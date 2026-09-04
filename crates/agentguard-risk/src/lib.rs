@@ -273,6 +273,50 @@ mod tests {
     }
 
     #[test]
+    fn newly_seeded_vendors_score_low_and_their_lookalikes_do_not() {
+        // Regression test for the 2026-09-05 trust-seed expansion (Slack,
+        // HubSpot, Supabase, Neon, X, AWS) -- proves the entries actually
+        // load from data/trust_seed.json and discount correctly, and that
+        // a domain merely resembling one of them gets nothing. `api.aws`
+        // is the interesting case: it's the registrable-domain heuristic's
+        // output for AWS's real region-scoped host
+        // (aws-mcp.us-east-1.api.aws), not a generic two-label domain like
+        // stripe.com -- worth locking in since a future refactor of
+        // host_registrable_domain could silently break this specific
+        // trust anchor without an obvious test failure elsewhere.
+        let engine = RiskEngine::new();
+        for verified_publisher in ["slack.com", "hubspot.com", "supabase.com", "neon.tech", "x.com", "api.aws"] {
+            let artifact = artifact_with(
+                ArtifactKind::McpServer,
+                Some(verified_publisher),
+                false,
+                &[Capability::NetworkExternal, Capability::ApiKeys],
+            );
+            let breakdown = engine.score(&artifact);
+            assert_eq!(
+                breakdown.reputation_discount, 30,
+                "{verified_publisher} should get the full verified-vendor discount"
+            );
+            assert_eq!(breakdown.band(), RiskBand::Low, "{verified_publisher} should score LOW");
+        }
+
+        // Simulates the publisher agentguard-adapters' host_registrable_domain
+        // would actually derive for a lookalike host like
+        // "aws-mcp.us-east-1.api-aws.example.com" (last two dot-labels:
+        // "example.com", NOT "api.aws" -- the hyphen means it's a
+        // different label, not a subdomain of the real thing).
+        let lookalike = artifact_with(
+            ArtifactKind::McpServer,
+            Some("example.com"),
+            false,
+            &[Capability::NetworkExternal, Capability::ApiKeys],
+        );
+        let breakdown = engine.score(&lookalike);
+        assert_eq!(breakdown.reputation_discount, 0);
+        assert_eq!(breakdown.band(), RiskBand::Medium);
+    }
+
+    #[test]
     fn reputation_match_is_exact_not_substring() {
         // A publisher name that merely CONTAINS a trusted matcher must not
         // get the discount -- otherwise "totally-fake-linear-app-stealer"
