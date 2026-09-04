@@ -329,6 +329,73 @@ pub fn scan_package_json(path: &Path) -> Vec<CapabilityFinding> {
     findings
 }
 
+/// Content hash for drift detection (BUILD_PLAN.md §8). For a single file,
+/// the SHA-256 of its raw bytes. For a directory, a SHA-256 over a sorted,
+/// tab/newline-joined "relative/path\thash\n" listing of every file under
+/// it (skipping the same SKIP_DIRS as `scan_dir`, for the same
+/// this-artifact's-own-code-not-its-dependencies reason) — so a file's
+/// content changing, or a file being added or removed, changes the
+/// top-level hash. Path separators are normalized to `/` so the same
+/// directory hashes identically on Windows and Unix.
+///
+/// Returns `None` if nothing could be hashed (path doesn't exist, or a
+/// directory with no readable files) — that's "no baseline to compare
+/// against," not an error worth surfacing to the user.
+pub fn hash_path(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+
+    if path.is_file() {
+        let bytes = std::fs::read(path).ok()?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        return Some(format!("{:x}", hasher.finalize()));
+    }
+    if !path.is_dir() {
+        return None;
+    }
+
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
+        if e.file_type().is_dir() {
+            let name = e.file_name().to_string_lossy();
+            !SKIP_DIRS.iter().any(|skip| name == *skip)
+        } else {
+            true
+        }
+    });
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let file_hash = format!("{:x}", hasher.finalize());
+        let rel = entry
+            .path()
+            .strip_prefix(path)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        entries.push((rel, file_hash));
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    entries.sort();
+
+    let mut hasher = Sha256::new();
+    for (rel, file_hash) in &entries {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\t");
+        hasher.update(file_hash.as_bytes());
+        hasher.update(b"\n");
+    }
+    Some(format!("{:x}", hasher.finalize()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,5 +428,57 @@ mod tests {
         let caps: Vec<_> = findings.iter().map(|f| f.capability).collect();
         assert!(caps.contains(&Capability::ExecuteShell));
         assert!(caps.contains(&Capability::NetworkExternal));
+    }
+
+    fn unique_temp_path(name: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut p = std::env::temp_dir();
+        p.push(format!("agentguard-scanner-test-{}-{}-{}", std::process::id(), n, name));
+        p
+    }
+
+    #[test]
+    fn hash_path_changes_when_file_content_changes() {
+        let file = unique_temp_path("hash-file.txt");
+        std::fs::write(&file, b"version one").unwrap();
+        let h1 = hash_path(&file).unwrap();
+
+        std::fs::write(&file, b"version two").unwrap();
+        let h2 = hash_path(&file).unwrap();
+
+        assert_ne!(h1, h2);
+        std::fs::remove_file(&file).ok();
+    }
+
+    #[test]
+    fn hash_path_stable_for_unchanged_file() {
+        let file = unique_temp_path("hash-stable.txt");
+        std::fs::write(&file, b"unchanged content").unwrap();
+        let h1 = hash_path(&file).unwrap();
+        let h2 = hash_path(&file).unwrap();
+        assert_eq!(h1, h2);
+        std::fs::remove_file(&file).ok();
+    }
+
+    #[test]
+    fn hash_path_changes_when_a_file_is_added_to_a_directory() {
+        let dir = unique_temp_path("hash-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.js"), b"const x = 1;").unwrap();
+        let h1 = hash_path(&dir).unwrap();
+
+        std::fs::write(dir.join("b.js"), b"const y = 2;").unwrap();
+        let h2 = hash_path(&dir).unwrap();
+
+        assert_ne!(h1, h2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hash_path_none_for_missing_path() {
+        let missing = unique_temp_path("does-not-exist");
+        assert_eq!(hash_path(&missing), None);
     }
 }

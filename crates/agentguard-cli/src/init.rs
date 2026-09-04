@@ -9,10 +9,10 @@
 
 use crate::pipeline::{collect, ScannedArtifact};
 use agentguard_adapters::ConfigSourceKind;
-use agentguard_core::{Decision, ProtectionLevel, RiskBand};
+use agentguard_core::{Capability, Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
 use agentguard_store::{DecisionRecord, DecisionStore};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -37,10 +37,11 @@ pub fn resolve_store(store_override: Option<PathBuf>) -> DecisionStore {
 
 /// Writes a scan result into the store, preserving a prior manual approval
 /// ONLY if this artifact's score and decision are unchanged from what's
-/// cached. Any change resets approval and requires a fresh `agentguard
-/// allow` — a cheap, honest stand-in for real hash-based drift detection
-/// (not built yet): "the thing I approved" should mean exactly that thing,
-/// not "whatever this artifact_id points to now."
+/// cached. This is a safety net independent of `check_drift` below — it
+/// also catches score changes that aren't capability-driven (e.g. a
+/// reputation-discount change from a future trust-graph sync): "the thing
+/// I approved" should mean exactly that thing, not "whatever this
+/// artifact_id points to now."
 fn upsert_preserving_approval(store: &DecisionStore, mut record: DecisionRecord) -> io::Result<()> {
     if let Some(existing) = store.get(&record.artifact_id) {
         if existing.manually_approved
@@ -53,20 +54,79 @@ fn upsert_preserving_approval(store: &DecisionStore, mut record: DecisionRecord)
     store.upsert(record)
 }
 
-fn record_for(s: &ScannedArtifact, level: ProtectionLevel) -> DecisionRecord {
+/// BUILD_PLAN.md §8 — semantic drift. Compares a fresh scan against
+/// whatever's cached for this artifact id. A content-hash change alone is
+/// folded into the new baseline silently: per the product's own stated
+/// design, "security capabilities changed" is the user-facing signal, not
+/// "SHA-256 mismatch," and the user doesn't care about a hash changing if
+/// nothing about what the artifact can actually DO changed (a comment
+/// tweak, a version bump with no behavior change). Only when the content
+/// changed AND a new dangerous capability (secret access, process
+/// execution, or persistence) appeared that wasn't there before does this
+/// force the decision to at least ASK, regardless of what the raw score
+/// says, and return a plain-English reason naming exactly what was gained.
+/// Never downgrades a decision — drift only makes things more cautious.
+fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<String>) {
+    let baseline_decision = s.decision;
+
+    let Some(previous) = store.get(&s.artifact.id) else {
+        return (baseline_decision, None); // first sighting — nothing to compare
+    };
+    let (Some(prev_hash), Some(new_hash)) = (&previous.content_hash, &s.artifact.content_hash)
+    else {
+        return (baseline_decision, None); // one side couldn't be hashed
+    };
+    if prev_hash == new_hash {
+        return (baseline_decision, None); // unchanged
+    }
+
+    let old_caps: BTreeSet<Capability> = previous.capability_snapshot.iter().copied().collect();
+    let new_caps = s.artifact.capability_set();
+    let gained_dangerous: Vec<Capability> = new_caps
+        .difference(&old_caps)
+        .copied()
+        .filter(|c| c.is_secret_access() || c.is_process_execution() || c.is_persistence())
+        .collect();
+
+    if gained_dangerous.is_empty() {
+        return (baseline_decision, None); // content changed, nothing new & dangerous
+    }
+
+    let names: Vec<String> = gained_dangerous.iter().map(|c| c.to_string()).collect();
+    let reason = format!(
+        "SECURITY CAPABILITIES CHANGED since the last scan: this artifact's content changed and it now does something it didn't before -- gained: {}.",
+        names.join(", ")
+    );
+    let decision = if matches!(baseline_decision, Decision::Allow | Decision::AllowLog) {
+        Decision::Ask
+    } else {
+        baseline_decision
+    };
+    (decision, Some(reason))
+}
+
+fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel) -> DecisionRecord {
     let mut reasons = Vec::new();
     reasons.extend(s.breakdown.static_evidence_reasons.clone());
     reasons.extend(s.breakdown.reputation_reasons.clone());
     reasons.extend(s.breakdown.context_reasons.clone());
+
+    let (decision, drift_reason) = check_drift(store, s);
+    if let Some(reason) = drift_reason {
+        reasons.push(reason);
+    }
+
     DecisionRecord {
         artifact_id: s.artifact.id.clone(),
         name: s.artifact.name.clone(),
         band: s.band,
-        decision: s.decision,
+        decision,
         total_score: s.breakdown.total(),
         protection_level: level,
         scanned_at_unix: DecisionRecord::now_unix(),
         reasons,
+        content_hash: s.artifact.content_hash.clone(),
+        capability_snapshot: s.artifact.capability_set().into_iter().collect(),
         manually_approved: false, // upsert_preserving_approval fixes this up
     }
 }
@@ -198,7 +258,7 @@ pub fn run_init(
     }
 
     for s in &scanned {
-        let record = record_for(s, level);
+        let record = record_for(&store, s, level);
         if let Err(e) = upsert_preserving_approval(&store, record) {
             eprintln!(
                 "agentguard: failed to write decision cache for '{}': {e}",

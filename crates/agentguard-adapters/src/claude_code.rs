@@ -103,8 +103,8 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
 
     for (name, cfg) in servers {
-        let command = cfg.get("command").and_then(|c| c.as_str()).unwrap_or("");
-        let args: Vec<String> = cfg
+        let raw_command = cfg.get("command").and_then(|c| c.as_str()).unwrap_or("");
+        let raw_args: Vec<String> = cfg
             .get("args")
             .and_then(|a| a.as_array())
             .map(|arr| {
@@ -119,7 +119,22 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
             .map(|o| !o.is_empty())
             .unwrap_or(false);
 
-        let (source, scan_root, display_location) = classify_command(command, &args, base_dir);
+        // See through a config entry already routed through
+        // agentguard-shim (from a previous `agentguard init`) back to the
+        // real underlying command. Without this, every scan after the
+        // first `init` would classify/scan the shim BINARY itself instead
+        // of the artifact it wraps — permanently blinding drift detection
+        // and re-scoring the moment protection is turned on. Found by
+        // actually re-running `init` twice against a live fixture, not by
+        // inspection: the second run silently stopped detecting a
+        // capability change that the first run's baseline should have
+        // caught a diff against.
+        let (command, args) = match unwrap_shim_invocation(raw_command, &raw_args) {
+            Some((real_command, real_args)) => (real_command, real_args),
+            None => (raw_command.to_string(), raw_args),
+        };
+
+        let (source, scan_root, display_location) = classify_command(&command, &args, base_dir);
 
         let mut capabilities = vec![CapabilityFinding {
             capability: Capability::SpawnProcess,
@@ -165,6 +180,31 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
     }
 
     out
+}
+
+/// If `command`/`args` match agentguard-shim's own invocation convention
+/// (`<artifact-id> -- <real-command> [real-args...]` — see
+/// agentguard-shim/src/main.rs's module doc comment, the single owner of
+/// this contract besides here), returns the real underlying command and
+/// args. Matched on the shim binary's filename AND the `--`-separator
+/// shape together, not either alone, to avoid false-unwrapping a
+/// legitimate server that happens to pass `--` as a real argument for its
+/// own reasons.
+fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
+    let looks_like_shim = Path::new(command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("agentguard-shim"))
+        .unwrap_or(false);
+    if !looks_like_shim {
+        return None;
+    }
+    // Shape is [artifact_id, "--", real_command, ...real_args] — need at
+    // least 3 elements to have a real command to unwrap to.
+    if args.len() < 3 || args[1] != "--" {
+        return None;
+    }
+    Some((args[2].clone(), args[3..].to_vec()))
 }
 
 /// Best-effort classification of an MCP server's launch command into a
@@ -405,4 +445,97 @@ fn discover_skills(dir: &Path) -> Vec<DiscoveredArtifact> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwraps_a_shim_invocation() {
+        let args = vec![
+            "MCP server:foo:local:./x.js".to_string(),
+            "--".to_string(),
+            "node".to_string(),
+            "./x.js".to_string(),
+        ];
+        let result = unwrap_shim_invocation("/some/path/agentguard-shim.exe", &args);
+        assert_eq!(
+            result,
+            Some(("node".to_string(), vec!["./x.js".to_string()]))
+        );
+    }
+
+    #[test]
+    fn does_not_unwrap_an_unrelated_command_with_a_bare_double_dash() {
+        // A real server that happens to pass `--` as one of its own args
+        // must NOT be misidentified as an already-wrapped shim entry.
+        let args = vec!["--".to_string(), "--verbose".to_string()];
+        assert_eq!(unwrap_shim_invocation("some-real-mcp-server", &args), None);
+    }
+
+    #[test]
+    fn does_not_unwrap_when_shim_named_binary_lacks_the_expected_arg_shape() {
+        let args = vec!["only-one-arg".to_string()];
+        assert_eq!(
+            unwrap_shim_invocation("/path/agentguard-shim.exe", &args),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_mcp_servers_sees_through_an_already_wrapped_entry() {
+        // Regression test for the exact bug found via a live fixture: once
+        // `agentguard init` rewrites a config entry to launch through the
+        // shim, a later scan must still classify/scan the REAL underlying
+        // script, not the shim binary itself — otherwise every scan after
+        // the first `init` is permanently blind to the artifact's actual
+        // content.
+        let dir = std::env::temp_dir().join(format!(
+            "agentguard-claude-code-test-{}-{}",
+            std::process::id(),
+            UniqueTestId::next()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("index.js");
+        std::fs::write(&script, "console.log('hi');").unwrap();
+
+        let config_path = dir.join(".mcp.json");
+        let shim_path = dir.join("agentguard-shim.exe");
+        let config = serde_json::json!({
+            "mcpServers": {
+                "already-wrapped": {
+                    "command": shim_path.to_string_lossy(),
+                    "args": [
+                        "MCP server:already-wrapped:local:index.js",
+                        "--",
+                        "node",
+                        "index.js"
+                    ]
+                }
+            }
+        });
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_mcp_servers(&config_path);
+        assert_eq!(discovered.len(), 1);
+        let d = &discovered[0];
+        // scan_root should point at the real script next to the config,
+        // NOT at the shim binary.
+        assert_eq!(d.scan_root.as_deref(), Some(script.as_path()));
+        let launch = d.launch.as_ref().unwrap();
+        assert_eq!(launch.command, "node");
+        assert_eq!(launch.args, vec!["index.js".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    struct UniqueTestId;
+    impl UniqueTestId {
+        fn next() -> u64 {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        }
+    }
 }

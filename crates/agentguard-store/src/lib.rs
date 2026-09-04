@@ -2,8 +2,10 @@
 //!
 //! The local decision cache — BUILD_PLAN.md §6: "cache the decision keyed
 //! on (artifact hash, policy version) and only re-evaluate on hash change,
-//! policy change, or new incident data." v0 keys on artifact id alone (hash
-//! + drift detection lands in a later phase); this crate is deliberately
+//! policy change, or new incident data." Records are keyed on artifact id;
+//! `content_hash`/`capability_snapshot` on each record are the baseline
+//! `agentguard init`'s drift check (§8, in agentguard-cli's init.rs)
+//! compares the next scan against. This crate is deliberately
 //! small and dependency-light because both `agentguard-cli` (writer, at
 //! `init`/`scan` time) and `agentguard-shim` (reader, at every gated
 //! process launch — must be fast and must not depend on the scanner/risk
@@ -27,7 +29,7 @@
 //! comment. Fix before this store is written by more than one process at a
 //! time in practice (e.g. once a daemon exists).
 
-use agentguard_core::{Decision, ProtectionLevel, RiskBand};
+use agentguard_core::{Capability, Decision, ProtectionLevel, RiskBand};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
@@ -49,6 +51,20 @@ pub struct DecisionRecord {
     /// surface `total_score`/`band` to a user without these attached.
     #[serde(default)]
     pub reasons: Vec<String>,
+    /// Content hash from the scan that produced this record (see
+    /// agentguard-scanner's `hash_path`) — `None` for artifacts that
+    /// couldn't be hashed (no local content, e.g. an unresolved registry
+    /// package). This is the baseline `agentguard init`'s drift check
+    /// compares the next scan against — BUILD_PLAN.md §8.
+    #[serde(default)]
+    pub content_hash: Option<String>,
+    /// The artifact's distinct capability set at scan time (sorted,
+    /// deduped — not the full evidence list, which lives in `reasons`).
+    /// Compared against the next scan's capability set when `content_hash`
+    /// changes, to tell "content changed but does the same things" apart
+    /// from "content changed AND now does something new and dangerous."
+    #[serde(default)]
+    pub capability_snapshot: Vec<Capability>,
     /// Set only by an explicit human action (`agentguard allow <id>`),
     /// never inferred. The shim treats an approved record as ALLOW
     /// regardless of what the engine's own decision says, which is the
@@ -182,6 +198,8 @@ mod tests {
             protection_level: ProtectionLevel::Balanced,
             scanned_at_unix: DecisionRecord::now_unix(),
             reasons: vec!["test evidence".to_string()],
+            content_hash: Some("abc123".to_string()),
+            capability_snapshot: vec![Capability::NetworkExternal],
             manually_approved: false,
         };
         store.upsert(record.clone()).unwrap();
@@ -205,6 +223,8 @@ mod tests {
                 protection_level: ProtectionLevel::Balanced,
                 scanned_at_unix: DecisionRecord::now_unix(),
                 reasons: vec![],
+                content_hash: None,
+                capability_snapshot: vec![],
                 manually_approved: false,
             })
             .unwrap();

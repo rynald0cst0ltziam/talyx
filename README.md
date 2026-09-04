@@ -4,6 +4,7 @@ Cross-agent security scanner for AI coding agent artifacts — MCP servers,
 skills, plugins, and hooks.
 
 Read first:
+- [`STATUS.md`](STATUS.md) — what's actually built and tested right now, and what's next
 - [`BUILD_PLAN.md`](BUILD_PLAN.md) — the full architecture and build plan
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — what this defends against, and what it explicitly doesn't (v1)
 

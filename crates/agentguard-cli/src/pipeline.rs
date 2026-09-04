@@ -59,6 +59,12 @@ pub fn collect(
                         artifact.capabilities.extend(findings);
                     }
                 }
+                // Feeds drift detection (init.rs) — None for artifacts with
+                // no scan_root (e.g. an unresolved registry package),
+                // which is a real, documented limitation: those can't be
+                // drift-checked until BUILD_PLAN.md §7's ecosystem scan
+                // gives us something to hash.
+                artifact.content_hash = agentguard_scanner::hash_path(root);
             }
 
             let breakdown = engine.score(&artifact);
