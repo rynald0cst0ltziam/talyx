@@ -20,6 +20,31 @@
       "match": "notion.com",
       "discount": 25,
       "note": "Notion's official remote MCP server (https://mcp.notion.com/mcp). Verified 2026-09-04 via Claude Code's own documented example (`claude mcp add --transport http notion https://mcp.notion.com/mcp`), not Notion's own docs directly -- slightly weaker provenance than the other entries here, reflected in a lower discount."
+    },
+    {
+      "match": "stripe.com",
+      "discount": 30,
+      "note": "Stripe's official remote MCP server (https://mcp.stripe.com). Verified 2026-09-05 directly against docs.stripe.com/mcp -- includes explicit setup snippets for Cursor/Claude Code/Codex/VS Code all pointing at the same URL."
+    },
+    {
+      "match": "vercel.com",
+      "discount": 30,
+      "note": "Vercel's official remote MCP server (https://mcp.vercel.com). Verified 2026-09-05 directly against vercel.com/docs/agent-resources/vercel-mcp, which also explicitly tells users to 'verify the official endpoint' before trusting a connector -- a good sign this vendor takes the same kind of impersonation risk seriously that this trust seed exists to catch."
+    },
+    {
+      "match": "atlassian.com",
+      "discount": 30,
+      "note": "Atlassian's official remote MCP server (https://mcp.atlassian.com/v2/mcp) for Jira/Confluence/Jira Service Management/Bitbucket/Compass. Verified 2026-09-05 via support.atlassian.com's own Rovo MCP Server documentation, cross-checked against the github.com/atlassian/atlassian-mcp-server repo description ('Official remote MCP server for Atlassian')."
+    },
+    {
+      "match": "figma.com",
+      "discount": 25,
+      "note": "Figma's official remote MCP server (https://mcp.figma.com/mcp). Verified 2026-09-05 directly against help.figma.com's own documentation. Slightly lower discount than the single-source-of-truth entries above: also corroborated by (not solely sourced from) OpenAI's Codex MCP docs example, similar provenance strength to the notion.com entry."
+    },
+    {
+      "match": "githubcopilot.com",
+      "discount": 30,
+      "note": "GitHub's official REMOTE MCP server is https://api.githubcopilot.com/mcp/ -- verified 2026-09-05 via github.com/github/github-mcp-server's own remote-server.md and GitHub's own docs.github.com setup guide. Deliberately NOT 'github.com' as the matcher: worth calling out explicitly since guessing 'github.com' (the obvious assumption) would have been wrong -- the hosted endpoint lives under githubcopilot.com, a different registrable domain entirely. Distinct from the modelcontextprotocol entry above's caveat about the deprecated @modelcontextprotocol/server-github package, and distinct from the locally-run github/github-mcp-server binary (github.com/github/github-mcp-server) -- that one isn't npm/registry-distributed and isn't matchable by the current publisher-guessing logic (agentguard-adapters' classify_command never produces a GitUrl-sourced artifact today), so it's intentionally not seeded here; would need that gap closed first to be worth adding."
     }
   ]
 }
