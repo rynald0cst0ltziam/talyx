@@ -95,6 +95,10 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
     let Some(servers) = json.get("mcpServers").and_then(|v| v.as_object()) else {
         return out;
     };
+    // Relative script paths in the config are conventionally relative to
+    // the config file's own directory, not the current process's working
+    // directory — resolve against that, not `std::env::current_dir()`.
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
 
     for (name, cfg) in servers {
         let command = cfg.get("command").and_then(|c| c.as_str()).unwrap_or("");
@@ -113,7 +117,7 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
             .map(|o| !o.is_empty())
             .unwrap_or(false);
 
-        let (source, scan_root, display_location) = classify_command(command, &args);
+        let (source, scan_root, display_location) = classify_command(command, &args, base_dir);
 
         let mut capabilities = vec![CapabilityFinding {
             capability: Capability::SpawnProcess,
@@ -157,7 +161,22 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
 /// confidently classify falls through to a bare LocalPath with no scan_root
 /// rather than guessing — an artifact with thin evidence lands with fewer
 /// findings, which is a weaker signal, not a wrong one.
-fn classify_command(command: &str, args: &[String]) -> (ArtifactSource, Option<PathBuf>, String) {
+fn classify_command(
+    command: &str,
+    args: &[String],
+    base_dir: &Path,
+) -> (ArtifactSource, Option<PathBuf>, String) {
+    /// Resolve a possibly-relative path against `base_dir` (the config
+    /// file's own directory) rather than the process's current directory.
+    fn resolve(base_dir: &Path, candidate: &str) -> PathBuf {
+        let p = Path::new(candidate);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            base_dir.join(p)
+        }
+    }
+
     let runner = Path::new(command)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -183,14 +202,32 @@ fn classify_command(command: &str, args: &[String]) -> (ArtifactSource, Option<P
         }
     }
 
+    // A generic language runtime with a script path argument — e.g.
+    // `"command": "node", "args": ["./mcp-servers/foo/index.js"]`. This is
+    // the most common real-world MCP server launch shape; the scannable
+    // target is the script argument, not the runtime binary itself.
+    if matches!(
+        runner.as_str(),
+        "node" | "python" | "python3" | "bun" | "deno" | "ts-node"
+    ) {
+        if let Some(script) = args.iter().find(|a| !a.starts_with('-')) {
+            let resolved = resolve(base_dir, script);
+            if resolved.is_file() {
+                return (
+                    ArtifactSource::LocalPath(script.clone()),
+                    Some(resolved),
+                    format!("{script} (via {command})"),
+                );
+            }
+        }
+    }
+
     // Looks like a local script/binary path rather than a package runner.
     let looks_like_path = command.contains('/') || command.contains('\\');
     if looks_like_path {
-        let path = PathBuf::from(command);
-        let scan_root = if path.is_file() {
-            Some(path.clone())
-        } else if path.is_dir() {
-            Some(path.clone())
+        let resolved = resolve(base_dir, command);
+        let scan_root = if resolved.is_file() || resolved.is_dir() {
+            Some(resolved)
         } else {
             None
         };

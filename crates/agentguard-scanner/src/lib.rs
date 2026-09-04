@@ -12,7 +12,7 @@
 use agentguard_core::{Capability, CapabilityFinding, EvidenceBasis};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
 use walkdir::WalkDir;
 
@@ -20,7 +20,10 @@ use walkdir::WalkDir;
 pub enum ScanError {
     #[error("io error reading {path}: {source}")]
     Io {
-        path: PathBuf,
+        /// Rendered path, not `PathBuf` — `Path`/`PathBuf` don't implement
+        /// `Display`, only `Debug`, so this is `.display().to_string()`'d
+        /// at construction time.
+        path: String,
         #[source]
         source: std::io::Error,
     },
@@ -215,7 +218,7 @@ fn apply_rules(source: &str, rules: &[PatternRule], path: &Path) -> Vec<Capabili
 /// modifier accounts for.
 pub fn scan_file(path: &Path) -> Result<Vec<CapabilityFinding>, ScanError> {
     let meta = std::fs::metadata(path).map_err(|e| ScanError::Io {
-        path: path.to_path_buf(),
+        path: path.display().to_string(),
         source: e,
     })?;
     if meta.len() > MAX_SCAN_BYTES {
@@ -233,7 +236,7 @@ pub fn scan_file(path: &Path) -> Result<Vec<CapabilityFinding>, ScanError> {
     };
 
     let source = std::fs::read_to_string(path).map_err(|e| ScanError::Io {
-        path: path.to_path_buf(),
+        path: path.display().to_string(),
         source: e,
     })?;
     Ok(apply_rules(&source, rules, path))

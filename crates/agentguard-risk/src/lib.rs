@@ -105,6 +105,25 @@ impl RiskEngine {
             reasons.push("installs/downloads packages at runtime (+20)".to_string());
         }
 
+        // The canonical exfiltration pattern — reading raw secret material
+        // (an SSH key, stored OS/browser credentials) combined with any
+        // outbound network capability. Deliberately NOT part of the capped
+        // sum above: unlike an API key being sent to its own service, there
+        // is no ordinary workflow where this combination is expected, so it
+        // should never be softened by the "this is normal for a dev tool"
+        // cap. See Capability::is_raw_secret_material's doc comment for why
+        // this exists as its own rule.
+        let has_network = caps.contains(&Capability::NetworkExternal)
+            || caps.contains(&Capability::NetworkUnrestricted)
+            || caps.contains(&Capability::NetworkLocal);
+        if caps.iter().any(|c| c.is_raw_secret_material()) && has_network {
+            extra += 40;
+            reasons.push(
+                "reads raw secret material (SSH keys / stored credentials / browser data) AND has network access — the canonical exfiltration pattern (+40, not subject to the cap above)"
+                    .to_string(),
+            );
+        }
+
         (capped + extra, reasons)
     }
 
@@ -179,7 +198,8 @@ pub fn band_for(breakdown: &ScoreBreakdown) -> RiskBand {
 mod tests {
     use super::*;
     use agentguard_core::{
-        ArtifactSource, CapabilityFinding, EvidenceBasis, PublisherIdentity,
+        ArtifactSource, CapabilityFinding, Decision, EvidenceBasis, ProtectionLevel,
+        PublisherIdentity,
     };
     use std::collections::BTreeSet;
 
@@ -229,9 +249,14 @@ mod tests {
             ],
         );
         let breakdown = engine.score(&artifact);
-        // 10 (shell) + 25 (secret) + 15 (network) = 50, minus trust-seed
-        // discount for "github" (35) = 15 => LOW, not HIGH.
-        assert_eq!(breakdown.total(), 15);
+        // 10 (shell) + 25 (secret) + 15 (network) = 50, capped at 40 per
+        // BUILD_PLAN.md §4, minus the trust-seed discount for "github" (35)
+        // => 5, LOW. This is the exact scenario the original plan's
+        // uncapped/no-reputation scoring got wrong (flagged the official
+        // GitHub MCP as HIGH).
+        assert_eq!(breakdown.static_evidence, 40);
+        assert_eq!(breakdown.reputation_discount, 35);
+        assert_eq!(breakdown.total(), 5);
         assert_eq!(breakdown.band(), RiskBand::Low);
     }
 
@@ -249,8 +274,13 @@ mod tests {
             ],
         );
         let breakdown = engine.score(&artifact);
-        assert_eq!(breakdown.total(), 50);
-        assert_eq!(breakdown.band(), RiskBand::High);
+        // Same capped evidence (40), but no reputation match => no discount.
+        // Notably higher than the verified-publisher case above, despite
+        // identical capabilities — that gap is the whole point of §4.
+        assert_eq!(breakdown.static_evidence, 40);
+        assert_eq!(breakdown.reputation_discount, 0);
+        assert_eq!(breakdown.total(), 40);
+        assert_eq!(breakdown.band(), RiskBand::Medium);
     }
 
     #[test]
@@ -263,9 +293,48 @@ mod tests {
             &[Capability::SshKeys, Capability::NetworkExternal],
         );
         let breakdown = engine.score(&artifact);
-        // 25 (secret) + 15 (network) + 20 (context: skill wanting secrets) = 60
-        assert_eq!(breakdown.total(), 60);
+        // 25 (secret, capped-trio) + 15 (network, capped-trio) = 40, plus
+        // +40 uncapped for the raw-secret-material + network exfiltration
+        // pattern (SshKeys qualifies), plus +20 context (a Skill wanting
+        // secrets) = 100 -> CRITICAL. Under the Balanced preset this is an
+        // automatic BLOCK, matching the product's "critical activity: 0
+        // interactions" principle for exactly this shape of artifact.
+        assert_eq!(breakdown.total(), 100);
         assert_eq!(breakdown.band(), RiskBand::Critical);
+        assert_eq!(
+            ProtectionLevel::Balanced.decision_for(breakdown.band()),
+            Decision::Block
+        );
+    }
+
+    #[test]
+    fn ssh_key_exfiltration_pattern_is_auto_blocked_even_on_first_sight() {
+        // The flagship scenario from BUILD_PLAN.md §12 / THREAT_MODEL.md
+        // archetype A1: an unverified, never-before-seen artifact that
+        // reads an SSH private key and makes an external network call.
+        // This must land at CRITICAL/BLOCK with zero reputation history —
+        // waiting for "enough sightings" defeats the point for a
+        // credential-exfiltration payload, which by definition is often
+        // seen for the first time on the machine it's attacking.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::McpServer,
+            None,
+            false,
+            &[
+                Capability::ExecuteShell,
+                Capability::SpawnProcess,
+                Capability::ReadSsh,
+                Capability::NetworkExternal,
+                Capability::EnvironmentVariables,
+            ],
+        );
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.band(), RiskBand::Critical);
+        assert_eq!(
+            ProtectionLevel::Balanced.decision_for(breakdown.band()),
+            Decision::Block
+        );
     }
 
     #[test]

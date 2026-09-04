@@ -49,7 +49,11 @@ pub enum Capability {
 impl Capability {
     /// Capabilities that touch credential/secret material directly. Used by
     /// the risk engine as a distinct, heavily-weighted category regardless
-    /// of which specific variant matched.
+    /// of which specific variant matched. This is deliberately broad — it
+    /// includes API keys and tokens, which routinely flow through
+    /// legitimate integrations (an MCP server sending its own bearer token
+    /// to its own API is normal). For the narrower, much higher-signal
+    /// case, see `is_raw_secret_material`.
     pub fn is_secret_access(self) -> bool {
         matches!(
             self,
@@ -60,6 +64,31 @@ impl Capability {
                 | Capability::CloudCredentials
                 | Capability::ApiKeys
                 | Capability::TokenStores
+        )
+    }
+
+    /// The narrow subset of `is_secret_access` that has essentially no
+    /// legitimate reason to co-occur with outbound network access: raw SSH
+    /// key material, stored OS/browser credentials. Unlike an API key
+    /// (expected to be sent to its own service), there is no ordinary MCP
+    /// server / skill workflow that reads an SSH private key or a browser's
+    /// cookie store and then makes a network call. The risk engine treats
+    /// this combination as the canonical exfiltration pattern — see
+    /// BUILD_PLAN.md §4 and THREAT_MODEL.md archetype A1 — and does not
+    /// let the general evidence cap soften it. This distinction exists
+    /// because a v0 build of the risk engine, tested against a synthetic
+    /// SSH-exfiltration fixture, initially scored it MEDIUM instead of
+    /// CRITICAL: the broad `is_secret_access` category was capped together
+    /// with shell/network/write-outside-workspace evidence on the
+    /// assumption that combination is "normal for a dev tool," which is
+    /// true for API keys but not for raw key material.
+    pub fn is_raw_secret_material(self) -> bool {
+        matches!(
+            self,
+            Capability::ReadSsh
+                | Capability::SshKeys
+                | Capability::ReadCredentials
+                | Capability::ReadBrowserData
         )
     }
 
