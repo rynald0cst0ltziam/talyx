@@ -1,0 +1,16 @@
+[package]
+name = "agentguard-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agentguard"
+path = "src/main.rs"
+
+[dependencies]
+agentguard-core = { path = "../agentguard-core" }
+agentguard-scanner = { path = "../agentguard-scanner" }
+agentguard-adapters = { path = "../agentguard-adapters" }
+agentguard-risk = { path = "../agentguard-risk" }
+clap.workspace = true

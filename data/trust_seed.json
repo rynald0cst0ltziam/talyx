@@ -1,0 +1,25 @@
+{
+  "_comment": "v0 hand-seeded trust graph — BUILD_PLAN.md §7. This is a stand-in for the pre-launch ecosystem-wide scan; entries here are illustrative examples of well-known publishers, not a complete or currently-accurate dataset. Replace/extend via the pre-seed scan job before any real release.",
+  "publishers": [
+    {
+      "match": "github",
+      "discount": 35,
+      "note": "GitHub official MCP server — verified org, widely scanned"
+    },
+    {
+      "match": "linear",
+      "discount": 30,
+      "note": "Linear official MCP server — verified org"
+    },
+    {
+      "match": "sentry",
+      "discount": 30,
+      "note": "Sentry official MCP server — verified org"
+    },
+    {
+      "match": "anthropic",
+      "discount": 40,
+      "note": "Anthropic first-party tooling"
+    }
+  ]
+}
