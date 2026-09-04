@@ -93,7 +93,7 @@ impl AgentAdapter for CodexAdapter {
 /// for those specific cases; it just won't happen LOUDLY as a parse
 /// failure the way the unambiguous cases (anything else, including the
 /// `\U`sers example above) do.
-fn parse_toml_leniently(text: &str) -> Option<Value> {
+pub fn parse_toml_leniently(text: &str) -> Option<Value> {
     if let Ok(v) = toml::from_str::<Value>(text) {
         return Some(v);
     }

@@ -163,15 +163,36 @@ struct RewriteOutcome {
 /// entry already pointing at the shim is left alone and counted as
 /// `already_protected`.
 ///
-/// Dispatches per `ConfigSourceKind` because the two rewritable shapes are
-/// structurally different: `mcpServers` is a flat `{name: {command,
-/// args}}` map (one lookup); Claude Code's hooks config is a nested tree
-/// with no flat key to look up by, so it's walked in the same order
-/// discovery used to assign each hook's index-based id. Matching
-/// exhaustively (no wildcard) means a future ConfigSourceKind variant with
-/// a different shape forces a deliberate decision here, not a silent (and
-/// wrong) fallthrough to one of these.
+/// Dispatches to a JSON path (Claude Code / Cursor's `mcpServers`, Claude
+/// Code's hooks tree) or a TOML path (Codex's `[mcp_servers.*]`) based on
+/// what kind the artifacts for this config file actually are — a
+/// `by_config` group is always homogeneous (one physical file only ever
+/// holds one agent's config in one format), so checking the first
+/// artifact's kind is sufficient.
 fn rewrite_config(
+    config_path: &Path,
+    artifacts: &[&ScannedArtifact],
+    shim_path: &Path,
+) -> io::Result<RewriteOutcome> {
+    let is_toml = artifacts.iter().any(|s| {
+        s.config_source
+            .as_ref()
+            .map(|cs| cs.kind == ConfigSourceKind::CodexMcpServersToml)
+            .unwrap_or(false)
+    });
+    if is_toml {
+        rewrite_config_toml(config_path, artifacts, shim_path)
+    } else {
+        rewrite_config_json(config_path, artifacts, shim_path)
+    }
+}
+
+/// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and Claude
+/// Code's hooks tree (nested, no flat key). Matching `config_source.kind`
+/// exhaustively (no wildcard) means a future variant with a different
+/// shape forces a deliberate decision here, not a silent (and wrong)
+/// fallthrough into this logic.
+fn rewrite_config_json(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: &Path,
@@ -195,12 +216,11 @@ fn rewrite_config(
                 mcp_artifacts.push(*s)
             }
             ConfigSourceKind::ClaudeCodeHooksJson => hook_artifacts.push(*s),
-            // Filtered out in run_init before by_config is ever built for
-            // this kind (TOML rewriting isn't implemented) — this JSON
-            // rewriter should never actually receive one. Matched
-            // exhaustively anyway rather than with a wildcard, so a real
-            // TOML rewrite path added later is a deliberate decision here
-            // too, not a silent fallthrough into JSON-only logic.
+            // Never reached: rewrite_config routes any group containing a
+            // Codex artifact to rewrite_config_toml instead, and a group
+            // is always homogeneous. Matched anyway so a shape genuinely
+            // different from both existing JSON shapes forces a decision
+            // here rather than a silent fallthrough.
             ConfigSourceKind::CodexMcpServersToml => {}
         }
     }
@@ -224,6 +244,91 @@ fn rewrite_config(
     }
 
     let pretty = serde_json::to_string_pretty(&json)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(config_path, pretty)?;
+
+    Ok(RewriteOutcome {
+        newly_protected,
+        already_protected,
+        backup_path: Some(backup_path),
+    })
+}
+
+/// TOML path: Codex's `[mcp_servers.<entry_key>]` — structurally the same
+/// flat-map-of-tables concept as `mcpServers`, just a different format
+/// (verified against OpenAI's own docs — see codex.rs's module doc
+/// comment). Parses leniently (agentguard_adapters::codex's
+/// backslash-repair fallback — this machine's own real `~/.codex/
+/// config.toml` needs it, confirmed live), so a file that only parses
+/// after repair comes out the other side as valid TOML, which is a
+/// reasonable side effect, not a goal in itself.
+fn rewrite_config_toml(
+    config_path: &Path,
+    artifacts: &[&ScannedArtifact],
+    shim_path: &Path,
+) -> io::Result<RewriteOutcome> {
+    let original_text = std::fs::read_to_string(config_path)?;
+    let mut doc = agentguard_adapters::codex::parse_toml_leniently(&original_text).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "could not parse config.toml, even with the lenient backslash repair",
+        )
+    })?;
+    let shim_str = shim_path.display().to_string();
+
+    let mut newly_protected = 0;
+    let mut already_protected = 0;
+
+    if let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
+        for s in artifacts {
+            let Some(config_source) = &s.config_source else {
+                continue;
+            };
+            if config_source.kind != ConfigSourceKind::CodexMcpServersToml {
+                continue;
+            }
+            let Some(launch) = &s.launch else { continue };
+
+            let Some(entry) = servers
+                .get_mut(&config_source.entry_key)
+                .and_then(|v| v.as_table_mut())
+            else {
+                continue;
+            };
+
+            let current_command = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            if current_command == shim_str {
+                already_protected += 1;
+                continue;
+            }
+
+            let mut new_args = vec![
+                toml::Value::String(s.artifact.id.clone()),
+                toml::Value::String("--".to_string()),
+                toml::Value::String(launch.command.clone()),
+            ];
+            new_args.extend(launch.args.iter().cloned().map(toml::Value::String));
+
+            entry.insert("command".to_string(), toml::Value::String(shim_str.clone()));
+            entry.insert("args".to_string(), toml::Value::Array(new_args));
+            newly_protected += 1;
+        }
+    }
+
+    if newly_protected == 0 {
+        return Ok(RewriteOutcome {
+            newly_protected: 0,
+            already_protected,
+            backup_path: None,
+        });
+    }
+
+    let backup_path = PathBuf::from(format!("{}.agentguard-backup", config_path.display()));
+    if !backup_path.exists() {
+        std::fs::write(&backup_path, &original_text)?;
+    }
+
+    let pretty = toml::to_string_pretty(&doc)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     std::fs::write(config_path, pretty)?;
 
@@ -425,18 +530,8 @@ pub fn run_init(
     // live ~/.claude.json on the machine it was built on.
     let mut by_config: BTreeMap<PathBuf, Vec<&ScannedArtifact>> = BTreeMap::new();
     let mut skipped_outside_project = 0usize;
-    let mut skipped_unsupported_format = 0usize;
     for s in &scanned {
         if let (Some(_), Some(cs)) = (&s.launch, &s.config_source) {
-            // TOML rewriting (Codex's config.toml) isn't implemented yet —
-            // rewrite_config below is JSON-only. Filtered out here, with
-            // an honest message, rather than letting it reach
-            // rewrite_config and fail there with a confusing
-            // "failed to rewrite" error for something never attempted.
-            if cs.kind == ConfigSourceKind::CodexMcpServersToml {
-                skipped_unsupported_format += 1;
-                continue;
-            }
             if include_user_config || cs.path.starts_with(&project_root) {
                 by_config.entry(cs.path.clone()).or_default().push(s);
             } else {
@@ -451,12 +546,6 @@ pub fn run_init(
         scanned.len(),
         level_name = level_name(level)
     );
-
-    if skipped_unsupported_format > 0 {
-        println!(
-            "{skipped_unsupported_format} Codex MCP server(s) found — scanned and scored, but config.toml rewriting isn't implemented yet, so these are NOT routed through enforcement. `agentguard why <id>` still works for them."
-        );
-    }
 
     if skipped_outside_project > 0 {
         println!(
@@ -570,5 +659,150 @@ pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     println!();
     for r in &record.reasons {
         println!("  {r}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentguard_adapters::{ConfigSource, LaunchCommand};
+    use agentguard_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity, ScoreBreakdown};
+    use std::collections::BTreeSet;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "agentguard-init-test-{}-{}-{}",
+            std::process::id(),
+            n,
+            name
+        ))
+    }
+
+    fn synthetic_scanned_artifact(
+        name: &str,
+        config_path: PathBuf,
+        command: &str,
+        args: Vec<String>,
+    ) -> ScannedArtifact {
+        let source = ArtifactSource::LocalPath(command.to_string());
+        let artifact = Artifact {
+            id: format!("MCP server:{name}:local:{command}"),
+            kind: ArtifactKind::McpServer,
+            name: name.to_string(),
+            version: None,
+            publisher: PublisherIdentity::default(),
+            source,
+            content_hash: None,
+            capabilities: vec![],
+            discovered_by: BTreeSet::new(),
+        };
+        ScannedArtifact {
+            agent_name: "codex",
+            artifact,
+            breakdown: ScoreBreakdown::default(),
+            band: RiskBand::Low,
+            decision: Decision::Allow,
+            location: command.to_string(),
+            launch: Some(LaunchCommand {
+                command: command.to_string(),
+                args,
+            }),
+            config_source: Some(ConfigSource {
+                path: config_path,
+                kind: ConfigSourceKind::CodexMcpServersToml,
+                entry_key: name.to_string(),
+            }),
+        }
+    }
+
+    #[test]
+    fn rewrite_config_toml_routes_entry_through_shim_and_is_idempotent() {
+        let dir = unique_temp_dir("toml-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[mcp_servers.example]\ncommand = \"node\"\nargs = [\"server.js\"]\n",
+        )
+        .unwrap();
+        let shim_path = dir.join("agentguard-shim.exe");
+
+        let scanned = synthetic_scanned_artifact(
+            "example",
+            config_path.clone(),
+            "node",
+            vec!["server.js".to_string()],
+        );
+
+        let outcome = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+        assert_eq!(outcome.already_protected, 0);
+        assert!(outcome.backup_path.is_some());
+        assert!(outcome.backup_path.unwrap().exists());
+
+        let rewritten = std::fs::read_to_string(&config_path).unwrap();
+        let parsed: toml::Value = toml::from_str(&rewritten).unwrap();
+        let entry = parsed
+            .get("mcp_servers")
+            .and_then(|v| v.get("example"))
+            .unwrap();
+        assert_eq!(
+            entry.get("command").and_then(|v| v.as_str()),
+            Some(shim_path.display().to_string()).as_deref()
+        );
+        let entry_args: Vec<&str> = entry
+            .get("args")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            entry_args,
+            vec!["MCP server:example:local:node", "--", "node", "server.js"]
+        );
+
+        // Idempotent: re-running against the now-rewritten file must not
+        // re-wrap an already-protected entry.
+        let outcome2 = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        assert_eq!(outcome2.newly_protected, 0);
+        assert_eq!(outcome2.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_toml_recovers_a_malformed_real_world_file() {
+        // The same real-world breakage codex.rs's own tests cover for
+        // discovery — confirming the rewrite path also survives it, not
+        // just read-only parsing.
+        let dir = unique_temp_dir("toml-rewrite-malformed");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[mcp_servers.bastion]\ncommand = \"C:\\Users\\Hubby\\bastion.exe\"\n",
+        )
+        .unwrap();
+        let shim_path = dir.join("agentguard-shim.exe");
+
+        let scanned = synthetic_scanned_artifact(
+            "bastion",
+            config_path.clone(),
+            r"C:\Users\Hubby\bastion.exe",
+            vec![],
+        );
+
+        let outcome = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        // And the rewritten file is now genuinely valid TOML, strictly.
+        let rewritten = std::fs::read_to_string(&config_path).unwrap();
+        assert!(toml::from_str::<toml::Value>(&rewritten).is_ok());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

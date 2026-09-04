@@ -26,6 +26,7 @@ dependencies = [
  "agentguard-store",
  "clap",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
