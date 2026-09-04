@@ -178,7 +178,7 @@ impl fmt::Display for ArtifactKind {
 
 /// Where an artifact was found / declared. Kept separate from identity so
 /// the same logical artifact discovered via two agents dedupes cleanly.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArtifactSource {
     LocalPath(String),
     GitUrl(String),

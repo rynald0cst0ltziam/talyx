@@ -274,6 +274,36 @@ pub(crate) fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(
     Some((args[2].clone(), args[3..].to_vec()))
 }
 
+/// For `<runner> <subcommand> [flags] <package>` shapes (`npm exec`,
+/// `pnpm dlx`, `yarn dlx`, `pipx run`) — the subcommand word must be the
+/// FIRST argument (not just present anywhere in `args`), and the package
+/// spec is the first non-flag argument after it.
+fn package_after_subcommand(args: &[String], subcommands: &[&str]) -> Option<String> {
+    let first = args.first()?;
+    if !subcommands.contains(&first.as_str()) {
+        return None;
+    }
+    args[1..].iter().find(|a| !a.starts_with('-')).cloned()
+}
+
+/// `uv tool run [--from <pkg-spec>] <command> [args...]` — both
+/// `--from <pkg>` and `--from=<pkg>` forms accepted.
+fn uv_tool_run_package(args: &[String]) -> Option<String> {
+    if args.first().map(String::as_str) != Some("tool") || args.get(1).map(String::as_str) != Some("run") {
+        return None;
+    }
+    let rest = &args[2..];
+    for (i, a) in rest.iter().enumerate() {
+        if let Some(v) = a.strip_prefix("--from=") {
+            return Some(v.to_string());
+        }
+        if a == "--from" {
+            return rest.get(i + 1).cloned();
+        }
+    }
+    rest.iter().find(|a| !a.starts_with('-')).cloned()
+}
+
 /// Best-effort classification of an MCP server's launch command into a
 /// source we can reason about. Deliberately conservative: anything we can't
 /// confidently classify falls through to a bare LocalPath with no scan_root
@@ -301,7 +331,20 @@ pub(crate) fn classify_command(
         .unwrap_or(command)
         .to_lowercase();
 
-    if matches!(runner.as_str(), "npx" | "npm" | "pnpm" | "yarn" | "bunx") {
+    // Direct-pass-through ad-hoc runners: the package spec IS the first
+    // non-flag argument, no subcommand word involved -- genuinely how
+    // npx/bunx/uvx work. Deliberately NOT "npm"/"pnpm"/"yarn"/"pipx"/"uv"
+    // here even though they can also launch an ad-hoc package -- those
+    // require a specific subcommand word first (`npm exec`, `pnpm dlx`,
+    // `uv tool run`, ...), and treating "the first non-flag arg" as the
+    // package name for THOSE would silently misclassify the subcommand
+    // word itself as the package (e.g. `uv tool run --from black==24.1.0
+    // black` would have produced a package named "tool"). Found live
+    // while verifying this against uv's own docs, not from an actual
+    // fixture failure -- fixed before it ever shipped classifying
+    // anything wrong, by requiring the exact subcommand shape below
+    // instead of guessing from "any non-flag argument."
+    if matches!(runner.as_str(), "npx" | "bunx") {
         if let Some(pkg) = args.iter().find(|a| !a.starts_with('-')) {
             let source = ArtifactSource::Registry {
                 name: pkg.clone(),
@@ -310,13 +353,45 @@ pub(crate) fn classify_command(
             return (source, None, format!("npm:{pkg} (via {command})"));
         }
     }
-    if matches!(runner.as_str(), "uvx" | "pipx" | "pip" | "uv") {
+    if runner == "uvx" {
         if let Some(pkg) = args.iter().find(|a| !a.starts_with('-')) {
             let source = ArtifactSource::Registry {
                 name: pkg.clone(),
                 registry: "pypi".to_string(),
             };
             return (source, None, format!("pypi:{pkg} (via {command})"));
+        }
+    }
+
+    // Subcommand-style ad-hoc runners: `npm exec <pkg>` / `npm x <pkg>`,
+    // `pnpm dlx <pkg>`, `yarn dlx <pkg>`, `pipx run <pkg>`. The
+    // subcommand word must be the FIRST argument, and the package spec
+    // is the first non-flag argument after it -- matching this file's
+    // own stated design principle (fall through to no classification
+    // rather than guess) when the shape isn't exactly this.
+    if matches!(runner.as_str(), "npm" | "pnpm" | "yarn") {
+        if let Some(pkg) = package_after_subcommand(args, &["exec", "dlx", "x"]) {
+            let source = ArtifactSource::Registry { name: pkg.clone(), registry: "npm".to_string() };
+            return (source, None, format!("npm:{pkg} (via {command} exec)"));
+        }
+    }
+    if runner == "pipx" {
+        if let Some(pkg) = package_after_subcommand(args, &["run"]) {
+            let source = ArtifactSource::Registry { name: pkg.clone(), registry: "pypi".to_string() };
+            return (source, None, format!("pypi:{pkg} (via pipx run)"));
+        }
+    }
+    // `uv tool run [--from <pkg-spec>] <command> [args...]` -- verified
+    // against uv's own docs (docs.astral.sh/uv/concepts/tools/, 2026-09-
+    // 05): with --from, that value IS the package spec (may itself carry
+    // ==version, handled by agentguard-registry's parse_package_spec);
+    // without it, uv resolves the package from the command name, so the
+    // command name doubles as the package name.
+    if runner == "uv" {
+        if let Some(pkg) = uv_tool_run_package(args) {
+            let display = format!("pypi:{pkg} (via uv tool run)");
+            let source = ArtifactSource::Registry { name: pkg, registry: "pypi".to_string() };
+            return (source, None, display);
         }
     }
 
@@ -443,6 +518,104 @@ mod tests {
             result,
             Some(("node".to_string(), vec!["./x.js".to_string()]))
         );
+    }
+
+    fn strs(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn classify_command_recognizes_direct_npx_and_uvx() {
+        let base = Path::new(".");
+        let (source, _, _) = classify_command("npx", &strs(&["-y", "left-pad"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "left-pad".to_string(), registry: "npm".to_string() }
+        );
+        let (source, _, _) = classify_command("uvx", &strs(&["black"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "black".to_string(), registry: "pypi".to_string() }
+        );
+    }
+
+    #[test]
+    fn classify_command_does_not_misclassify_npm_install_as_a_package_named_install() {
+        // Regression test for a real bug caught before it ever shipped:
+        // the original version of this function took "the first non-flag
+        // argument" as the package name for EVERY npm-family/uv-family
+        // runner, which for a subcommand shape like `npm install <pkg>`
+        // or `uv tool run --from <pkg> <cmd>` would silently treat the
+        // subcommand word itself ("install", "tool") as the package name.
+        // `npm install` isn't even an ad-hoc-run shape (it doesn't launch
+        // anything), so this must fall through to no classification at
+        // all, matching classify_command's own stated "don't guess"
+        // design principle.
+        let base = Path::new(".");
+        let (source, scan_root, _) = classify_command("npm", &strs(&["install", "left-pad"]), base);
+        assert!(!matches!(source, ArtifactSource::Registry { .. }));
+        assert_eq!(scan_root, None);
+    }
+
+    #[test]
+    fn classify_command_recognizes_npm_exec_pnpm_dlx_and_pipx_run() {
+        let base = Path::new(".");
+        let (source, _, _) = classify_command("npm", &strs(&["exec", "-y", "left-pad"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "left-pad".to_string(), registry: "npm".to_string() }
+        );
+        let (source, _, _) = classify_command("pnpm", &strs(&["dlx", "left-pad"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "left-pad".to_string(), registry: "npm".to_string() }
+        );
+        let (source, _, _) = classify_command("pipx", &strs(&["run", "black"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "black".to_string(), registry: "pypi".to_string() }
+        );
+    }
+
+    #[test]
+    fn classify_command_recognizes_uv_tool_run_with_and_without_from() {
+        let base = Path::new(".");
+        // Without --from: the command name doubles as the package name
+        // (verified against uv's own docs).
+        let (source, _, _) = classify_command("uv", &strs(&["tool", "run", "black"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "black".to_string(), registry: "pypi".to_string() }
+        );
+        // With --from: that value is the package spec, NOT the trailing
+        // command -- this is exactly the shape that used to misclassify
+        // "tool" as the package name.
+        let (source, _, _) =
+            classify_command("uv", &strs(&["tool", "run", "--from", "black==24.1.0", "blackd"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "black==24.1.0".to_string(), registry: "pypi".to_string() }
+        );
+        // --from=value form too.
+        let (source, _, _) =
+            classify_command("uv", &strs(&["tool", "run", "--from=black==24.1.0", "blackd"]), base);
+        assert_eq!(
+            source,
+            ArtifactSource::Registry { name: "black==24.1.0".to_string(), registry: "pypi".to_string() }
+        );
+    }
+
+    #[test]
+    fn classify_command_does_not_classify_bare_uv_or_pip_without_a_recognized_subcommand() {
+        // "uv" and "pip" alone (not "uv tool run" or a recognized ad-hoc
+        // shape) are not ad-hoc package runners -- `pip install X` and a
+        // bare `uv sync` don't launch anything either. Falls through to
+        // no classification, same principle as the npm-install case.
+        let base = Path::new(".");
+        let (source, _, _) = classify_command("pip", &strs(&["install", "requests"]), base);
+        assert!(!matches!(source, ArtifactSource::Registry { .. }));
+        let (source, _, _) = classify_command("uv", &strs(&["sync"]), base);
+        assert!(!matches!(source, ArtifactSource::Registry { .. }));
     }
 
     #[test]
