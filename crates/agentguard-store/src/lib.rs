@@ -111,6 +111,28 @@ pub struct DecisionRecord {
     /// artifacts.
     #[serde(default)]
     pub config_entry_key: Option<String>,
+    /// Where a Skill artifact's directory originally lived (its
+    /// `scan_root` at scan time). A Skill has no `PreToolUse`-style
+    /// interception point at all — Claude Code's own hooks reference
+    /// (verified 2026-09-05 against code.claude.com/docs/en/hooks) lists
+    /// no hook event that fires on skill invocation, and skill content
+    /// loads by direct context injection, never as a tool call a
+    /// `PreToolUse` matcher could see. So enforcement means physically
+    /// moving the skill's directory out of `.claude/skills/` (the same
+    /// "there's nothing else to intercept, so change what's on disk"
+    /// logic as remote MCP entry removal) rather than gating a launch or
+    /// a config entry. `None` for every non-Skill artifact.
+    #[serde(default)]
+    pub quarantine_original_path: Option<PathBuf>,
+    /// Where a quarantined Skill's directory currently sits, if
+    /// `agentguard init` has moved it out of `.claude/skills/`
+    /// (BLOCK/QUARANTINE, or an unapproved ASK). `None` when the skill is
+    /// at its original location — either never quarantined, or already
+    /// restored by `agentguard allow`. `agentguard allow` moves the
+    /// directory from here back to `quarantine_original_path` and clears
+    /// this field.
+    #[serde(default)]
+    pub quarantine_current_path: Option<PathBuf>,
 }
 
 impl DecisionRecord {
@@ -260,6 +282,8 @@ mod tests {
             remote_entry_snapshot: None,
             config_path: None,
             config_entry_key: None,
+            quarantine_original_path: None,
+            quarantine_current_path: None,
         };
         store.upsert(record.clone()).unwrap();
 
@@ -289,6 +313,8 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
+                quarantine_original_path: None,
+                quarantine_current_path: None,
             })
             .unwrap();
 

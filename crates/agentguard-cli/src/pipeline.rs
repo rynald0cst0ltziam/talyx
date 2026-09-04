@@ -5,7 +5,7 @@
 use agentguard_adapters::{all_adapters, ConfigSource, DiscoveredArtifact, LaunchCommand};
 use agentguard_core::{Artifact, ArtifactKind, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
 use agentguard_risk::RiskEngine;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct ScannedArtifact {
     pub agent_name: &'static str,
@@ -24,6 +24,12 @@ pub struct ScannedArtifact {
     /// comment) — carried through so `init.rs` can snapshot it into the
     /// decision store for `agentguard allow` to restore from later.
     pub raw_config_entry: Option<serde_json::Value>,
+    /// The directory (or file) this artifact was statically scanned from —
+    /// carried through so `init.rs` can quarantine (move out of Claude
+    /// Code's `.claude/skills/` tree) a Skill artifact whose decision
+    /// doesn't allow it to load. `None` for artifacts with no local
+    /// content (e.g. a remote MCP server).
+    pub scan_root: Option<PathBuf>,
 }
 
 /// Runs discovery + static scan + risk scoring for every detected adapter.
@@ -106,6 +112,7 @@ pub fn collect(
                 launch,
                 config_source,
                 raw_config_entry,
+                scan_root,
             });
         }
     }

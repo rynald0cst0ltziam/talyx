@@ -350,6 +350,8 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
+                quarantine_original_path: None,
+                quarantine_current_path: None,
             })
             .unwrap();
         store

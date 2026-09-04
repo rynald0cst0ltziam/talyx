@@ -10,7 +10,7 @@
 use crate::pipeline::{collect, ScannedArtifact};
 use crate::sanitize_for_display;
 use agentguard_adapters::ConfigSourceKind;
-use agentguard_core::{Capability, Decision, ProtectionLevel, RiskBand};
+use agentguard_core::{ArtifactKind, Capability, Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
 use agentguard_store::{DecisionRecord, DecisionStore};
 use std::collections::{BTreeMap, BTreeSet};
@@ -139,6 +139,18 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         (None, None, None)
     };
 
+    // A Skill has no launch/config_source at all (see DecisionRecord's
+    // quarantine_original_path doc comment for why moving the directory,
+    // not a hook, is the only enforcement point) — its scan_root at scan
+    // time is the only thing `agentguard allow` needs to restore it from
+    // quarantine later, so it's captured here the same way a remote MCP
+    // entry's config snapshot is: before any quarantine action happens.
+    let quarantine_original_path = if s.artifact.kind == ArtifactKind::Skill {
+        s.scan_root.clone()
+    } else {
+        None
+    };
+
     DecisionRecord {
         artifact_id: s.artifact.id.clone(),
         name: s.artifact.name.clone(),
@@ -155,6 +167,8 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         remote_entry_snapshot,
         config_path,
         config_entry_key,
+        quarantine_original_path,
+        quarantine_current_path: None, // a fresh scan means it's at its original location
     }
 }
 
@@ -217,26 +231,127 @@ fn rewrite_config(
     }
 }
 
-/// Effective decision for a remote artifact per `store`, folding in manual
+/// Effective decision for an artifact per `store`, folding in manual
 /// approval — falls back to the just-computed scan decision if the store
 /// write somehow didn't land (should not happen in practice: `run_init`
-/// always upserts every scanned artifact before rewriting configs).
-fn effective_remote_decision(store: &DecisionStore, s: &ScannedArtifact) -> Decision {
+/// always upserts every scanned artifact before acting on any of them).
+/// Shared by remote-MCP-entry removal and skill quarantine — both are
+/// "there's no shim/hook interception point, so change what's on disk"
+/// enforcement, just for different artifact shapes.
+fn effective_decision_for(store: &DecisionStore, s: &ScannedArtifact) -> Decision {
     store
         .get(&s.artifact.id)
         .map(|r| r.effective_decision())
         .unwrap_or(s.decision)
 }
 
-/// A remote entry with this effective decision has nothing physically
-/// stopping it from being reached — there is no local process for the shim
-/// to intercept — so the only enforcement point is removing it from the
-/// live config outright. Ask is included: an ASK the user hasn't approved
-/// yet must not be reachable, same as Block/Quarantine; `effective_decision`
-/// already turns an APPROVED Ask into Allow, so this only ever fires for
-/// genuinely unapproved entries.
-fn remote_decision_requires_removal(decision: Decision) -> bool {
+/// An artifact with this effective decision has nothing physically
+/// stopping it from being reached (no shim, no hook — see
+/// `effective_decision_for`'s doc comment), so the only enforcement point
+/// is changing what's on disk: removing a remote MCP entry from its config,
+/// or moving a skill's directory out of `.claude/skills/`. Ask is included:
+/// an ASK the user hasn't approved yet must not be reachable, same as
+/// Block/Quarantine; `effective_decision` already turns an APPROVED Ask
+/// into Allow, so this only ever fires for genuinely unapproved entries.
+fn decision_requires_removal(decision: Decision) -> bool {
     matches!(decision, Decision::Block | Decision::Quarantine | Decision::Ask)
+}
+
+struct QuarantineOutcome {
+    quarantined: usize,
+    skipped_outside_project: usize,
+}
+
+/// Moves a flagged Skill's directory out of `.claude/skills/`.
+///
+/// Skills are architecturally different from MCP servers and hooks: there
+/// is no `PreToolUse`-style interception point at all. Verified 2026-09-05
+/// directly against Anthropic's own docs (code.claude.com/docs/en/hooks
+/// lists every hook event Claude Code fires — no event corresponds to a
+/// skill loading or being invoked; code.claude.com/docs/en/skills confirms
+/// a skill's body reaches Claude by direct context injection, never as a
+/// tool call). So unlike a hook or an MCP server, there's no "route it
+/// through the shim" or "match it in PreToolUse" option to even consider —
+/// the only lever is changing what's on disk, the same principle as remote
+/// MCP entry removal: Claude Code's own skill-discovery walk can't find a
+/// SKILL.md that isn't where it's looking.
+///
+/// The destination is a `.agentguard-quarantine/<name>` directory sibling
+/// to `skills/` (i.e. inside `.claude/`, next to it) — deliberately NOT
+/// nested inside `.claude/skills/` itself, so there's no question of
+/// whether Claude Code's own one-level skill-discovery walk might still
+/// find it there. `agentguard allow <id>` moves it back.
+fn quarantine_skills(
+    scanned: &[ScannedArtifact],
+    store: &DecisionStore,
+    project_root: &Path,
+    include_user_config: bool,
+) -> QuarantineOutcome {
+    let mut quarantined = 0;
+    let mut skipped_outside_project = 0;
+
+    for s in scanned {
+        if s.artifact.kind != ArtifactKind::Skill {
+            continue;
+        }
+        let Some(scan_root) = &s.scan_root else { continue };
+        if !decision_requires_removal(effective_decision_for(store, s)) {
+            continue;
+        }
+        if !(include_user_config || scan_root.starts_with(project_root)) {
+            skipped_outside_project += 1;
+            continue;
+        }
+        if !scan_root.is_dir() {
+            continue; // already moved (or gone) -- nothing to do this run
+        }
+        let Some(quarantine_dir) = quarantine_target_dir(scan_root) else {
+            continue;
+        };
+
+        match move_skill_directory(scan_root, &quarantine_dir) {
+            Ok(()) => {
+                quarantined += 1;
+                if let Some(mut record) = store.get(&s.artifact.id) {
+                    record.quarantine_original_path = Some(scan_root.clone());
+                    record.quarantine_current_path = Some(quarantine_dir);
+                    if let Err(e) = store.upsert(record) {
+                        eprintln!(
+                            "agentguard: quarantined '{}' but failed to update the decision cache: {e}",
+                            sanitize_for_display(&s.artifact.name)
+                        );
+                    }
+                }
+            }
+            Err(e) => eprintln!(
+                "agentguard: failed to quarantine skill '{}': {e}",
+                sanitize_for_display(&s.artifact.name)
+            ),
+        }
+    }
+
+    QuarantineOutcome { quarantined, skipped_outside_project }
+}
+
+/// `.../.claude/skills/<name>` -> `.../.claude/.agentguard-quarantine/<name>`.
+fn quarantine_target_dir(skill_dir: &Path) -> Option<PathBuf> {
+    let skill_name = skill_dir.file_name()?;
+    let skills_dir = skill_dir.parent()?; // .../.claude/skills
+    let claude_dir = skills_dir.parent()?; // .../.claude
+    Some(claude_dir.join(".agentguard-quarantine").join(skill_name))
+}
+
+fn move_skill_directory(from: &Path, to: &Path) -> io::Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if to.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("quarantine destination {} already exists", to.display()),
+        ));
+    }
+    std::fs::rename(from, to)
 }
 
 /// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and Claude
@@ -324,7 +439,7 @@ fn rewrite_config_json(
 
 /// Removes each remote artifact's entry from the (already-parsed)
 /// `mcpServers` map when its effective decision doesn't allow it to run —
-/// see `remote_decision_requires_removal`. There's no shim to route a
+/// see `decision_requires_removal`. There's no shim to route a
 /// remote server through (no local process to launch), so physically
 /// deleting the entry from the live config is the only interception point:
 /// the agent simply can't connect to a server that isn't listed. The
@@ -345,7 +460,7 @@ fn remove_blocked_remote_entries_json(
     let mut removed = 0;
     for s in remote_artifacts {
         let config_source = s.config_source.as_ref().unwrap(); // filtered by caller
-        if !remote_decision_requires_removal(effective_remote_decision(store, s)) {
+        if !decision_requires_removal(effective_decision_for(store, s)) {
             continue;
         }
         if servers.remove(&config_source.entry_key).is_some() {
@@ -476,7 +591,7 @@ fn remove_blocked_remote_entries_toml(
     let mut removed = 0;
     for s in remote_artifacts {
         let config_source = s.config_source.as_ref().unwrap(); // filtered by caller
-        if !remote_decision_requires_removal(effective_remote_decision(store, s)) {
+        if !decision_requires_removal(effective_decision_for(store, s)) {
             continue;
         }
         if servers.remove(&config_source.entry_key).is_some() {
@@ -708,8 +823,31 @@ pub fn run_init(
         println!("Re-run with --include-user-config to also protect those.");
     }
 
+    // Skills go through a separate path from `by_config` below: they have
+    // no shim-wrappable launch and no config-file entry to remove, so
+    // there's nothing for `rewrite_config` to do with them. See
+    // `quarantine_skills`'s doc comment for why moving the directory is
+    // the only enforcement lever for this artifact kind, and why that
+    // means this must run even when there's no rewritable config at all.
+    let skill_outcome = quarantine_skills(&scanned, &store, &project_root, include_user_config);
+    if skill_outcome.quarantined > 0 {
+        println!(
+            "{} skill(s) quarantined (blocked or awaiting approval) — moved out of .claude/skills/.",
+            skill_outcome.quarantined
+        );
+        println!("Run `agentguard allow <id>` to approve and restore one.");
+    }
+    if skill_outcome.skipped_outside_project > 0 {
+        println!(
+            "{} flagged skill(s) found outside {} — NOT quarantined.",
+            skill_outcome.skipped_outside_project,
+            project_root.display()
+        );
+        println!("Re-run with --include-user-config to also quarantine those.");
+    }
+
     if by_config.is_empty() {
-        println!("No rewritable MCP server configs found inside this project — nothing to route through enforcement yet.");
+        println!("No rewritable MCP server configs found inside this project — nothing more to route through enforcement.");
         print_risk_summary(&scanned);
         return;
     }
@@ -789,6 +927,7 @@ pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
             println!("Approved '{artifact_id}'.");
             println!("It will be allowed to run until it changes (a different score/decision on the next scan resets this).");
             restore_remote_entry_if_needed(&store, artifact_id);
+            restore_quarantined_skill_if_needed(&store, artifact_id);
         }
         Ok(false) => {
             eprintln!(
@@ -832,6 +971,54 @@ fn restore_remote_entry_if_needed(store: &DecisionStore, artifact_id: &str) {
         Err(e) => eprintln!(
             "agentguard: approved, but failed to restore the config entry at {}: {e}",
             config_path.display()
+        ),
+    }
+}
+
+/// After approving a Skill, move its directory back from quarantine — see
+/// `quarantine_skills`'s doc comment for why moving it, not re-registering
+/// a hook, is the enforcement mechanism this restores from. A no-op for
+/// any non-Skill artifact (those fields are `None`) and for a skill that
+/// was never quarantined in the first place.
+fn restore_quarantined_skill_if_needed(store: &DecisionStore, artifact_id: &str) {
+    let Some(mut record) = store.get(artifact_id) else {
+        return;
+    };
+    let (Some(current), Some(original)) = (
+        record.quarantine_current_path.clone(),
+        record.quarantine_original_path.clone(),
+    ) else {
+        return;
+    };
+
+    if !current.is_dir() {
+        eprintln!(
+            "agentguard: approved, but the quarantined skill directory {} is missing -- nothing to restore.",
+            current.display()
+        );
+        return;
+    }
+    if original.exists() {
+        eprintln!(
+            "agentguard: approved, but {} already exists -- not overwriting it. The quarantined copy is still at {}.",
+            original.display(),
+            current.display()
+        );
+        return;
+    }
+
+    match std::fs::rename(&current, &original) {
+        Ok(()) => {
+            println!("Restored skill to {}.", original.display());
+            record.quarantine_current_path = None;
+            if let Err(e) = store.upsert(record) {
+                eprintln!(
+                    "agentguard: restored the skill directory but failed to update the decision cache: {e}"
+                );
+            }
+        }
+        Err(e) => eprintln!(
+            "agentguard: approved, but failed to restore the skill directory: {e}"
         ),
     }
 }
@@ -1001,6 +1188,7 @@ mod tests {
                 entry_key: name.to_string(),
             }),
             raw_config_entry: None,
+            scan_root: None,
         }
     }
 
@@ -1134,6 +1322,7 @@ mod tests {
                 entry_key: name.to_string(),
             }),
             raw_config_entry: Some(serde_json::json!({ "type": "http", "url": url })),
+            scan_root: None,
         }
     }
 
@@ -1170,7 +1359,7 @@ mod tests {
             RiskBand::Low,
         );
 
-        // Store is empty -- effective_remote_decision falls back to each
+        // Store is empty -- effective_decision_for falls back to each
         // artifact's own scan decision, same as a fresh first-ever scan.
         let outcome = rewrite_config_json(&config_path, &[&evil, &good], None, &store).unwrap();
         assert_eq!(outcome.removed_remote, 1);
@@ -1235,6 +1424,8 @@ mod tests {
                 remote_entry_snapshot: askme.raw_config_entry.clone(),
                 config_path: Some(config_path.clone()),
                 config_entry_key: Some("askme".to_string()),
+                quarantine_original_path: None,
+                quarantine_current_path: None,
             })
             .unwrap();
 
@@ -1295,6 +1486,182 @@ mod tests {
 
         let restored_again = restore_remote_entry_toml(&config_path, "example", &snapshot).unwrap();
         assert!(!restored_again);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn synthetic_skill_scanned_artifact(
+        name: &str,
+        scan_root: PathBuf,
+        decision: Decision,
+        band: RiskBand,
+    ) -> ScannedArtifact {
+        let source = ArtifactSource::LocalPath(scan_root.display().to_string());
+        let artifact = Artifact {
+            id: format!("skill:{name}:local:{}", scan_root.display()),
+            kind: ArtifactKind::Skill,
+            name: name.to_string(),
+            version: None,
+            publisher: PublisherIdentity::default(),
+            source,
+            content_hash: None,
+            capabilities: vec![],
+            discovered_by: BTreeSet::new(),
+        };
+        ScannedArtifact {
+            agent_name: "claude-code",
+            artifact,
+            breakdown: ScoreBreakdown::default(),
+            band,
+            decision,
+            location: scan_root.display().to_string(),
+            launch: None,
+            config_source: None,
+            raw_config_entry: None,
+            scan_root: Some(scan_root),
+        }
+    }
+
+    #[test]
+    fn quarantine_skills_moves_a_blocked_skill_and_leaves_an_allowed_one() {
+        let dir = unique_temp_dir("skill-quarantine");
+        let skills_dir = dir.join(".claude").join("skills");
+        std::fs::create_dir_all(skills_dir.join("evil-skill")).unwrap();
+        std::fs::write(skills_dir.join("evil-skill").join("SKILL.md"), "evil").unwrap();
+        std::fs::create_dir_all(skills_dir.join("good-skill")).unwrap();
+        std::fs::write(skills_dir.join("good-skill").join("SKILL.md"), "good").unwrap();
+        let store = temp_store(&dir);
+
+        let evil = synthetic_skill_scanned_artifact(
+            "evil-skill",
+            skills_dir.join("evil-skill"),
+            Decision::Block,
+            RiskBand::Critical,
+        );
+        let evil_id = evil.artifact.id.clone();
+        let good = synthetic_skill_scanned_artifact(
+            "good-skill",
+            skills_dir.join("good-skill"),
+            Decision::Allow,
+            RiskBand::Low,
+        );
+        let scanned = vec![evil, good];
+
+        // Real usage always upserts a record for every scanned artifact
+        // before quarantining anything (run_init's own ordering) --
+        // record_for is what actually captures quarantine_original_path.
+        for s in &scanned {
+            store.upsert(record_for(&store, s, ProtectionLevel::Balanced)).unwrap();
+        }
+
+        let outcome = quarantine_skills(&scanned, &store, &dir, false);
+        assert_eq!(outcome.quarantined, 1);
+        assert_eq!(outcome.skipped_outside_project, 0);
+
+        assert!(
+            !skills_dir.join("evil-skill").exists(),
+            "the blocked skill must be moved out of .claude/skills/"
+        );
+        assert!(
+            dir.join(".claude")
+                .join(".agentguard-quarantine")
+                .join("evil-skill")
+                .join("SKILL.md")
+                .exists(),
+            "the blocked skill's content must survive the move, sibling to skills/"
+        );
+        assert!(
+            skills_dir.join("good-skill").exists(),
+            "an ALLOW-decision skill must stay in place"
+        );
+
+        let record = store.get(&evil_id).unwrap();
+        assert_eq!(record.quarantine_original_path, Some(skills_dir.join("evil-skill")));
+        assert_eq!(
+            record.quarantine_current_path,
+            Some(dir.join(".claude").join(".agentguard-quarantine").join("evil-skill"))
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn quarantine_skills_respects_the_project_safety_boundary() {
+        let dir = unique_temp_dir("skill-quarantine-outside");
+        let outside_dir = unique_temp_dir("skill-quarantine-outside-user-scope");
+        let skills_dir = outside_dir.join(".claude").join("skills");
+        std::fs::create_dir_all(skills_dir.join("evil-skill")).unwrap();
+        std::fs::write(skills_dir.join("evil-skill").join("SKILL.md"), "evil").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = temp_store(&dir);
+
+        let evil = synthetic_skill_scanned_artifact(
+            "evil-skill",
+            skills_dir.join("evil-skill"),
+            Decision::Block,
+            RiskBand::Critical,
+        );
+        let scanned = vec![evil];
+
+        // dir (project_root) does NOT contain outside_dir's skill.
+        let outcome = quarantine_skills(&scanned, &store, &dir, false);
+        assert_eq!(outcome.quarantined, 0);
+        assert_eq!(outcome.skipped_outside_project, 1);
+        assert!(
+            skills_dir.join("evil-skill").exists(),
+            "a flagged skill outside --project must NOT be touched without --include-user-config"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
+    }
+
+    #[test]
+    fn restore_quarantined_skill_if_needed_moves_it_back_and_clears_the_record() {
+        let dir = unique_temp_dir("skill-restore");
+        let skills_dir = dir.join(".claude").join("skills");
+        let quarantine_dir = dir.join(".claude").join(".agentguard-quarantine");
+        std::fs::create_dir_all(&quarantine_dir.join("evil-skill")).unwrap();
+        std::fs::write(quarantine_dir.join("evil-skill").join("SKILL.md"), "evil").unwrap();
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let store = temp_store(&dir);
+
+        let artifact_id = "skill:evil-skill:local:test".to_string();
+        store
+            .upsert(DecisionRecord {
+                artifact_id: artifact_id.clone(),
+                name: "evil-skill".to_string(),
+                band: RiskBand::Critical,
+                decision: Decision::Block,
+                total_score: 100,
+                protection_level: ProtectionLevel::Balanced,
+                scanned_at_unix: DecisionRecord::now_unix(),
+                reasons: vec![],
+                content_hash: None,
+                capability_snapshot: vec![],
+                shell_command: None,
+                manually_approved: true,
+                remote_entry_snapshot: None,
+                config_path: None,
+                config_entry_key: None,
+                quarantine_original_path: Some(skills_dir.join("evil-skill")),
+                quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
+            })
+            .unwrap();
+
+        restore_quarantined_skill_if_needed(&store, &artifact_id);
+
+        assert!(
+            skills_dir.join("evil-skill").join("SKILL.md").exists(),
+            "the skill directory must be moved back to its original location"
+        );
+        assert!(!quarantine_dir.join("evil-skill").exists());
+
+        let record = store.get(&artifact_id).unwrap();
+        assert_eq!(
+            record.quarantine_current_path, None,
+            "the record must be cleared once restored, so a later scan doesn't think it's still quarantined"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
