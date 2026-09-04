@@ -378,7 +378,10 @@ fn rewrite_config_json(
             continue;
         };
         match config_source.kind {
-            ConfigSourceKind::ClaudeCodeMcpServersJson | ConfigSourceKind::CursorMcpJson => {
+            ConfigSourceKind::ClaudeCodeMcpServersJson
+            | ConfigSourceKind::CursorMcpJson
+            | ConfigSourceKind::WindsurfMcpJson
+            | ConfigSourceKind::AntigravityMcpJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {

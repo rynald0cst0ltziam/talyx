@@ -7,11 +7,13 @@
 //! shim/daemon — see BUILD_PLAN.md §5). Keeping that boundary is what lets
 //! adding a new agent stay an adapter-sized change instead of a rewrite.
 
+pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
 mod mcp_config;
 pub mod unknown;
+pub mod windsurf;
 
 use agentguard_core::Artifact;
 use std::path::{Path, PathBuf};
@@ -109,6 +111,26 @@ pub enum ConfigSourceKind {
     /// parser (codex.rs) rather than reusing mcp_config.rs, even though
     /// the underlying command/args/env concept per server is the same.
     CodexMcpServersToml,
+    /// Same `mcpServers` JSON shape again, but Windsurf's own config file
+    /// — `~/.codeium/windsurf/mcp_config.json`, user scope ONLY. Verified
+    /// 2026-09-05 against Windsurf's own docs (docs.windsurf.com/windsurf/
+    /// cascade/mcp, which as of this writing redirects to
+    /// docs.devin.ai/desktop/cascade/mcp — Windsurf was acquired by
+    /// Cognition/Devin; the config path and JSON shape are unchanged by
+    /// the rebrand, confirmed directly, not assumed): unlike Claude Code/
+    /// Cursor/Codex, Windsurf does NOT support a project-scoped copy —
+    /// every server is configured globally, so `windsurf.rs` never looks
+    /// for a `.windsurf/mcp_config.json` project file at all, on purpose.
+    WindsurfMcpJson,
+    /// Same `mcpServers` JSON shape again, but Google Antigravity's config
+    /// files — `~/.gemini/config/mcp_config.json` (user/global scope) or
+    /// `.agents/mcp_config.json` (project scope) as of this writing.
+    /// Verified 2026-09-05 against antigravity.google/docs/mcp/. Distinct
+    /// from Gemini CLI's own config (a different tool, different path,
+    /// not covered by this adapter) despite sharing the `~/.gemini/`
+    /// directory name — worth calling out since guessing the two were
+    /// the same thing would have been an easy, wrong assumption.
+    AntigravityMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -131,6 +153,8 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(claude_code::ClaudeCodeAdapter),
         Box::new(cursor::CursorAdapter),
         Box::new(codex::CodexAdapter),
+        Box::new(windsurf::WindsurfAdapter),
+        Box::new(antigravity::AntigravityAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

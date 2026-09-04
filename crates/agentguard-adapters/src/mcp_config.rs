@@ -60,7 +60,19 @@ pub(crate) fn parse_mcp_servers_json(
         // remote entry means agentguard-cli's init.rs including/excluding
         // it from the config outright, which still needs to know where
         // to find it.
-        if let Some(url) = cfg.get("url").and_then(|u| u.as_str()) {
+        //
+        // `url` is Claude Code/Cursor's field name; `serverUrl` is
+        // Windsurf's (which also accepts `url`) and Antigravity's (which
+        // documents ONLY `serverUrl`, not `url`) — verified directly
+        // against each vendor's own docs before adding this, not assumed
+        // to be interchangeable. Checking both here, in the shared
+        // parser, means every caller gets both for free; harmless for
+        // Claude Code/Cursor, which never populate `serverUrl` at all.
+        if let Some(url) = cfg
+            .get("url")
+            .or_else(|| cfg.get("serverUrl"))
+            .and_then(|u| u.as_str())
+        {
             out.push(remote_mcp_artifact(name, url, cfg, path, kind, agent_id, agent_display_name));
             continue;
         }
