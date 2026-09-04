@@ -8,6 +8,7 @@
 //! adding a new agent stay an adapter-sized change instead of a rewrite.
 
 pub mod claude_code;
+pub mod codex;
 pub mod cursor;
 mod mcp_config;
 pub mod unknown;
@@ -89,6 +90,14 @@ pub enum ConfigSourceKind {
     /// find the matching occurrence, since there's no flat map key to
     /// look up the way there is for `mcpServers`.
     ClaudeCodeHooksJson,
+    /// A Codex CLI `[mcp_servers.<entry_key>]` table in `config.toml` —
+    /// `.codex/config.toml` (project scope, trusted projects only) or
+    /// `~/.codex/config.toml` (user scope) as of this writing. TOML, not
+    /// JSON — a structurally different file format from the other three
+    /// variants (verified against OpenAI's own docs), so it gets its own
+    /// parser (codex.rs) rather than reusing mcp_config.rs, even though
+    /// the underlying command/args/env concept per server is the same.
+    CodexMcpServersToml,
 }
 
 pub trait AgentAdapter {
@@ -110,6 +119,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
     vec![
         Box::new(claude_code::ClaudeCodeAdapter),
         Box::new(cursor::CursorAdapter),
+        Box::new(codex::CodexAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

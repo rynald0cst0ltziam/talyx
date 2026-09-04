@@ -8,6 +8,7 @@
 //! `scan`/`status` (main.rs) never call into this module — they only read.
 
 use crate::pipeline::{collect, ScannedArtifact};
+use crate::sanitize_for_display;
 use agentguard_adapters::ConfigSourceKind;
 use agentguard_core::{Capability, Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
@@ -194,6 +195,13 @@ fn rewrite_config(
                 mcp_artifacts.push(*s)
             }
             ConfigSourceKind::ClaudeCodeHooksJson => hook_artifacts.push(*s),
+            // Filtered out in run_init before by_config is ever built for
+            // this kind (TOML rewriting isn't implemented) — this JSON
+            // rewriter should never actually receive one. Matched
+            // exhaustively anyway rather than with a wildcard, so a real
+            // TOML rewrite path added later is a deliberate decision here
+            // too, not a silent fallthrough into JSON-only logic.
+            ConfigSourceKind::CodexMcpServersToml => {}
         }
     }
 
@@ -400,7 +408,7 @@ pub fn run_init(
         if let Err(e) = upsert_preserving_approval(&store, record) {
             eprintln!(
                 "agentguard: failed to write decision cache for '{}': {e}",
-                s.artifact.name
+                sanitize_for_display(&s.artifact.name)
             );
         }
     }
@@ -417,8 +425,18 @@ pub fn run_init(
     // live ~/.claude.json on the machine it was built on.
     let mut by_config: BTreeMap<PathBuf, Vec<&ScannedArtifact>> = BTreeMap::new();
     let mut skipped_outside_project = 0usize;
+    let mut skipped_unsupported_format = 0usize;
     for s in &scanned {
         if let (Some(_), Some(cs)) = (&s.launch, &s.config_source) {
+            // TOML rewriting (Codex's config.toml) isn't implemented yet —
+            // rewrite_config below is JSON-only. Filtered out here, with
+            // an honest message, rather than letting it reach
+            // rewrite_config and fail there with a confusing
+            // "failed to rewrite" error for something never attempted.
+            if cs.kind == ConfigSourceKind::CodexMcpServersToml {
+                skipped_unsupported_format += 1;
+                continue;
+            }
             if include_user_config || cs.path.starts_with(&project_root) {
                 by_config.entry(cs.path.clone()).or_default().push(s);
             } else {
@@ -433,6 +451,12 @@ pub fn run_init(
         scanned.len(),
         level_name = level_name(level)
     );
+
+    if skipped_unsupported_format > 0 {
+        println!(
+            "{skipped_unsupported_format} Codex MCP server(s) found — scanned and scored, but config.toml rewriting isn't implemented yet, so these are NOT routed through enforcement. `agentguard why <id>` still works for them."
+        );
+    }
 
     if skipped_outside_project > 0 {
         println!(
@@ -541,7 +565,7 @@ pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     };
     println!(
         "{} — {} (score {}), decision: {}{approval_note}",
-        record.name, record.band, record.total_score, record.decision
+        sanitize_for_display(&record.name), record.band, record.total_score, record.decision
     );
     println!();
     for r in &record.reasons {

@@ -139,10 +139,10 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
             "{:<12} {:<11} {:<30} {:<9} {:<10} {}",
             s.agent_name,
             s.artifact.kind.to_string(),
-            truncate(&s.artifact.name, 30),
+            truncate(&sanitize_for_display(&s.artifact.name), 30),
             s.band.to_string(),
             s.decision.to_string(),
-            s.location,
+            sanitize_for_display(&s.location),
         );
     }
 
@@ -168,7 +168,12 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
         for s in flagged {
             println!(
                 "\n--- {} ({}) via {} — {} => {} [id: {}] ---",
-                s.artifact.name, s.artifact.kind, s.agent_name, s.band, s.decision, s.artifact.id
+                sanitize_for_display(&s.artifact.name),
+                s.artifact.kind,
+                s.agent_name,
+                s.band,
+                s.decision,
+                sanitize_for_display(&s.artifact.id)
             );
             for r in &s.breakdown.static_evidence_reasons {
                 println!("  {r}");
@@ -228,11 +233,52 @@ fn run_status(project: &Path) {
     }
 }
 
+/// Replaces control characters with U+FFFD before printing anything
+/// derived from an artifact's name/path/id to a terminal. Found live, not
+/// hypothetically: a real, malformed Codex config.toml on this machine
+/// parsed an ambiguous `\b` escape (see codex.rs's
+/// repair_unescaped_backslashes doc comment) into a literal backspace
+/// character, which then visibly corrupted the printed path (a character
+/// appeared to vanish mid-string). More generally, an artifact's
+/// name/path/id is exactly the kind of attacker-influenced content a
+/// security tool must never print raw — control or ANSI-escape sequences
+/// in a name could otherwise manipulate the terminal display in
+/// misleading ways. `agentguard why`'s underlying data (the decision
+/// store) keeps the real string; this only affects what hits the screen.
+pub(crate) fn sanitize_for_display(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
         let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
         format!("{truncated}\u{2026}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_replaces_a_literal_backspace() {
+        // Regression test for the exact live failure: a real Codex
+        // config.toml's ambiguous `\b` escape (codex.rs's
+        // repair_unescaped_backslashes) parsed into an actual backspace
+        // character, which then visibly corrupted a printed path.
+        let corrupted = "Bastion-AI\u{8}bastion.exe";
+        let sanitized = sanitize_for_display(corrupted);
+        assert!(!sanitized.contains('\u{8}'));
+        assert!(sanitized.contains("Bastion-AI"));
+        assert!(sanitized.contains("bastion.exe"));
+    }
+
+    #[test]
+    fn sanitize_leaves_ordinary_text_unchanged() {
+        assert_eq!(sanitize_for_display("normal-name_123.js"), "normal-name_123.js");
     }
 }

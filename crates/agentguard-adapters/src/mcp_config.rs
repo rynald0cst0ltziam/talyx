@@ -263,7 +263,7 @@ pub(crate) fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(
 /// confidently classify falls through to a bare LocalPath with no scan_root
 /// rather than guessing — an artifact with thin evidence lands with fewer
 /// findings, which is a weaker signal, not a wrong one.
-fn classify_command(
+pub(crate) fn classify_command(
     command: &str,
     args: &[String],
     base_dir: &Path,
@@ -349,7 +349,7 @@ fn classify_command(
     )
 }
 
-fn guess_publisher(source: &ArtifactSource) -> PublisherIdentity {
+pub(crate) fn guess_publisher(source: &ArtifactSource) -> PublisherIdentity {
     match source {
         ArtifactSource::Registry { name, .. } => {
             // Scoped npm packages (@org/pkg) name the org explicitly; use
