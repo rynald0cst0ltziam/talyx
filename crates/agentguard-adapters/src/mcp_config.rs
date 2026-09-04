@@ -21,6 +21,15 @@ use std::path::{Path, PathBuf};
 /// agentguard-cli's init.rs; `agent_id`/`agent_display_name` go into
 /// `discovered_by` and the capability evidence text respectively.
 ///
+/// `top_level_key` is the JSON key the server map sits under — `
+/// "mcpServers"` for every agent covered so far except VS Code's Copilot
+/// Chat extension, which documents `"servers"` instead (verified against
+/// code.visualstudio.com/docs/agents/reference/mcp-configuration, not
+/// assumed identical to every other tool just because the per-server
+/// shape underneath is the same). Kept as an explicit parameter rather
+/// than hardcoding `"mcpServers"` so a genuinely different top-level key
+/// is a deliberate choice at each call site, not a silent assumption.
+///
 /// `base_dir` is where relative script paths in the config resolve
 /// against — deliberately an explicit parameter, NOT derived from
 /// `path.parent()`: that coincidentally equals the project root for
@@ -34,6 +43,7 @@ pub(crate) fn parse_mcp_servers_json(
     path: &Path,
     base_dir: &Path,
     kind: ConfigSourceKind,
+    top_level_key: &str,
     agent_id: &str,
     agent_display_name: &str,
 ) -> Vec<DiscoveredArtifact> {
@@ -44,7 +54,7 @@ pub(crate) fn parse_mcp_servers_json(
     let Ok(json) = serde_json::from_str::<Value>(&text) else {
         return out;
     };
-    let Some(servers) = json.get("mcpServers").and_then(|v| v.as_object()) else {
+    let Some(servers) = json.get(top_level_key).and_then(|v| v.as_object()) else {
         return out;
     };
 
@@ -63,14 +73,19 @@ pub(crate) fn parse_mcp_servers_json(
         //
         // `url` is Claude Code/Cursor's field name; `serverUrl` is
         // Windsurf's (which also accepts `url`) and Antigravity's (which
-        // documents ONLY `serverUrl`, not `url`) — verified directly
-        // against each vendor's own docs before adding this, not assumed
-        // to be interchangeable. Checking both here, in the shared
-        // parser, means every caller gets both for free; harmless for
-        // Claude Code/Cursor, which never populate `serverUrl` at all.
+        // documents ONLY `serverUrl`, not `url`); Gemini CLI splits
+        // remote transport into `url` (SSE) and `httpUrl` (HTTP
+        // streaming) — a third, distinct field name, not an alias for
+        // either of the other two. Verified directly against each
+        // vendor's own docs before adding any of these, not assumed to
+        // be interchangeable. Checking all three here, in the shared
+        // parser, means every caller gets all of them for free; harmless
+        // for Claude Code/Cursor, which never populate `serverUrl` or
+        // `httpUrl` at all.
         if let Some(url) = cfg
             .get("url")
             .or_else(|| cfg.get("serverUrl"))
+            .or_else(|| cfg.get("httpUrl"))
             .and_then(|u| u.as_str())
         {
             out.push(remote_mcp_artifact(name, url, cfg, path, kind, agent_id, agent_display_name));
@@ -729,6 +744,7 @@ mod tests {
             &config_path,
             &dir,
             ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "mcpServers",
             "claude-code",
             "Claude Code",
         );
@@ -827,6 +843,7 @@ mod tests {
             &config_path,
             &dir,
             ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "mcpServers",
             "claude-code",
             "Claude Code",
         );
@@ -854,6 +871,7 @@ mod tests {
             &config_path,
             &dir,
             ConfigSourceKind::CursorMcpJson,
+            "mcpServers",
             "cursor",
             "Cursor",
         );
@@ -893,6 +911,7 @@ mod tests {
             &config_path,
             &project_root,
             ConfigSourceKind::CursorMcpJson,
+            "mcpServers",
             "cursor",
             "Cursor",
         );

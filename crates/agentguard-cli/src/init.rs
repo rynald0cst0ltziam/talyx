@@ -97,6 +97,27 @@ fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<
     (decision, Some(reason))
 }
 
+/// The JSON key a `ConfigSourceKind`'s server map sits under — `None` for
+/// a TOML config (Codex, which doesn't use this string-keyed restore path
+/// at all — see `restore_remote_entry`'s dispatch by file extension) or a
+/// shape with no flat server map (hooks). `"mcpServers"` for every
+/// JSON-format agent except VS Code's Copilot Chat extension
+/// (`"servers"` — see `ConfigSourceKind::VsCodeCopilotMcpJson`'s doc
+/// comment). Kept as its own small function, matched exhaustively, so a
+/// future `ConfigSourceKind` variant forces a decision here too.
+fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
+    match kind {
+        ConfigSourceKind::ClaudeCodeMcpServersJson
+        | ConfigSourceKind::CursorMcpJson
+        | ConfigSourceKind::WindsurfMcpJson
+        | ConfigSourceKind::AntigravityMcpJson
+        | ConfigSourceKind::GeminiCliSettingsJson
+        | ConfigSourceKind::GitHubCopilotCliMcpJson => Some("mcpServers".to_string()),
+        ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
+        ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexMcpServersToml => None,
+    }
+}
+
 fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel) -> DecisionRecord {
     let mut reasons = Vec::new();
     reasons.extend(s.breakdown.static_evidence_reasons.clone());
@@ -129,14 +150,16 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
     // this saved now, at scan time, rather than re-reading the config
     // later (by the time it's approved the entry may already be gone).
     let is_remote = s.launch.is_none() && s.config_source.is_some();
-    let (remote_entry_snapshot, config_path, config_entry_key) = if is_remote {
+    let (remote_entry_snapshot, config_path, config_entry_key, config_top_level_key) = if is_remote
+    {
         (
             s.raw_config_entry.clone(),
             s.config_source.as_ref().map(|cs| cs.path.clone()),
             s.config_source.as_ref().map(|cs| cs.entry_key.clone()),
+            s.config_source.as_ref().and_then(|cs| json_top_level_key(cs.kind)),
         )
     } else {
-        (None, None, None)
+        (None, None, None, None)
     };
 
     // A Skill has no launch/config_source at all (see DecisionRecord's
@@ -167,6 +190,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         remote_entry_snapshot,
         config_path,
         config_entry_key,
+        config_top_level_key,
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
     }
@@ -373,6 +397,7 @@ fn rewrite_config_json(
     let mut mcp_artifacts = Vec::new();
     let mut hook_artifacts = Vec::new();
     let mut remote_artifacts = Vec::new();
+    let mut top_level_key = "mcpServers";
     for s in artifacts {
         let Some(config_source) = &s.config_source else {
             continue;
@@ -381,7 +406,23 @@ fn rewrite_config_json(
             ConfigSourceKind::ClaudeCodeMcpServersJson
             | ConfigSourceKind::CursorMcpJson
             | ConfigSourceKind::WindsurfMcpJson
-            | ConfigSourceKind::AntigravityMcpJson => {
+            | ConfigSourceKind::AntigravityMcpJson
+            | ConfigSourceKind::GeminiCliSettingsJson
+            | ConfigSourceKind::GitHubCopilotCliMcpJson => {
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
+            }
+            // The one shape with a different top-level key — see
+            // `parse_mcp_servers_json`'s `top_level_key` doc comment. A
+            // config-file group is always homogeneous (one physical file
+            // only ever holds one agent's config), so it's safe to just
+            // overwrite this on every matching artifact rather than
+            // reconcile conflicting values.
+            ConfigSourceKind::VsCodeCopilotMcpJson => {
+                top_level_key = "servers";
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
@@ -403,14 +444,15 @@ fn rewrite_config_json(
     }
 
     let (mcp_new, mcp_already) = match &shim_str {
-        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s),
+        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s, top_level_key),
         None => (0, 0),
     };
     let (hook_new, hook_already) = match &shim_str {
         Some(s) => rewrite_hooks(&mut json, &hook_artifacts, s),
         None => (0, 0),
     };
-    let removed_remote = remove_blocked_remote_entries_json(&mut json, &remote_artifacts, store);
+    let removed_remote =
+        remove_blocked_remote_entries_json(&mut json, &remote_artifacts, store, top_level_key);
     let newly_protected = mcp_new + hook_new;
     let already_protected = mcp_already + hook_already;
 
@@ -453,11 +495,12 @@ fn remove_blocked_remote_entries_json(
     json: &mut serde_json::Value,
     remote_artifacts: &[&ScannedArtifact],
     store: &DecisionStore,
+    top_level_key: &str,
 ) -> usize {
     if remote_artifacts.is_empty() {
         return 0;
     }
-    let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+    let Some(servers) = json.get_mut(top_level_key).and_then(|v| v.as_object_mut()) else {
         return 0;
     };
     let mut removed = 0;
@@ -604,16 +647,20 @@ fn remove_blocked_remote_entries_toml(
     removed
 }
 
-/// Rewrites `{ "mcpServers": { "<entry_key>": { command, args } } }`
-/// entries — a flat map, one lookup per artifact.
+/// Rewrites `{ "<top_level_key>": { "<entry_key>": { command, args } } }`
+/// entries — a flat map, one lookup per artifact. `top_level_key` is
+/// `"mcpServers"` for every agent covered so far except VS Code's Copilot
+/// Chat extension (`"servers"` — see `ConfigSourceKind::
+/// VsCodeCopilotMcpJson`'s doc comment).
 fn rewrite_mcp_servers(
     json: &mut serde_json::Value,
     artifacts: &[&ScannedArtifact],
     shim_str: &str,
+    top_level_key: &str,
 ) -> (usize, usize) {
     let mut newly_protected = 0;
     let mut already_protected = 0;
-    let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+    let Some(servers) = json.get_mut(top_level_key).and_then(|v| v.as_object_mut()) else {
         return (0, 0);
     };
 
@@ -965,8 +1012,12 @@ fn restore_remote_entry_if_needed(store: &DecisionStore, artifact_id: &str) {
     ) else {
         return;
     };
+    // Older store records written before `config_top_level_key` existed
+    // won't have it — every JSON agent except VS Code used "mcpServers"
+    // at the time, so that's the correct fallback, not a guess.
+    let top_level_key = record.config_top_level_key.as_deref().unwrap_or("mcpServers");
 
-    match restore_remote_entry(config_path, entry_key, snapshot) {
+    match restore_remote_entry(config_path, entry_key, snapshot, top_level_key) {
         Ok(true) => println!(
             "Restored '{}' in {}.",
             sanitize_for_display(entry_key),
@@ -1038,12 +1089,13 @@ fn restore_remote_entry(
     config_path: &Path,
     entry_key: &str,
     snapshot: &serde_json::Value,
+    top_level_key: &str,
 ) -> io::Result<bool> {
     let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml");
     if is_toml {
         restore_remote_entry_toml(config_path, entry_key, snapshot)
     } else {
-        restore_remote_entry_json(config_path, entry_key, snapshot)
+        restore_remote_entry_json(config_path, entry_key, snapshot, top_level_key)
     }
 }
 
@@ -1051,6 +1103,7 @@ fn restore_remote_entry_json(
     config_path: &Path,
     entry_key: &str,
     snapshot: &serde_json::Value,
+    top_level_key: &str,
 ) -> io::Result<bool> {
     let original_text = std::fs::read_to_string(config_path)?;
     let mut json: serde_json::Value = serde_json::from_str(&original_text)
@@ -1060,10 +1113,10 @@ fn restore_remote_entry_json(
         .as_object_mut()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config root is not a JSON object"))?;
     let servers = root
-        .entry("mcpServers")
+        .entry(top_level_key.to_string())
         .or_insert_with(|| serde_json::Value::Object(Default::default()))
         .as_object_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "mcpServers is not an object"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("{top_level_key} is not an object")))?;
 
     if servers.contains_key(entry_key) {
         return Ok(false);
@@ -1431,6 +1484,7 @@ mod tests {
                 remote_entry_snapshot: askme.raw_config_entry.clone(),
                 config_path: Some(config_path.clone()),
                 config_entry_key: Some("askme".to_string()),
+                config_top_level_key: Some("mcpServers".to_string()),
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
@@ -1458,7 +1512,7 @@ mod tests {
         .unwrap();
 
         let snapshot = serde_json::json!({ "type": "http", "url": "https://mcp.linear.app/mcp" });
-        let restored = restore_remote_entry_json(&config_path, "linear", &snapshot).unwrap();
+        let restored = restore_remote_entry_json(&config_path, "linear", &snapshot, "mcpServers").unwrap();
         assert!(restored);
 
         let rewritten: serde_json::Value =
@@ -1467,8 +1521,40 @@ mod tests {
 
         // Idempotent: an already-present entry is left alone, not
         // duplicated or clobbered, and reports "nothing to do."
-        let restored_again = restore_remote_entry_json(&config_path, "linear", &snapshot).unwrap();
+        let restored_again =
+            restore_remote_entry_json(&config_path, "linear", &snapshot, "mcpServers").unwrap();
         assert!(!restored_again);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_json_uses_the_servers_key_for_vscode_copilot() {
+        // Regression test for a real latent bug: this function used to
+        // hardcode "mcpServers" everywhere, which is wrong for VS Code's
+        // Copilot Chat extension (top-level key "servers" -- see
+        // ConfigSourceKind::VsCodeCopilotMcpJson's doc comment). Proves
+        // the fix actually inserts under "servers", not "mcpServers".
+        let dir = unique_temp_dir("remote-restore-vscode");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({ "servers": {} })).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = serde_json::json!({ "type": "http", "url": "https://mcp.example.com/mcp" });
+        let restored = restore_remote_entry_json(&config_path, "example", &snapshot, "servers").unwrap();
+        assert!(restored);
+
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(rewritten["servers"]["example"], snapshot);
+        assert!(
+            rewritten.get("mcpServers").is_none(),
+            "must not create a spurious mcpServers key alongside the real servers one"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1652,6 +1738,7 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
+                config_top_level_key: None,
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
             })

@@ -51,6 +51,7 @@ impl AgentAdapter for AntigravityAdapter {
             &project_root.join(".agents").join("mcp_config.json"),
             project_root,
             ConfigSourceKind::AntigravityMcpJson,
+            "mcpServers",
             "antigravity",
             "Antigravity",
         ));
@@ -59,6 +60,7 @@ impl AgentAdapter for AntigravityAdapter {
                 &h.join(".gemini").join("config").join("mcp_config.json"),
                 h,
                 ConfigSourceKind::AntigravityMcpJson,
+                "mcpServers",
                 "antigravity",
                 "Antigravity",
             ));

@@ -59,6 +59,7 @@ impl AgentAdapter for WindsurfAdapter {
                 &h.join(".codeium").join("windsurf").join("mcp_config.json"),
                 h,
                 ConfigSourceKind::WindsurfMcpJson,
+                "mcpServers",
                 "windsurf",
                 "Windsurf",
             ));

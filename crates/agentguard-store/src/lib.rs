@@ -118,6 +118,17 @@ pub struct DecisionRecord {
     /// artifacts.
     #[serde(default)]
     pub config_entry_key: Option<String>,
+    /// The JSON key the server map sits under in `config_path` —
+    /// `"mcpServers"` for every JSON-format agent except VS Code's
+    /// Copilot Chat extension (`"servers"`); `None` for a TOML config
+    /// (Codex) or a non-remote artifact. This crate stays deliberately
+    /// unaware of `agentguard-adapters`' `ConfigSourceKind` enum (kept
+    /// dependency-light — see this module's doc comment), so the actual
+    /// key string is captured here as plain data at scan time instead,
+    /// letting `agentguard allow`'s restore path insert a remote entry
+    /// back under the correct key without needing to re-derive it.
+    #[serde(default)]
+    pub config_top_level_key: Option<String>,
     /// Where a Skill artifact's directory originally lived (its
     /// `scan_root` at scan time). A Skill has no `PreToolUse`-style
     /// interception point at all — Claude Code's own hooks reference
@@ -351,6 +362,7 @@ mod tests {
             remote_entry_snapshot: None,
             config_path: None,
             config_entry_key: None,
+            config_top_level_key: None,
             quarantine_original_path: None,
             quarantine_current_path: None,
         };
@@ -382,6 +394,7 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
+            config_top_level_key: None,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
@@ -418,6 +431,7 @@ mod tests {
             remote_entry_snapshot: None,
             config_path: None,
             config_entry_key: None,
+            config_top_level_key: None,
             quarantine_original_path: None,
             quarantine_current_path: None,
         }

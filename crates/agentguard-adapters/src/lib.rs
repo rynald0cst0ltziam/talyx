@@ -11,8 +11,11 @@ pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
+pub mod gemini_cli;
+pub mod github_copilot_cli;
 mod mcp_config;
 pub mod unknown;
+pub mod vscode_copilot;
 pub mod windsurf;
 
 use agentguard_core::Artifact;
@@ -131,6 +134,36 @@ pub enum ConfigSourceKind {
     /// directory name — worth calling out since guessing the two were
     /// the same thing would have been an easy, wrong assumption.
     AntigravityMcpJson,
+    /// Same `mcpServers` JSON shape again, but Gemini CLI's own
+    /// `settings.json` — `.gemini/settings.json` (project scope) or
+    /// `~/.gemini/settings.json` (user scope) as of this writing.
+    /// Verified 2026-09-05 against google-gemini/gemini-cli's own docs
+    /// (github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-
+    /// server.md). `settings.json` carries other Gemini CLI settings
+    /// alongside `mcpServers` — irrelevant here, since parsing only ever
+    /// looks at that one key. Distinct from Antigravity's config despite
+    /// sharing a `~/.gemini/` parent directory — see
+    /// `AntigravityMcpJson`'s doc comment.
+    GeminiCliSettingsJson,
+    /// GitHub Copilot CLI's own config — `.mcp.json` (project root) is
+    /// deliberately NOT covered by this variant: verified 2026-09-05 that
+    /// `docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/
+    /// add-mcp-servers` documents Copilot CLI reading the SAME `.mcp.json`
+    /// Claude Code's adapter already discovers (`ClaudeCodeMcpServersJson`
+    /// above) — adding a second path check for the identical file would
+    /// double-report every entry in it (the same class of bug this
+    /// codebase already found and fixed once for `.cursorrules`). This
+    /// variant covers only `.github/mcp.json`, Copilot CLI's OTHER,
+    /// non-shared config location, same `{ "mcpServers": {...} }` shape.
+    GitHubCopilotCliMcpJson,
+    /// VS Code's Copilot Chat extension — `.vscode/mcp.json`, workspace
+    /// scope. Verified 2026-09-05 against code.visualstudio.com/docs/
+    /// agents/reference/mcp-configuration: the top-level key is
+    /// `"servers"`, NOT `"mcpServers"` — a genuinely different key name
+    /// from every other variant here, not just a different file path
+    /// (see `parse_mcp_servers_json`'s `top_level_key` parameter, added
+    /// specifically to support this without forking the parser).
+    VsCodeCopilotMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -155,6 +188,9 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(codex::CodexAdapter),
         Box::new(windsurf::WindsurfAdapter),
         Box::new(antigravity::AntigravityAdapter),
+        Box::new(gemini_cli::GeminiCliAdapter),
+        Box::new(github_copilot_cli::GitHubCopilotCliAdapter),
+        Box::new(vscode_copilot::VsCodeCopilotAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

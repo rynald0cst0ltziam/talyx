@@ -58,6 +58,7 @@ impl AgentAdapter for CursorAdapter {
             &project_root.join(".cursor").join("mcp.json"),
             project_root,
             ConfigSourceKind::CursorMcpJson,
+            "mcpServers",
             "cursor",
             "Cursor",
         ));
@@ -66,6 +67,7 @@ impl AgentAdapter for CursorAdapter {
                 &h.join(".cursor").join("mcp.json"),
                 h,
                 ConfigSourceKind::CursorMcpJson,
+                "mcpServers",
                 "cursor",
                 "Cursor",
             ));

@@ -74,6 +74,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
             &project_root.join(".mcp.json"),
             project_root,
             ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "mcpServers",
             "claude-code",
             "Claude Code",
         ));
@@ -82,6 +83,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 &h.join(".claude.json"),
                 h,
                 ConfigSourceKind::ClaudeCodeMcpServersJson,
+                "mcpServers",
                 "claude-code",
                 "Claude Code",
             ));
@@ -350,6 +352,7 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
+                config_top_level_key: None,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })

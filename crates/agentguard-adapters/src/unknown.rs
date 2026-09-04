@@ -29,7 +29,6 @@ const GENERIC_MARKERS: &[&str] = &[
     ".zedrules",
     ".mcprules",
     "AGENTS.md",
-    "GEMINI.md",
     "CONVENTIONS.md",
     ".goose",
     ".opencode",
