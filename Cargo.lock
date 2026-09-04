@@ -7,9 +7,11 @@ name = "agentguard-adapters"
 version = "0.1.0"
 dependencies = [
  "agentguard-core",
+ "agentguard-store",
  "dirs",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

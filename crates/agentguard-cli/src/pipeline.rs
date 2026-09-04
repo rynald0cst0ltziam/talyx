@@ -3,7 +3,7 @@
 //! what counts as "found" or how it's scored.
 
 use agentguard_adapters::{all_adapters, ConfigSource, DiscoveredArtifact, LaunchCommand};
-use agentguard_core::{Artifact, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
+use agentguard_core::{Artifact, ArtifactKind, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
 use agentguard_risk::RiskEngine;
 use std::path::Path;
 
@@ -65,6 +65,25 @@ pub fn collect(
                 // drift-checked until BUILD_PLAN.md §7's ecosystem scan
                 // gives us something to hash.
                 artifact.content_hash = agentguard_scanner::hash_path(root);
+            }
+
+            // Hooks have no scan_root (their "content" is a config value,
+            // not a file) but their command is still inspectable text —
+            // scan it the same way a script's contents get scanned, so
+            // hook risk scoring reflects what the hook actually does
+            // instead of always landing on the flat declared baseline
+            // (Hook + ExecuteShell) regardless of content. Also hashed
+            // here for the same reason a script file is hashed: without
+            // it, drift detection (init.rs) has no baseline to compare a
+            // changed hook command against.
+            if artifact.kind == ArtifactKind::Hook {
+                if let Some(l) = &launch {
+                    artifact.capabilities.extend(agentguard_scanner::scan_shell_command(
+                        &l.command,
+                        &display_location,
+                    ));
+                    artifact.content_hash = Some(agentguard_scanner::hash_text(&l.command));
+                }
             }
 
             let breakdown = engine.score(&artifact);

@@ -77,6 +77,18 @@ pub enum ConfigSourceKind {
     /// them as one thing here would undo the "adding a variant forces a
     /// deliberate decision" property this enum exists for.
     CursorMcpJson,
+    /// A Claude Code `settings.json` hooks entry — nested under
+    /// `hooks.<EventName>[].hooks[].command`, a single shell-command
+    /// STRING (not an argv array; Claude Code's own docs show shell
+    /// variable expansion like `$CLAUDE_PROJECT_DIR` inside it, confirming
+    /// it runs through a real shell, unlike an MCP server's `command` +
+    /// `args`). `entry_key` for this kind is `"hook-<index>"`, the same
+    /// stable traversal-order index used to build the artifact id in
+    /// claude_code.rs's `parse_hooks` — the rewrite step in
+    /// agentguard-cli's init.rs walks the tree in that identical order to
+    /// find the matching occurrence, since there's no flat map key to
+    /// look up the way there is for `mcpServers`.
+    ClaudeCodeHooksJson,
 }
 
 pub trait AgentAdapter {

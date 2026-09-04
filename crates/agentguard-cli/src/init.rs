@@ -20,18 +20,9 @@ use std::path::{Path, PathBuf};
 /// The env var and flag exist so tests/demos can point at an isolated
 /// store instead of ever touching the real machine-wide one.
 pub fn resolve_store(store_override: Option<PathBuf>) -> DecisionStore {
-    if let Some(path) = store_override {
-        return DecisionStore::open_at(path);
-    }
-    if let Ok(path) = std::env::var("AGENTGUARD_STORE") {
-        return DecisionStore::open_at(PathBuf::from(path));
-    }
-    match DecisionStore::open_default() {
-        Ok(store) => store,
-        Err(e) => {
-            eprintln!("agentguard: cannot determine decision store location: {e}");
-            std::process::exit(1);
-        }
+    match store_override {
+        Some(path) => DecisionStore::open_at(path),
+        None => DecisionStore::resolve(),
     }
 }
 
@@ -116,6 +107,21 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         reasons.push(reason);
     }
 
+    // Only for hooks — see DecisionRecord.shell_command's doc comment for
+    // why this travels through the store instead of the rewritten config
+    // text: embedding it there would let an outer shell re-interpret any
+    // metacharacters in the command before the shim ever runs.
+    let is_hook_shell_command = s
+        .config_source
+        .as_ref()
+        .map(|cs| cs.kind == ConfigSourceKind::ClaudeCodeHooksJson)
+        .unwrap_or(false);
+    let shell_command = if is_hook_shell_command {
+        s.launch.as_ref().map(|l| l.command.clone())
+    } else {
+        None
+    };
+
     DecisionRecord {
         artifact_id: s.artifact.id.clone(),
         name: s.artifact.name.clone(),
@@ -127,6 +133,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         reasons,
         content_hash: s.artifact.content_hash.clone(),
         capability_snapshot: s.artifact.capability_set().into_iter().collect(),
+        shell_command,
         manually_approved: false, // upsert_preserving_approval fixes this up
     }
 }
@@ -149,11 +156,20 @@ struct RewriteOutcome {
     backup_path: Option<PathBuf>,
 }
 
-/// Rewrites the `mcpServers` entries in one config file so each of
-/// `artifacts` launches through the shim instead of directly. Backs up the
-/// original file (once — never overwritten on subsequent runs) before the
-/// first write. Idempotent: an entry already pointing at the shim is left
-/// alone and counted as `already_protected`.
+/// Rewrites one config file so each of `artifacts` launches through the
+/// shim instead of directly. Backs up the original file (once — never
+/// overwritten on subsequent runs) before the first write. Idempotent: an
+/// entry already pointing at the shim is left alone and counted as
+/// `already_protected`.
+///
+/// Dispatches per `ConfigSourceKind` because the two rewritable shapes are
+/// structurally different: `mcpServers` is a flat `{name: {command,
+/// args}}` map (one lookup); Claude Code's hooks config is a nested tree
+/// with no flat key to look up by, so it's walked in the same order
+/// discovery used to assign each hook's index-based id. Matching
+/// exhaustively (no wildcard) means a future ConfigSourceKind variant with
+/// a different shape forces a deliberate decision here, not a silent (and
+/// wrong) fallthrough to one of these.
 fn rewrite_config(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
@@ -162,60 +178,29 @@ fn rewrite_config(
     let original_text = std::fs::read_to_string(config_path)?;
     let mut json: serde_json::Value = serde_json::from_str(&original_text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-    let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
-        return Ok(RewriteOutcome {
-            newly_protected: 0,
-            already_protected: 0,
-            backup_path: None,
-        });
-    };
-
     let shim_str = shim_path.display().to_string();
-    let mut newly_protected = 0;
-    let mut already_protected = 0;
 
+    let mut mcp_artifacts = Vec::new();
+    let mut hook_artifacts = Vec::new();
     for s in artifacts {
-        // Both variants use the identical `mcpServers` JSON shape the
-        // rewrite logic below already handles generically. Matching
-        // exhaustively (no wildcard) means a future ConfigSourceKind
-        // variant with a DIFFERENT shape forces a deliberate decision
-        // here, not a silent (and wrong) fallthrough to this same logic.
         let Some(config_source) = &s.config_source else {
             continue;
         };
+        if s.launch.is_none() {
+            continue;
+        }
         match config_source.kind {
-            ConfigSourceKind::ClaudeCodeMcpServersJson | ConfigSourceKind::CursorMcpJson => {}
+            ConfigSourceKind::ClaudeCodeMcpServersJson | ConfigSourceKind::CursorMcpJson => {
+                mcp_artifacts.push(*s)
+            }
+            ConfigSourceKind::ClaudeCodeHooksJson => hook_artifacts.push(*s),
         }
-        let Some(launch) = &s.launch else { continue };
-
-        let Some(entry) = servers
-            .get_mut(&config_source.entry_key)
-            .and_then(|v| v.as_object_mut())
-        else {
-            continue;
-        };
-
-        let current_command = entry.get("command").and_then(|c| c.as_str()).unwrap_or("");
-        if current_command == shim_str {
-            already_protected += 1;
-            continue;
-        }
-
-        let mut new_args = vec![
-            serde_json::Value::String(s.artifact.id.clone()),
-            serde_json::Value::String("--".to_string()),
-            serde_json::Value::String(launch.command.clone()),
-        ];
-        new_args.extend(launch.args.iter().cloned().map(serde_json::Value::String));
-
-        entry.insert(
-            "command".to_string(),
-            serde_json::Value::String(shim_str.clone()),
-        );
-        entry.insert("args".to_string(), serde_json::Value::Array(new_args));
-        newly_protected += 1;
     }
+
+    let (mcp_new, mcp_already) = rewrite_mcp_servers(&mut json, &mcp_artifacts, &shim_str);
+    let (hook_new, hook_already) = rewrite_hooks(&mut json, &hook_artifacts, &shim_str);
+    let newly_protected = mcp_new + hook_new;
+    let already_protected = mcp_already + hook_already;
 
     if newly_protected == 0 {
         return Ok(RewriteOutcome {
@@ -239,6 +224,157 @@ fn rewrite_config(
         already_protected,
         backup_path: Some(backup_path),
     })
+}
+
+/// Rewrites `{ "mcpServers": { "<entry_key>": { command, args } } }`
+/// entries — a flat map, one lookup per artifact.
+fn rewrite_mcp_servers(
+    json: &mut serde_json::Value,
+    artifacts: &[&ScannedArtifact],
+    shim_str: &str,
+) -> (usize, usize) {
+    let mut newly_protected = 0;
+    let mut already_protected = 0;
+    let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+        return (0, 0);
+    };
+
+    for s in artifacts {
+        let config_source = s.config_source.as_ref().unwrap(); // filtered by caller
+        let launch = s.launch.as_ref().unwrap(); // filtered by caller
+
+        let Some(entry) = servers
+            .get_mut(&config_source.entry_key)
+            .and_then(|v| v.as_object_mut())
+        else {
+            continue;
+        };
+
+        let current_command = entry.get("command").and_then(|c| c.as_str()).unwrap_or("");
+        if current_command == shim_str {
+            already_protected += 1;
+            continue;
+        }
+
+        let mut new_args = vec![
+            serde_json::Value::String(s.artifact.id.clone()),
+            serde_json::Value::String("--".to_string()),
+            serde_json::Value::String(launch.command.clone()),
+        ];
+        new_args.extend(launch.args.iter().cloned().map(serde_json::Value::String));
+
+        entry.insert(
+            "command".to_string(),
+            serde_json::Value::String(shim_str.to_string()),
+        );
+        entry.insert("args".to_string(), serde_json::Value::Array(new_args));
+        newly_protected += 1;
+    }
+
+    (newly_protected, already_protected)
+}
+
+/// Rewrites Claude Code hook entries. There's no flat key to look up by —
+/// a hook's `entry_key` is `"hook-<i>"`, its index in the same
+/// depth-first, object-then-array traversal order
+/// claude_code.rs's `collect_command_strings` uses to assign it in the
+/// first place — so this walks `json["hooks"]` in that identical order and
+/// rewrites the i-th `"command"` field found for any index we have a
+/// target for.
+fn rewrite_hooks(
+    json: &mut serde_json::Value,
+    artifacts: &[&ScannedArtifact],
+    shim_str: &str,
+) -> (usize, usize) {
+    let mut targets: BTreeMap<usize, &ScannedArtifact> = BTreeMap::new();
+    for s in artifacts {
+        let entry_key = &s.config_source.as_ref().unwrap().entry_key; // filtered by caller
+        if let Some(idx_str) = entry_key.strip_prefix("hook-") {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                targets.insert(idx, s);
+            }
+        }
+    }
+    if targets.is_empty() {
+        return (0, 0);
+    }
+
+    let Some(hooks_val) = json.get_mut("hooks") else {
+        return (0, 0);
+    };
+
+    let mut newly_protected = 0;
+    let mut already_protected = 0;
+    let mut index = 0usize;
+    walk_and_rewrite_hook_commands(
+        hooks_val,
+        &mut index,
+        &targets,
+        shim_str,
+        &mut newly_protected,
+        &mut already_protected,
+    );
+    (newly_protected, already_protected)
+}
+
+fn walk_and_rewrite_hook_commands(
+    value: &mut serde_json::Value,
+    index: &mut usize,
+    targets: &BTreeMap<usize, &ScannedArtifact>,
+    shim_str: &str,
+    newly_protected: &mut usize,
+    already_protected: &mut usize,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let has_command = matches!(map.get("command"), Some(serde_json::Value::String(_)));
+            if has_command {
+                let this_index = *index;
+                *index += 1;
+                if let Some(s) = targets.get(&this_index) {
+                    let current = map.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                    if current.starts_with(&format!("\"{shim_str}\"")) {
+                        *already_protected += 1;
+                    } else {
+                        // Deliberately does NOT embed the real command —
+                        // see DecisionRecord.shell_command's doc comment.
+                        // This string is safe for Claude Code's own shell
+                        // to re-parse: two quoted tokens (no
+                        // metacharacters possible in either — the shim
+                        // path is a filesystem path, the artifact id is
+                        // hash-based, see claude_code.rs's short_hash) and
+                        // a literal flag, nothing else.
+                        let wrapped = format!("\"{shim_str}\" \"{}\" --shell", s.artifact.id);
+                        map.insert("command".to_string(), serde_json::Value::String(wrapped));
+                        *newly_protected += 1;
+                    }
+                }
+            }
+            for v in map.values_mut() {
+                walk_and_rewrite_hook_commands(
+                    v,
+                    index,
+                    targets,
+                    shim_str,
+                    newly_protected,
+                    already_protected,
+                );
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                walk_and_rewrite_hook_commands(
+                    item,
+                    index,
+                    targets,
+                    shim_str,
+                    newly_protected,
+                    already_protected,
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 pub fn run_init(
@@ -300,7 +436,7 @@ pub fn run_init(
 
     if skipped_outside_project > 0 {
         println!(
-            "{skipped_outside_project} MCP server(s) found outside {} (e.g. a user-level config) — NOT rewritten.",
+            "{skipped_outside_project} rewritable artifact(s) found outside {} (e.g. a user-level config) — NOT rewritten.",
             project_root.display()
         );
         println!("Re-run with --include-user-config to also protect those.");
@@ -341,10 +477,10 @@ pub fn run_init(
     }
 
     println!(
-        "{newly_protected_total} MCP server(s) newly routed through the enforcement shim."
+        "{newly_protected_total} artifact(s) (MCP servers / hooks) newly routed through the enforcement shim."
     );
     if already_protected_total > 0 {
-        println!("{already_protected_total} MCP server(s) already protected (unchanged).");
+        println!("{already_protected_total} artifact(s) already protected (unchanged).");
     }
     if !backups.is_empty() {
         println!("\nOriginal config(s) backed up before the first rewrite:");

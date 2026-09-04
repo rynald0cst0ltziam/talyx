@@ -65,6 +65,22 @@ pub struct DecisionRecord {
     /// from "content changed AND now does something new and dangerous."
     #[serde(default)]
     pub capability_snapshot: Vec<Capability>,
+    /// The real shell command for a hook (`ConfigSourceKind::
+    /// ClaudeCodeHooksJson`) artifact — `None` for anything else. Exists
+    /// because the wrapped config entry `agentguard init` writes for a
+    /// hook deliberately does NOT contain this text: a hook's `command` is
+    /// a shell-syntax string that Claude Code itself re-parses through a
+    /// real shell when the hook fires, so embedding the original command
+    /// (which may contain pipes, redirects, etc.) directly in that
+    /// rewritten string would let the OUTER shell interpret those
+    /// metacharacters before agentguard-shim ever runs — found live, not
+    /// hypothetically: a fixture hook command containing `|` caused
+    /// cmd.exe to split the rewritten line into a pipeline and run later
+    /// stages directly, bypassing the shim's block entirely. The shim
+    /// instead looks up the real command from here (this store, never
+    /// re-parsed by a shell) after deciding ALLOW.
+    #[serde(default)]
+    pub shell_command: Option<String>,
     /// Set only by an explicit human action (`agentguard allow <id>`),
     /// never inferred. The shim treats an approved record as ALLOW
     /// regardless of what the engine's own decision says, which is the
@@ -116,6 +132,21 @@ impl DecisionStore {
     /// real machine-wide one.
     pub fn open_at(path: PathBuf) -> Self {
         Self { path }
+    }
+
+    /// `$AGENTGUARD_STORE` env var if set, else `open_default()`, falling
+    /// back to a store in the current directory on the (very rare) case
+    /// `open_default()` can't determine a home directory — resolving a
+    /// store location should never itself be a hard failure for a
+    /// read-only lookup. This is the single shared resolution policy
+    /// every caller that just wants "the store" (as opposed to explicit
+    /// control, like the CLI's `--store` flag) should use, rather than
+    /// each reimplementing the same env-var-then-default logic.
+    pub fn resolve() -> Self {
+        if let Ok(path) = std::env::var("AGENTGUARD_STORE") {
+            return Self::open_at(PathBuf::from(path));
+        }
+        Self::open_default().unwrap_or_else(|_| Self::open_at(PathBuf::from(".agentguard-decisions.json")))
     }
 
     fn load(&self) -> StoreFile {
@@ -200,6 +231,7 @@ mod tests {
             reasons: vec!["test evidence".to_string()],
             content_hash: Some("abc123".to_string()),
             capability_snapshot: vec![Capability::NetworkExternal],
+            shell_command: None,
             manually_approved: false,
         };
         store.upsert(record.clone()).unwrap();
@@ -225,6 +257,7 @@ mod tests {
                 reasons: vec![],
                 content_hash: None,
                 capability_snapshot: vec![],
+                shell_command: None,
                 manually_approved: false,
             })
             .unwrap();
