@@ -81,6 +81,7 @@ impl AgentAdapter for UnknownAgentAdapter {
                     artifact,
                     launch: None,
                     config_source: None,
+                    raw_config_entry: None,
                 });
             }
         }

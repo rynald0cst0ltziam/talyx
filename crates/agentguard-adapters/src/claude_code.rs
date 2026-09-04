@@ -202,6 +202,7 @@ fn parse_hooks(path: &Path) -> Vec<DiscoveredArtifact> {
                 kind: ConfigSourceKind::ClaudeCodeHooksJson,
                 entry_key: format!("hook-{i}"),
             }),
+            raw_config_entry: None,
         });
     }
 
@@ -306,6 +307,7 @@ fn discover_skills(dir: &Path) -> Vec<DiscoveredArtifact> {
                 artifact,
                 launch: None,
                 config_source: None,
+                raw_config_entry: None,
             });
         }
     }
@@ -345,6 +347,9 @@ mod tests {
                 capability_snapshot: vec![],
                 shell_command: Some(shell_command.to_string()),
                 manually_approved: false,
+                remote_entry_snapshot: None,
+                config_path: None,
+                config_entry_key: None,
             })
             .unwrap();
         store

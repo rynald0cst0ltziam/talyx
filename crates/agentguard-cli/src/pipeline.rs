@@ -19,6 +19,11 @@ pub struct ScannedArtifact {
     /// `DiscoveredArtifact`.
     pub launch: Option<LaunchCommand>,
     pub config_source: Option<ConfigSource>,
+    /// The original config entry for a remote MCP server (see
+    /// agentguard-adapters' `DiscoveredArtifact::raw_config_entry` doc
+    /// comment) — carried through so `init.rs` can snapshot it into the
+    /// decision store for `agentguard allow` to restore from later.
+    pub raw_config_entry: Option<serde_json::Value>,
 }
 
 /// Runs discovery + static scan + risk scoring for every detected adapter.
@@ -42,6 +47,7 @@ pub fn collect(
                 display_location,
                 launch,
                 config_source,
+                raw_config_entry,
             } = discovered;
 
             if let Some(root) = &scan_root {
@@ -99,6 +105,7 @@ pub fn collect(
                 location: display_location,
                 launch,
                 config_source,
+                raw_config_entry,
             });
         }
     }

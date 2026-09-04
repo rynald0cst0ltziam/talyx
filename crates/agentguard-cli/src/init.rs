@@ -123,6 +123,22 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         None
     };
 
+    // Remote MCP servers (no `launch` — no local process to wrap) are the
+    // only artifacts with anything to snapshot here: see DecisionRecord's
+    // `remote_entry_snapshot` doc comment for why `agentguard allow` needs
+    // this saved now, at scan time, rather than re-reading the config
+    // later (by the time it's approved the entry may already be gone).
+    let is_remote = s.launch.is_none() && s.config_source.is_some();
+    let (remote_entry_snapshot, config_path, config_entry_key) = if is_remote {
+        (
+            s.raw_config_entry.clone(),
+            s.config_source.as_ref().map(|cs| cs.path.clone()),
+            s.config_source.as_ref().map(|cs| cs.entry_key.clone()),
+        )
+    } else {
+        (None, None, None)
+    };
+
     DecisionRecord {
         artifact_id: s.artifact.id.clone(),
         name: s.artifact.name.clone(),
@@ -136,6 +152,9 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         capability_snapshot: s.artifact.capability_set().into_iter().collect(),
         shell_command,
         manually_approved: false, // upsert_preserving_approval fixes this up
+        remote_entry_snapshot,
+        config_path,
+        config_entry_key,
     }
 }
 
@@ -154,14 +173,24 @@ fn locate_shim() -> Option<PathBuf> {
 struct RewriteOutcome {
     newly_protected: usize,
     already_protected: usize,
+    /// Remote MCP entries removed from the live config because their
+    /// effective decision is BLOCK/QUARANTINE or an unapproved ASK — see
+    /// `remove_blocked_remote_entries_json`/`_toml`'s doc comment.
+    removed_remote: usize,
     backup_path: Option<PathBuf>,
 }
 
 /// Rewrites one config file so each of `artifacts` launches through the
-/// shim instead of directly. Backs up the original file (once — never
-/// overwritten on subsequent runs) before the first write. Idempotent: an
-/// entry already pointing at the shim is left alone and counted as
-/// `already_protected`.
+/// shim instead of directly, and removes any remote MCP entry whose
+/// effective decision doesn't allow it to run. Backs up the original file
+/// (once — never overwritten on subsequent runs) before the first write.
+/// Idempotent: an entry already pointing at the shim is left alone and
+/// counted as `already_protected`.
+///
+/// `shim_path` is `None` when `agentguard-shim` couldn't be located next
+/// to this binary — local MCP servers and hooks can't be routed through
+/// enforcement in that case, but remote-entry removal doesn't need the
+/// shim at all (there's no process to launch), so it still proceeds.
 ///
 /// Dispatches to a JSON path (Claude Code / Cursor's `mcpServers`, Claude
 /// Code's hooks tree) or a TOML path (Codex's `[mcp_servers.*]`) based on
@@ -172,7 +201,8 @@ struct RewriteOutcome {
 fn rewrite_config(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
-    shim_path: &Path,
+    shim_path: Option<&Path>,
+    store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let is_toml = artifacts.iter().any(|s| {
         s.config_source
@@ -181,10 +211,32 @@ fn rewrite_config(
             .unwrap_or(false)
     });
     if is_toml {
-        rewrite_config_toml(config_path, artifacts, shim_path)
+        rewrite_config_toml(config_path, artifacts, shim_path, store)
     } else {
-        rewrite_config_json(config_path, artifacts, shim_path)
+        rewrite_config_json(config_path, artifacts, shim_path, store)
     }
+}
+
+/// Effective decision for a remote artifact per `store`, folding in manual
+/// approval — falls back to the just-computed scan decision if the store
+/// write somehow didn't land (should not happen in practice: `run_init`
+/// always upserts every scanned artifact before rewriting configs).
+fn effective_remote_decision(store: &DecisionStore, s: &ScannedArtifact) -> Decision {
+    store
+        .get(&s.artifact.id)
+        .map(|r| r.effective_decision())
+        .unwrap_or(s.decision)
+}
+
+/// A remote entry with this effective decision has nothing physically
+/// stopping it from being reached — there is no local process for the shim
+/// to intercept — so the only enforcement point is removing it from the
+/// live config outright. Ask is included: an ASK the user hasn't approved
+/// yet must not be reachable, same as Block/Quarantine; `effective_decision`
+/// already turns an APPROVED Ask into Allow, so this only ever fires for
+/// genuinely unapproved entries.
+fn remote_decision_requires_removal(decision: Decision) -> bool {
+    matches!(decision, Decision::Block | Decision::Quarantine | Decision::Ask)
 }
 
 /// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and Claude
@@ -195,27 +247,34 @@ fn rewrite_config(
 fn rewrite_config_json(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
-    shim_path: &Path,
+    shim_path: Option<&Path>,
+    store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
     let mut json: serde_json::Value = serde_json::from_str(&original_text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let shim_str = shim_path.display().to_string();
+    let shim_str = shim_path.map(|p| p.display().to_string());
 
     let mut mcp_artifacts = Vec::new();
     let mut hook_artifacts = Vec::new();
+    let mut remote_artifacts = Vec::new();
     for s in artifacts {
         let Some(config_source) = &s.config_source else {
             continue;
         };
-        if s.launch.is_none() {
-            continue;
-        }
         match config_source.kind {
             ConfigSourceKind::ClaudeCodeMcpServersJson | ConfigSourceKind::CursorMcpJson => {
-                mcp_artifacts.push(*s)
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
             }
-            ConfigSourceKind::ClaudeCodeHooksJson => hook_artifacts.push(*s),
+            ConfigSourceKind::ClaudeCodeHooksJson => {
+                if s.launch.is_some() {
+                    hook_artifacts.push(*s);
+                }
+            }
             // Never reached: rewrite_config routes any group containing a
             // Codex artifact to rewrite_config_toml instead, and a group
             // is always homogeneous. Matched anyway so a shape genuinely
@@ -225,15 +284,23 @@ fn rewrite_config_json(
         }
     }
 
-    let (mcp_new, mcp_already) = rewrite_mcp_servers(&mut json, &mcp_artifacts, &shim_str);
-    let (hook_new, hook_already) = rewrite_hooks(&mut json, &hook_artifacts, &shim_str);
+    let (mcp_new, mcp_already) = match &shim_str {
+        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s),
+        None => (0, 0),
+    };
+    let (hook_new, hook_already) = match &shim_str {
+        Some(s) => rewrite_hooks(&mut json, &hook_artifacts, s),
+        None => (0, 0),
+    };
+    let removed_remote = remove_blocked_remote_entries_json(&mut json, &remote_artifacts, store);
     let newly_protected = mcp_new + hook_new;
     let already_protected = mcp_already + hook_already;
 
-    if newly_protected == 0 {
+    if newly_protected == 0 && removed_remote == 0 {
         return Ok(RewriteOutcome {
             newly_protected: 0,
             already_protected,
+            removed_remote: 0,
             backup_path: None,
         });
     }
@@ -250,8 +317,42 @@ fn rewrite_config_json(
     Ok(RewriteOutcome {
         newly_protected,
         already_protected,
+        removed_remote,
         backup_path: Some(backup_path),
     })
+}
+
+/// Removes each remote artifact's entry from the (already-parsed)
+/// `mcpServers` map when its effective decision doesn't allow it to run —
+/// see `remote_decision_requires_removal`. There's no shim to route a
+/// remote server through (no local process to launch), so physically
+/// deleting the entry from the live config is the only interception point:
+/// the agent simply can't connect to a server that isn't listed. The
+/// removed value was already snapshotted into the decision store at scan
+/// time (`record_for`'s `remote_entry_snapshot`), so `agentguard allow`
+/// can put it back later without needing this file to still contain it.
+fn remove_blocked_remote_entries_json(
+    json: &mut serde_json::Value,
+    remote_artifacts: &[&ScannedArtifact],
+    store: &DecisionStore,
+) -> usize {
+    if remote_artifacts.is_empty() {
+        return 0;
+    }
+    let Some(servers) = json.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for s in remote_artifacts {
+        let config_source = s.config_source.as_ref().unwrap(); // filtered by caller
+        if !remote_decision_requires_removal(effective_remote_decision(store, s)) {
+            continue;
+        }
+        if servers.remove(&config_source.entry_key).is_some() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// TOML path: Codex's `[mcp_servers.<entry_key>]` — structurally the same
@@ -265,7 +366,8 @@ fn rewrite_config_json(
 fn rewrite_config_toml(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
-    shim_path: &Path,
+    shim_path: Option<&Path>,
+    store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
     let mut doc = agentguard_adapters::codex::parse_toml_leniently(&original_text).ok_or_else(|| {
@@ -274,12 +376,15 @@ fn rewrite_config_toml(
             "could not parse config.toml, even with the lenient backslash repair",
         )
     })?;
-    let shim_str = shim_path.display().to_string();
+    let shim_str = shim_path.map(|p| p.display().to_string());
 
     let mut newly_protected = 0;
     let mut already_protected = 0;
 
-    if let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
+    if let (Some(servers), Some(shim_str)) = (
+        doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()),
+        &shim_str,
+    ) {
         for s in artifacts {
             let Some(config_source) = &s.config_source else {
                 continue;
@@ -297,7 +402,7 @@ fn rewrite_config_toml(
             };
 
             let current_command = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            if current_command == shim_str {
+            if current_command == shim_str.as_str() {
                 already_protected += 1;
                 continue;
             }
@@ -315,10 +420,24 @@ fn rewrite_config_toml(
         }
     }
 
-    if newly_protected == 0 {
+    let remote_artifacts: Vec<&ScannedArtifact> = artifacts
+        .iter()
+        .filter(|s| {
+            s.launch.is_none()
+                && s.config_source
+                    .as_ref()
+                    .map(|cs| cs.kind == ConfigSourceKind::CodexMcpServersToml)
+                    .unwrap_or(false)
+        })
+        .copied()
+        .collect();
+    let removed_remote = remove_blocked_remote_entries_toml(&mut doc, &remote_artifacts, store);
+
+    if newly_protected == 0 && removed_remote == 0 {
         return Ok(RewriteOutcome {
             newly_protected: 0,
             already_protected,
+            removed_remote: 0,
             backup_path: None,
         });
     }
@@ -335,8 +454,36 @@ fn rewrite_config_toml(
     Ok(RewriteOutcome {
         newly_protected,
         already_protected,
+        removed_remote,
         backup_path: Some(backup_path),
     })
+}
+
+/// TOML equivalent of `remove_blocked_remote_entries_json` — see its doc
+/// comment for why removal (not a shim wrap) is the enforcement mechanism
+/// for remote MCP servers.
+fn remove_blocked_remote_entries_toml(
+    doc: &mut toml::Value,
+    remote_artifacts: &[&ScannedArtifact],
+    store: &DecisionStore,
+) -> usize {
+    if remote_artifacts.is_empty() {
+        return 0;
+    }
+    let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for s in remote_artifacts {
+        let config_source = s.config_source.as_ref().unwrap(); // filtered by caller
+        if !remote_decision_requires_removal(effective_remote_decision(store, s)) {
+            continue;
+        }
+        if servers.remove(&config_source.entry_key).is_some() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Rewrites `{ "mcpServers": { "<entry_key>": { command, args } } }`
@@ -528,10 +675,16 @@ pub fn run_init(
     // side effect of scoping this to one project. This was a real bug, not
     // a hypothetical one: an early version of this command rewrote the
     // live ~/.claude.json on the machine it was built on.
+    // Includes remote MCP entries (`launch: None`) as well as local
+    // MCP-server/hook artifacts (`launch: Some`) — a remote entry has no
+    // process for the shim to wrap, but it still needs to go through this
+    // same per-config-file rewrite pass so a BLOCK/unapproved-ASK entry
+    // gets physically removed from the live config (see rewrite_config's
+    // doc comment).
     let mut by_config: BTreeMap<PathBuf, Vec<&ScannedArtifact>> = BTreeMap::new();
     let mut skipped_outside_project = 0usize;
     for s in &scanned {
-        if let (Some(_), Some(cs)) = (&s.launch, &s.config_source) {
+        if let Some(cs) = &s.config_source {
             if include_user_config || cs.path.starts_with(&project_root) {
                 by_config.entry(cs.path.clone()).or_default().push(s);
             } else {
@@ -561,24 +714,29 @@ pub fn run_init(
         return;
     }
 
-    let Some(shim_path) = locate_shim() else {
+    // Missing shim only blocks local MCP-server/hook wrapping — remote
+    // MCP entries have no local process for it to wrap in the first
+    // place, so removing a blocked/unapproved one from the config still
+    // goes ahead below.
+    let shim_path = locate_shim();
+    if shim_path.is_none() {
         eprintln!(
-            "\nagentguard: could not find agentguard-shim next to this executable — enforcement was NOT wired."
+            "\nagentguard: could not find agentguard-shim next to this executable — local MCP servers and hooks were NOT routed through enforcement."
         );
-        eprintln!("(the decision cache above was still written; `agentguard scan`/`status` still work.)");
-        print_risk_summary(&scanned);
-        return;
-    };
+        eprintln!("(remote MCP server blocking still applies; the decision cache above was still written.)");
+    }
 
     let mut newly_protected_total = 0;
     let mut already_protected_total = 0;
+    let mut removed_remote_total = 0;
     let mut backups = Vec::new();
 
     for (config_path, artifacts) in &by_config {
-        match rewrite_config(config_path, artifacts, &shim_path) {
+        match rewrite_config(config_path, artifacts, shim_path.as_deref(), &store) {
             Ok(outcome) => {
                 newly_protected_total += outcome.newly_protected;
                 already_protected_total += outcome.already_protected;
+                removed_remote_total += outcome.removed_remote;
                 if let Some(b) = outcome.backup_path {
                     backups.push(b);
                 }
@@ -594,6 +752,12 @@ pub fn run_init(
     );
     if already_protected_total > 0 {
         println!("{already_protected_total} artifact(s) already protected (unchanged).");
+    }
+    if removed_remote_total > 0 {
+        println!(
+            "{removed_remote_total} remote MCP server entrie(s) removed from config (blocked or awaiting approval)."
+        );
+        println!("Run `agentguard allow <id>` to approve and restore one.");
     }
     if !backups.is_empty() {
         println!("\nOriginal config(s) backed up before the first rewrite:");
@@ -624,6 +788,7 @@ pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
         Ok(true) => {
             println!("Approved '{artifact_id}'.");
             println!("It will be allowed to run until it changes (a different score/decision on the next scan resets this).");
+            restore_remote_entry_if_needed(&store, artifact_id);
         }
         Ok(false) => {
             eprintln!(
@@ -636,6 +801,126 @@ pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
             std::process::exit(1);
         }
     }
+}
+
+/// After approving a remote MCP server, put its entry back if `agentguard
+/// init` previously removed it from the live config — see
+/// `DecisionRecord::remote_entry_snapshot`'s doc comment for why this is
+/// the only way to restore it (discovery can no longer find an entry
+/// that's no longer in the file). A no-op for any non-remote artifact
+/// (those fields are `None`) and for a remote entry that was never
+/// removed in the first place (still present — nothing to do).
+fn restore_remote_entry_if_needed(store: &DecisionStore, artifact_id: &str) {
+    let Some(record) = store.get(artifact_id) else {
+        return;
+    };
+    let (Some(snapshot), Some(config_path), Some(entry_key)) = (
+        &record.remote_entry_snapshot,
+        &record.config_path,
+        &record.config_entry_key,
+    ) else {
+        return;
+    };
+
+    match restore_remote_entry(config_path, entry_key, snapshot) {
+        Ok(true) => println!(
+            "Restored '{}' in {}.",
+            sanitize_for_display(entry_key),
+            config_path.display()
+        ),
+        Ok(false) => {} // already present -- nothing to restore
+        Err(e) => eprintln!(
+            "agentguard: approved, but failed to restore the config entry at {}: {e}",
+            config_path.display()
+        ),
+    }
+}
+
+/// Re-inserts `entry_key: snapshot` into `config_path`'s MCP-servers map if
+/// it's missing, dispatching on JSON vs TOML by file extension (the same
+/// two shapes `rewrite_config` handles; a `.toml` config is Codex's, every
+/// other config in this codebase is one of the two JSON shapes). Returns
+/// `Ok(false)` — not an error — when the entry is already present, so the
+/// caller can tell "nothing to do" apart from "something went wrong."
+fn restore_remote_entry(
+    config_path: &Path,
+    entry_key: &str,
+    snapshot: &serde_json::Value,
+) -> io::Result<bool> {
+    let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml");
+    if is_toml {
+        restore_remote_entry_toml(config_path, entry_key, snapshot)
+    } else {
+        restore_remote_entry_json(config_path, entry_key, snapshot)
+    }
+}
+
+fn restore_remote_entry_json(
+    config_path: &Path,
+    entry_key: &str,
+    snapshot: &serde_json::Value,
+) -> io::Result<bool> {
+    let original_text = std::fs::read_to_string(config_path)?;
+    let mut json: serde_json::Value = serde_json::from_str(&original_text)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let root = json
+        .as_object_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config root is not a JSON object"))?;
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::Value::Object(Default::default()))
+        .as_object_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "mcpServers is not an object"))?;
+
+    if servers.contains_key(entry_key) {
+        return Ok(false);
+    }
+    servers.insert(entry_key.to_string(), snapshot.clone());
+
+    let pretty = serde_json::to_string_pretty(&json)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(config_path, pretty)?;
+    Ok(true)
+}
+
+fn restore_remote_entry_toml(
+    config_path: &Path,
+    entry_key: &str,
+    snapshot: &serde_json::Value,
+) -> io::Result<bool> {
+    let original_text = std::fs::read_to_string(config_path)?;
+    let mut doc = agentguard_adapters::codex::parse_toml_leniently(&original_text).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "could not parse config.toml, even with the lenient backslash repair",
+        )
+    })?;
+
+    let root = doc
+        .as_table_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config root is not a TOML table"))?;
+    let servers = root
+        .entry("mcp_servers")
+        .or_insert_with(|| toml::Value::Table(Default::default()))
+        .as_table_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "mcp_servers is not a table"))?;
+
+    if servers.contains_key(entry_key) {
+        return Ok(false);
+    }
+    let toml_value: toml::Value = serde_json::from_value(snapshot.clone()).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("saved snapshot doesn't convert back to TOML: {e}"),
+        )
+    })?;
+    servers.insert(entry_key.to_string(), toml_value);
+
+    let pretty = toml::to_string_pretty(&doc)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(config_path, pretty)?;
+    Ok(true)
 }
 
 pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
@@ -715,7 +1000,12 @@ mod tests {
                 kind: ConfigSourceKind::CodexMcpServersToml,
                 entry_key: name.to_string(),
             }),
+            raw_config_entry: None,
         }
+    }
+
+    fn temp_store(dir: &Path) -> DecisionStore {
+        DecisionStore::open_at(dir.join("decisions.json"))
     }
 
     #[test]
@@ -729,6 +1019,7 @@ mod tests {
         )
         .unwrap();
         let shim_path = dir.join("agentguard-shim.exe");
+        let store = temp_store(&dir);
 
         let scanned = synthetic_scanned_artifact(
             "example",
@@ -737,7 +1028,8 @@ mod tests {
             vec!["server.js".to_string()],
         );
 
-        let outcome = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        let outcome =
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
         assert_eq!(outcome.already_protected, 0);
         assert!(outcome.backup_path.is_some());
@@ -767,7 +1059,8 @@ mod tests {
 
         // Idempotent: re-running against the now-rewritten file must not
         // re-wrap an already-protected entry.
-        let outcome2 = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        let outcome2 =
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
         assert_eq!(outcome2.newly_protected, 0);
         assert_eq!(outcome2.already_protected, 1);
 
@@ -788,6 +1081,7 @@ mod tests {
         )
         .unwrap();
         let shim_path = dir.join("agentguard-shim.exe");
+        let store = temp_store(&dir);
 
         let scanned = synthetic_scanned_artifact(
             "bastion",
@@ -796,12 +1090,211 @@ mod tests {
             vec![],
         );
 
-        let outcome = rewrite_config_toml(&config_path, &[&scanned], &shim_path).unwrap();
+        let outcome =
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         // And the rewritten file is now genuinely valid TOML, strictly.
         let rewritten = std::fs::read_to_string(&config_path).unwrap();
         assert!(toml::from_str::<toml::Value>(&rewritten).is_ok());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn synthetic_remote_scanned_artifact(
+        name: &str,
+        config_path: PathBuf,
+        url: &str,
+        decision: Decision,
+        band: RiskBand,
+    ) -> ScannedArtifact {
+        let source = ArtifactSource::RemoteUrl(url.to_string());
+        let artifact = Artifact {
+            id: format!("mcp-server:{name}:remote:{url}"),
+            kind: ArtifactKind::McpServer,
+            name: name.to_string(),
+            version: None,
+            publisher: PublisherIdentity::default(),
+            source,
+            content_hash: None,
+            capabilities: vec![],
+            discovered_by: BTreeSet::new(),
+        };
+        ScannedArtifact {
+            agent_name: "claude-code",
+            artifact,
+            breakdown: ScoreBreakdown::default(),
+            band,
+            decision,
+            location: url.to_string(),
+            launch: None,
+            config_source: Some(ConfigSource {
+                path: config_path,
+                kind: ConfigSourceKind::ClaudeCodeMcpServersJson,
+                entry_key: name.to_string(),
+            }),
+            raw_config_entry: Some(serde_json::json!({ "type": "http", "url": url })),
+        }
+    }
+
+    #[test]
+    fn rewrite_config_json_removes_a_blocked_remote_entry_and_keeps_an_allowed_one() {
+        let dir = unique_temp_dir("remote-removal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": {
+                    "evil": { "type": "http", "url": "https://evil.example.com/mcp" },
+                    "good": { "type": "http", "url": "https://good.example.com/mcp" }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let evil = synthetic_remote_scanned_artifact(
+            "evil",
+            config_path.clone(),
+            "https://evil.example.com/mcp",
+            Decision::Block,
+            RiskBand::Critical,
+        );
+        let good = synthetic_remote_scanned_artifact(
+            "good",
+            config_path.clone(),
+            "https://good.example.com/mcp",
+            Decision::Allow,
+            RiskBand::Low,
+        );
+
+        // Store is empty -- effective_remote_decision falls back to each
+        // artifact's own scan decision, same as a fresh first-ever scan.
+        let outcome = rewrite_config_json(&config_path, &[&evil, &good], None, &store).unwrap();
+        assert_eq!(outcome.removed_remote, 1);
+        assert_eq!(outcome.newly_protected, 0);
+        assert!(outcome.backup_path.is_some());
+
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(
+            rewritten["mcpServers"].get("evil").is_none(),
+            "a BLOCK-decision remote entry must be removed from the live config"
+        );
+        assert!(
+            rewritten["mcpServers"].get("good").is_some(),
+            "an ALLOW-decision remote entry must be left in place"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_leaves_a_manually_approved_ask_entry_in_place() {
+        let dir = unique_temp_dir("remote-approved-stays");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": {
+                    "askme": { "type": "http", "url": "https://askme.example.com/mcp" }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let askme = synthetic_remote_scanned_artifact(
+            "askme",
+            config_path.clone(),
+            "https://askme.example.com/mcp",
+            Decision::Ask,
+            RiskBand::Medium,
+        );
+        // Simulate a prior `agentguard allow` -- the raw engine decision
+        // is still Ask, but manual approval makes effective_decision()
+        // Allow, which must keep the entry in the config.
+        store
+            .upsert(DecisionRecord {
+                artifact_id: askme.artifact.id.clone(),
+                name: askme.artifact.name.clone(),
+                band: askme.band,
+                decision: Decision::Ask,
+                total_score: 40,
+                protection_level: ProtectionLevel::Balanced,
+                scanned_at_unix: DecisionRecord::now_unix(),
+                reasons: vec![],
+                content_hash: None,
+                capability_snapshot: vec![],
+                shell_command: None,
+                manually_approved: true,
+                remote_entry_snapshot: askme.raw_config_entry.clone(),
+                config_path: Some(config_path.clone()),
+                config_entry_key: Some("askme".to_string()),
+            })
+            .unwrap();
+
+        let outcome = rewrite_config_json(&config_path, &[&askme], None, &store).unwrap();
+        assert_eq!(outcome.removed_remote, 0);
+
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(rewritten["mcpServers"].get("askme").is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_json_reinserts_a_removed_entry_and_is_idempotent() {
+        let dir = unique_temp_dir("remote-restore-json");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": {} })).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = serde_json::json!({ "type": "http", "url": "https://mcp.linear.app/mcp" });
+        let restored = restore_remote_entry_json(&config_path, "linear", &snapshot).unwrap();
+        assert!(restored);
+
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(rewritten["mcpServers"]["linear"], snapshot);
+
+        // Idempotent: an already-present entry is left alone, not
+        // duplicated or clobbered, and reports "nothing to do."
+        let restored_again = restore_remote_entry_json(&config_path, "linear", &snapshot).unwrap();
+        assert!(!restored_again);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_toml_reinserts_a_removed_entry() {
+        let dir = unique_temp_dir("remote-restore-toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(&config_path, "").unwrap();
+
+        let snapshot = serde_json::json!({ "url": "https://mcp.example.com" });
+        let restored = restore_remote_entry_toml(&config_path, "example", &snapshot).unwrap();
+        assert!(restored);
+
+        let rewritten = std::fs::read_to_string(&config_path).unwrap();
+        let parsed: toml::Value = toml::from_str(&rewritten).unwrap();
+        assert_eq!(
+            parsed.get("mcp_servers").and_then(|v| v.get("example")).and_then(|v| v.get("url")).and_then(|v| v.as_str()),
+            Some("https://mcp.example.com")
+        );
+
+        let restored_again = restore_remote_entry_toml(&config_path, "example", &snapshot).unwrap();
+        assert!(!restored_again);
 
         std::fs::remove_dir_all(&dir).ok();
     }

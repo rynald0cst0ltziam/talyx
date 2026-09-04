@@ -55,11 +55,13 @@ pub(crate) fn parse_mcp_servers_json(
         // vendors ship this way rather than an npm package) that the
         // original version of this parser didn't recognize at all —
         // every remote entry was silently dropped. No local content to
-        // scan or hash; the URL's host is the reputation-relevant
-        // identity, and there's nothing here for `agentguard init` to
-        // route through the shim (there's no local process to wrap).
+        // scan or hash, and no `launch` (no local process for the shim to
+        // wrap) — but `config_source` IS populated: enforcement for a
+        // remote entry means agentguard-cli's init.rs including/excluding
+        // it from the config outright, which still needs to know where
+        // to find it.
         if let Some(url) = cfg.get("url").and_then(|u| u.as_str()) {
-            out.push(remote_mcp_artifact(name, url, cfg, path, agent_id, agent_display_name));
+            out.push(remote_mcp_artifact(name, url, cfg, path, kind, agent_id, agent_display_name));
             continue;
         }
 
@@ -133,6 +135,7 @@ pub(crate) fn parse_mcp_servers_json(
                 kind,
                 entry_key: name.clone(),
             }),
+            raw_config_entry: None,
         });
     }
 
@@ -149,6 +152,7 @@ fn remote_mcp_artifact(
     url: &str,
     cfg: &Value,
     path: &Path,
+    kind: ConfigSourceKind,
     agent_id: &str,
     agent_display_name: &str,
 ) -> DiscoveredArtifact {
@@ -202,7 +206,12 @@ fn remote_mcp_artifact(
         scan_root: None,
         artifact,
         launch: None,
-        config_source: None,
+        config_source: Some(ConfigSource {
+            path: path.to_path_buf(),
+            kind,
+            entry_key: name.to_string(),
+        }),
+        raw_config_entry: serde_json::to_value(cfg).ok(),
     }
 }
 
@@ -486,7 +495,25 @@ mod tests {
         let d = &discovered[0];
         assert_eq!(d.scan_root, None);
         assert_eq!(d.launch, None, "a remote server has no local process to wrap");
-        assert_eq!(d.config_source, None, "a remote server isn't rewritable via the shim");
+        // Not None: there's no shim to route a remote server through (no
+        // local process to wrap), but the entry is still block-or-remove
+        // enforceable at the config-file level, and that path needs
+        // exactly the same "where is this entry, what's its key" info a
+        // local artifact's config_source carries.
+        assert_eq!(
+            d.config_source,
+            Some(ConfigSource {
+                path: config_path.clone(),
+                kind: ConfigSourceKind::ClaudeCodeMcpServersJson,
+                entry_key: "linear".to_string(),
+            }),
+            "a remote server's config_source is still populated -- init.rs uses it to remove/restore the entry"
+        );
+        assert_eq!(
+            d.raw_config_entry,
+            Some(config["mcpServers"]["linear"].clone()),
+            "the original entry must be snapshotted so `agentguard allow` can restore it later"
+        );
         assert_eq!(d.artifact.publisher.name.as_deref(), Some("linear.app"));
         let caps: Vec<_> = d.artifact.capabilities.iter().map(|c| c.capability).collect();
         assert!(caps.contains(&Capability::NetworkExternal));

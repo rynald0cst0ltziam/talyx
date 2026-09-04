@@ -244,13 +244,19 @@ fn parse_codex_mcp_servers(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifa
                 kind: ConfigSourceKind::CodexMcpServersToml,
                 entry_key: name.clone(),
             }),
+            raw_config_entry: None,
         });
     }
 
     out
 }
 
-fn remote_codex_artifact(name: &str, url: &str, table: &toml::Table, path: &Path) -> DiscoveredArtifact {
+fn remote_codex_artifact(
+    name: &str,
+    url: &str,
+    table: &toml::Table,
+    path: &Path,
+) -> DiscoveredArtifact {
     let source = ArtifactSource::RemoteUrl(url.to_string());
 
     let mut capabilities = vec![CapabilityFinding {
@@ -300,7 +306,12 @@ fn remote_codex_artifact(name: &str, url: &str, table: &toml::Table, path: &Path
         scan_root: None,
         artifact,
         launch: None,
-        config_source: None,
+        config_source: Some(ConfigSource {
+            path: path.to_path_buf(),
+            kind: ConfigSourceKind::CodexMcpServersToml,
+            entry_key: name.to_string(),
+        }),
+        raw_config_entry: serde_json::to_value(table).ok(),
     }
 }
 

@@ -39,6 +39,17 @@ pub struct DiscoveredArtifact {
     /// there's no `launch` at all, or the adapter doesn't yet support
     /// rewriting this config shape (see `ConfigSourceKind`'s doc comment).
     pub config_source: Option<ConfigSource>,
+    /// The complete original config entry (the JSON object / TOML table
+    /// for this one server), captured as `serde_json::Value` regardless of
+    /// source format — `toml::Value` round-trips through it cleanly via
+    /// `serde_json::to_value`. Only populated for remote (`ArtifactSource::
+    /// RemoteUrl`) MCP servers, which have no local process for the shim to
+    /// wrap: enforcement for those means removing the entry from the
+    /// config entirely when blocked, and this snapshot is what `agentguard
+    /// allow` restores from — a removed entry is invisible to future
+    /// discovery, so without a saved copy there'd be nothing to restore
+    /// once the config no longer contains it.
+    pub raw_config_entry: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

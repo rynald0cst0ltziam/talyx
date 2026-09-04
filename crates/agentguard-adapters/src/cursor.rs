@@ -104,6 +104,7 @@ fn config_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
         artifact,
         launch: None,
         config_source: None,
+        raw_config_entry: None,
     }
 }
 

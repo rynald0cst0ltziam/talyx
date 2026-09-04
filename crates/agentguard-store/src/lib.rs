@@ -87,6 +87,30 @@ pub struct DecisionRecord {
     /// whole point of the ASK flow — the engine flags it once, a human
     /// decides, and that decision sticks until the artifact changes.
     pub manually_approved: bool,
+    /// The complete original config entry for a remote MCP server (see
+    /// agentguard-adapters' `DiscoveredArtifact::raw_config_entry`),
+    /// snapshotted here at scan time so a later `agentguard allow <id>`
+    /// can restore it. Remote servers have no local process for the shim
+    /// to wrap, so `agentguard init` enforces a BLOCK/unapproved-ASK
+    /// remote entry by removing it from the live config outright — but a
+    /// removed entry is invisible to future discovery (there's nothing
+    /// left on disk to re-scan), so without this snapshot there would be
+    /// no way to bring it back once approved. `None` for every other
+    /// artifact kind.
+    #[serde(default)]
+    pub remote_entry_snapshot: Option<serde_json::Value>,
+    /// The config file this record's remote entry lives in (or was
+    /// removed from), paired with `remote_entry_snapshot` /
+    /// `config_entry_key` — `agentguard allow` reopens exactly this file
+    /// rather than re-running discovery. `None` for non-remote artifacts.
+    #[serde(default)]
+    pub config_path: Option<PathBuf>,
+    /// The key this remote entry is (or was) stored under in
+    /// `config_path` (e.g. the `mcpServers` object key, or the Codex TOML
+    /// `[mcp_servers.<key>]` table name) — `None` for non-remote
+    /// artifacts.
+    #[serde(default)]
+    pub config_entry_key: Option<String>,
 }
 
 impl DecisionRecord {
@@ -233,6 +257,9 @@ mod tests {
             capability_snapshot: vec![Capability::NetworkExternal],
             shell_command: None,
             manually_approved: false,
+            remote_entry_snapshot: None,
+            config_path: None,
+            config_entry_key: None,
         };
         store.upsert(record.clone()).unwrap();
 
@@ -259,6 +286,9 @@ mod tests {
                 capability_snapshot: vec![],
                 shell_command: None,
                 manually_approved: false,
+                remote_entry_snapshot: None,
+                config_path: None,
+                config_entry_key: None,
             })
             .unwrap();
 
