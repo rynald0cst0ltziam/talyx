@@ -8,6 +8,7 @@ members = [
     "crates/agentguard-store",
     "crates/agentguard-shim",
     "crates/agentguard-cli",
+    "crates/agentguard-registry",
 ]
 
 [workspace.package]
@@ -34,6 +35,16 @@ once_cell = "1"
 sha2 = "0.10"
 toml = "0.8"
 psl = "2"
+ureq = { version = "3", features = ["json"] }
+tar = "0.4"
+flate2 = "1"
+# Default features pull in native bzip2/lzma/zstd/xz C dependencies for
+# compression methods a Python wheel never actually uses (wheels use
+# "deflate" or "store" per the wheel spec) -- trimmed to keep the build
+# pure-Rust (no C compiler requirement) and the dependency tree small.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha1 = "0.10"
+base64 = "0.22"
 
 [profile.dev]
 opt-level = 0

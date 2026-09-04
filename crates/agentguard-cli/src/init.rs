@@ -757,12 +757,13 @@ pub fn run_init(
     level: ProtectionLevel,
     store_override: Option<PathBuf>,
     include_user_config: bool,
+    fetch_registry: bool,
 ) {
     let project_root = project
         .canonicalize()
         .unwrap_or_else(|_| project.to_path_buf());
     let engine = RiskEngine::new();
-    let scanned = collect(&project_root, &engine, level);
+    let scanned = collect(&project_root, &engine, level, fetch_registry);
     let store = resolve_store(store_override);
 
     if scanned.is_empty() {
@@ -814,6 +815,7 @@ pub fn run_init(
         scanned.len(),
         level_name = level_name(level)
     );
+    crate::pipeline::print_registry_fetch_summary(&scanned, fetch_registry);
 
     if skipped_outside_project > 0 {
         println!(
@@ -1189,6 +1191,7 @@ mod tests {
             }),
             raw_config_entry: None,
             scan_root: None,
+            registry_fetch: None,
         }
     }
 
@@ -1323,6 +1326,7 @@ mod tests {
             }),
             raw_config_entry: Some(serde_json::json!({ "type": "http", "url": url })),
             scan_root: None,
+            registry_fetch: None,
         }
     }
 
@@ -1519,6 +1523,7 @@ mod tests {
             config_source: None,
             raw_config_entry: None,
             scan_root: Some(scan_root),
+            registry_fetch: None,
         }
     }
 

@@ -3,7 +3,7 @@
 //! what counts as "found" or how it's scored.
 
 use agentguard_adapters::{all_adapters, ConfigSource, DiscoveredArtifact, LaunchCommand};
-use agentguard_core::{Artifact, ArtifactKind, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
+use agentguard_core::{Artifact, ArtifactKind, ArtifactSource, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
 use agentguard_risk::RiskEngine;
 use std::path::{Path, PathBuf};
 
@@ -30,15 +30,32 @@ pub struct ScannedArtifact {
     /// doesn't allow it to load. `None` for artifacts with no local
     /// content (e.g. a remote MCP server).
     pub scan_root: Option<PathBuf>,
+    /// Set only for an `ArtifactSource::Registry` artifact when
+    /// `fetch_registry` was requested for this `collect()` call — `None`
+    /// for every other artifact kind, and also `None` for a registry
+    /// artifact when fetching wasn't requested at all (today's default:
+    /// declared-evidence-only scoring, exactly as before this existed).
+    pub registry_fetch: Option<RegistryFetchOutcome>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RegistryFetchOutcome {
+    Fetched { resolved_version: String },
+    Failed { error: String },
 }
 
 /// Runs discovery + static scan + risk scoring for every detected adapter.
-/// Read-only: never writes the decision store or touches any agent config
-/// on disk. `init` (in init.rs) is the only place that mutates anything.
+/// Read-only on disk in the sense that matters for this product's safety
+/// boundary: never writes the decision store or touches any agent CONFIG
+/// file. `init` (in init.rs) is the only place that does that. `collect`
+/// itself DOES make outbound network calls, but only when `fetch_registry`
+/// is true — see `maybe_fetch_registry_package`'s doc comment for why
+/// that's opt-in rather than automatic.
 pub fn collect(
     project_root: &Path,
     engine: &RiskEngine,
     level: ProtectionLevel,
+    fetch_registry: bool,
 ) -> Vec<ScannedArtifact> {
     let mut out = Vec::new();
 
@@ -49,12 +66,18 @@ pub fn collect(
         for discovered in adapter.discover(project_root) {
             let DiscoveredArtifact {
                 mut artifact,
-                scan_root,
+                mut scan_root,
                 display_location,
                 launch,
                 config_source,
                 raw_config_entry,
             } = discovered;
+
+            let registry_fetch = if fetch_registry {
+                maybe_fetch_registry_package(&artifact.source, &mut scan_root)
+            } else {
+                None
+            };
 
             if let Some(root) = &scan_root {
                 if root.is_dir() {
@@ -113,6 +136,7 @@ pub fn collect(
                 config_source,
                 raw_config_entry,
                 scan_root,
+                registry_fetch,
             });
         }
     }
@@ -120,4 +144,90 @@ pub fn collect(
     // Worst risk first — that's what a human should see first.
     out.sort_by(|a, b| b.band.cmp(&a.band));
     out
+}
+
+/// Fetches and extracts a registry-resolved artifact's actual code so it
+/// gets the same static analysis any local script does, instead of
+/// declared-evidence-only scoring. A no-op for every source except
+/// `ArtifactSource::Registry`.
+///
+/// **Why this is opt-in** (only called when `collect`'s `fetch_registry`
+/// is true): every other artifact this product scores comes entirely
+/// from what's already on disk — `scan`/`init` have been network-free
+/// until this existed. Fetching a package means a real outbound HTTPS
+/// call to the npm or PyPI registry at scan time, which changes that, so
+/// it stays behind an explicit flag rather than becoming silent default
+/// behavior a CI pipeline or air-gapped environment could be surprised by.
+fn maybe_fetch_registry_package(
+    source: &ArtifactSource,
+    scan_root: &mut Option<PathBuf>,
+) -> Option<RegistryFetchOutcome> {
+    if !matches!(source, ArtifactSource::Registry { .. }) {
+        return None;
+    }
+    let cache_dir = agentguard_registry::resolve_cache_dir();
+    match agentguard_registry::fetch_and_extract(source, &cache_dir) {
+        Ok(fetched) => {
+            *scan_root = Some(fetched.extracted_dir);
+            Some(RegistryFetchOutcome::Fetched { resolved_version: fetched.resolved_version })
+        }
+        Err(e) => Some(RegistryFetchOutcome::Failed { error: e.to_string() }),
+    }
+}
+
+/// Shared by `scan` and `init`'s output — reports how many
+/// registry-resolved artifacts were found and, when `fetch_registry` was
+/// on, what happened to each fetch attempt.
+pub fn print_registry_fetch_summary(scanned: &[ScannedArtifact], fetch_registry: bool) {
+    let registry_count = scanned
+        .iter()
+        .filter(|s| matches!(s.artifact.source, ArtifactSource::Registry { .. }))
+        .count();
+    if registry_count == 0 {
+        return;
+    }
+    if !fetch_registry {
+        println!(
+            "\n{registry_count} registry-resolved MCP server(s) found (npx/uvx) — scored on declared evidence only."
+        );
+        println!("Re-run with --fetch-registry to statically scan their actual code.");
+        return;
+    }
+
+    let fetched: Vec<(&ScannedArtifact, &str)> = scanned
+        .iter()
+        .filter_map(|s| match &s.registry_fetch {
+            Some(RegistryFetchOutcome::Fetched { resolved_version }) => Some((s, resolved_version.as_str())),
+            _ => None,
+        })
+        .collect();
+    let failed: Vec<(&ScannedArtifact, &str)> = scanned
+        .iter()
+        .filter_map(|s| match &s.registry_fetch {
+            Some(RegistryFetchOutcome::Failed { error }) => Some((s, error.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    if !fetched.is_empty() {
+        println!("\n{} registry package(s) fetched and statically scanned:", fetched.len());
+        for (s, version) in &fetched {
+            println!(
+                "  {}@{} — {} ({})",
+                crate::sanitize_for_display(&s.artifact.name),
+                crate::sanitize_for_display(version),
+                s.band,
+                s.decision,
+            );
+        }
+    }
+    if !failed.is_empty() {
+        println!(
+            "{} registry package(s) could not be fetched (declared-evidence-only scoring used instead):",
+            failed.len()
+        );
+        for (s, error) in failed {
+            println!("  {} — {error}", crate::sanitize_for_display(&s.artifact.name));
+        }
+    }
 }

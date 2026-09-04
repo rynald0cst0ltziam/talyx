@@ -58,9 +58,10 @@ otherwise they print the line to add yourself.
 ```
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
-  agentguard-scanner     static capability extraction (JS/TS, Python; package.json manifest)
+  agentguard-scanner     static capability extraction (JS/TS, Python, shell scripts; package.json manifest)
   agentguard-adapters    per-agent discovery: Claude Code, Cursor, Codex, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
+  agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
   agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch
   agentguard-cli         `agentguard` binary: scan, status, init, allow, why
@@ -88,6 +89,12 @@ cargo test --workspace
 # Scan the current project (and user-level Claude Code config) at the
 # Balanced protection preset:
 cargo run -p agentguard-cli -- scan --project .
+
+# Add --fetch-registry to also fetch and statically scan the actual code
+# behind an npx/uvx-launched MCP server (off by default -- makes a real
+# outbound call to the npm/PyPI registry; see agentguard-registry's crate
+# doc comment):
+cargo run -p agentguard-cli -- scan --project . --fetch-registry
 
 # Short status summary:
 cargo run -p agentguard-cli -- status --project .

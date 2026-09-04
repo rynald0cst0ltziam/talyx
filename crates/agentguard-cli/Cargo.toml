@@ -15,6 +15,7 @@ agentguard-scanner = { path = "../agentguard-scanner" }
 agentguard-adapters = { path = "../agentguard-adapters" }
 agentguard-risk = { path = "../agentguard-risk" }
 agentguard-store = { path = "../agentguard-store" }
+agentguard-registry = { path = "../agentguard-registry" }
 clap.workspace = true
 serde_json.workspace = true
 toml.workspace = true

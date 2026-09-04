@@ -40,6 +40,14 @@ enum Command {
         /// Onboarding preset — see BUILD_PLAN.md §6.
         #[arg(long, value_enum, default_value = "balanced")]
         level: ProtectionLevelArg,
+        /// Fetch and statically scan the actual code behind a
+        /// registry-resolved MCP server (`npx <pkg>`, `uvx <pkg>`) instead
+        /// of scoring it on declared evidence only. Off by default: this
+        /// makes a real outbound HTTPS call to the npm/PyPI registry for
+        /// each one found, which every other artifact this tool scores
+        /// never needs.
+        #[arg(long)]
+        fetch_registry: bool,
     },
     /// Short protection summary (agents detected, artifact counts). Read-only.
     Status {
@@ -65,6 +73,11 @@ enum Command {
         /// machine, not just this one.
         #[arg(long)]
         include_user_config: bool,
+        /// Fetch and statically scan the actual code behind a
+        /// registry-resolved MCP server before scoring/enforcing it — see
+        /// `scan --fetch-registry`'s help for why this is opt-in.
+        #[arg(long)]
+        fetch_registry: bool,
     },
     /// Manually approve an artifact flagged ASK/BLOCK (by id, from `scan`/`why`).
     Allow {
@@ -100,14 +113,15 @@ impl From<ProtectionLevelArg> for ProtectionLevel {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Scan { project, level } => run_scan(&project, level.into()),
+        Command::Scan { project, level, fetch_registry } => run_scan(&project, level.into(), fetch_registry),
         Command::Status { project } => run_status(&project),
         Command::Init {
             project,
             level,
             store,
             include_user_config,
-        } => init::run_init(&project, level.into(), store, include_user_config),
+            fetch_registry,
+        } => init::run_init(&project, level.into(), store, include_user_config, fetch_registry),
         Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
     }
@@ -117,10 +131,10 @@ fn resolve_root(project: &Path) -> PathBuf {
     project.canonicalize().unwrap_or_else(|_| project.to_path_buf())
 }
 
-fn run_scan(project: &Path, level: ProtectionLevel) {
+fn run_scan(project: &Path, level: ProtectionLevel, fetch_registry: bool) {
     let project_root = resolve_root(project);
     let engine = RiskEngine::new();
-    let scanned = collect(&project_root, &engine, level);
+    let scanned = collect(&project_root, &engine, level, fetch_registry);
 
     if scanned.is_empty() {
         println!(
@@ -158,6 +172,8 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
     );
     println!("(read-only — run `agentguard init` to also cache decisions and enable enforcement)");
 
+    pipeline::print_registry_fetch_summary(&scanned, fetch_registry);
+
     let flagged: Vec<&ScannedArtifact> = scanned
         .iter()
         .filter(|s| matches!(s.decision, Decision::Ask | Decision::Block | Decision::Quarantine))
@@ -191,7 +207,7 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
 fn run_status(project: &Path) {
     let project_root = resolve_root(project);
     let engine = RiskEngine::new();
-    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced);
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
 
     println!("AgentGuard\n");
 
