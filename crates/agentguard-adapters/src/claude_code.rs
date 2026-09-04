@@ -13,7 +13,7 @@
 //! not a hunt through the codebase (this is the adapter-maintenance
 //! treadmill called out in BUILD_PLAN.md's audit notes).
 
-use crate::mcp_config::parse_mcp_servers_json;
+use crate::mcp_config::{parse_mcp_servers_json, parse_server_map};
 use crate::{AgentAdapter, ConfigSource, ConfigSourceKind, DiscoveredArtifact, LaunchCommand};
 use agentguard_core::{
     Artifact, ArtifactKind, ArtifactSource, Capability, CapabilityFinding, EvidenceBasis,
@@ -87,6 +87,17 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 "claude-code",
                 "Claude Code",
             ));
+            // LOCAL scope — verified 2026-09-05 directly against
+            // code.claude.com/docs/en/mcp: "Local scope is the default"
+            // for `claude mcp add` (i.e. whenever a user doesn't pass
+            // --scope), and it is NOT stored at ~/.claude.json's top
+            // level like User scope is -- it nests under
+            // `projects["<absolute-project-path>"].mcpServers`. A real,
+            // previously-unhandled gap: since local is the default
+            // scope, this was very plausibly the single most common way
+            // an individual Claude Code user's MCP servers are actually
+            // stored, and none of them were being discovered at all.
+            out.extend(parse_local_scope_mcp_servers(&h.join(".claude.json"), project_root));
         }
 
         // Hooks — project and user settings.json.
@@ -105,6 +116,81 @@ impl AgentAdapter for ClaudeCodeAdapter {
 
         out
     }
+}
+
+/// Parses `~/.claude.json`'s LOCAL-scope MCP servers for `project_root`
+/// specifically — nested under `projects["<key>"].mcpServers`, where
+/// `<key>` is the absolute project path AS CLAUDE CODE ITSELF WROTE IT,
+/// not necessarily byte-identical to `project_root`'s own string form.
+///
+/// Verified empirically against a real `~/.claude.json` on the dev
+/// machine, not just the docs: the SAME logical project appeared under
+/// TWO different key spellings for the same directory
+/// (`C:\Users\...\pop.lol` and `C:/Users/...\pop.lol` — backslash vs
+/// forward-slash), evidently written at different times by different
+/// invocation contexts. A plain string-equality lookup would have missed
+/// one of them. `project_root` reaching this adapter is also typically
+/// `Path::canonicalize()`'d upstream, which on Windows prepends the
+/// `\\?\` extended-length prefix (`\\?\C:\...`) that Claude Code's own
+/// keys never carry — so every key in `projects` is compared via
+/// `paths_match_loosely` (strip that prefix, normalize separators, and
+/// compare case-insensitively on Windows / case-sensitively elsewhere)
+/// rather than a single exact-match attempt.
+fn parse_local_scope_mcp_servers(claude_json_path: &Path, project_root: &Path) -> Vec<DiscoveredArtifact> {
+    let Ok(text) = fs::read_to_string(claude_json_path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(projects) = json.get("projects").and_then(|p| p.as_object()) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for (key, entry) in projects {
+        if !paths_match_loosely(Path::new(key), project_root) {
+            continue;
+        }
+        let Some(servers) = entry.get("mcpServers").and_then(|v| v.as_object()) else {
+            continue;
+        };
+        out.extend(parse_server_map(
+            servers,
+            claude_json_path,
+            project_root,
+            ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "claude-code",
+            "Claude Code",
+        ));
+    }
+    out
+}
+
+/// Whether `a` and `b` plausibly refer to the same directory, tolerating
+/// the real-world path-spelling differences found empirically (see
+/// `parse_local_scope_mcp_servers`'s doc comment): a `\\?\` extended-
+/// length prefix present on one side and not the other, `\` vs `/`
+/// separators, and Windows' case-insensitive filesystem. Deliberately a
+/// string-level comparison, not `Path::canonicalize()` on both sides —
+/// canonicalizing `a` (a JSON value from `~/.claude.json`, which could
+/// name a project that's been moved, renamed, or deleted since) would
+/// fail or resolve to nothing for exactly the entries most worth still
+/// matching against (an old/moved project's cached MCP server config is
+/// still real, unmanaged risk sitting in that file either way).
+fn paths_match_loosely(a: &Path, b: &Path) -> bool {
+    fn normalize(p: &Path) -> String {
+        let s = p.to_string_lossy();
+        let stripped = s.strip_prefix(r"\\?\").unwrap_or(&s);
+        let forward_slashes = stripped.replace('\\', "/");
+        let trimmed = forward_slashes.trim_end_matches('/');
+        if cfg!(windows) {
+            trimmed.to_lowercase()
+        } else {
+            trimmed.to_string()
+        }
+    }
+    normalize(a) == normalize(b)
 }
 
 fn discovered_by_set() -> BTreeSet<String> {
@@ -331,6 +417,81 @@ mod tests {
             n,
             name
         ))
+    }
+
+    #[test]
+    fn paths_match_loosely_tolerates_separator_and_prefix_differences() {
+        // Reproduces the exact real-world discrepancy found empirically
+        // in a live ~/.claude.json: the same project appeared under both
+        // a backslash and a forward-slash key.
+        assert!(paths_match_loosely(
+            Path::new(r"C:\Users\Hubby\Desktop\pop.lol"),
+            Path::new("C:/Users/Hubby/Desktop/pop.lol"),
+        ));
+        // Windows' \\?\ extended-length prefix, as Path::canonicalize()
+        // adds, must not prevent a match against a key that never had it.
+        assert!(paths_match_loosely(
+            Path::new(r"\\?\C:\Users\Hubby\Desktop\pop.lol"),
+            Path::new(r"C:\Users\Hubby\Desktop\pop.lol"),
+        ));
+        // Genuinely different directories must not match.
+        assert!(!paths_match_loosely(
+            Path::new(r"C:\Users\Hubby\Desktop\pop.lol"),
+            Path::new(r"C:\Users\Hubby\Desktop\other-project"),
+        ));
+    }
+
+    #[test]
+    fn parse_local_scope_mcp_servers_finds_the_project_regardless_of_key_spelling() {
+        let dir = unique_temp_dir("local-scope");
+        std::fs::create_dir_all(&dir).unwrap();
+        let claude_json_path = dir.join("claude.json");
+
+        // The project_root this test passes in uses forward slashes (as
+        // Path::display() would on a Unix-style path); the stored key
+        // uses backslashes -- reproducing the mismatch found live,
+        // proving the lookup survives it either direction.
+        let project_key = dir.display().to_string();
+        let config = serde_json::json!({
+            "projects": {
+                project_key.replace('/', "\\"): {
+                    "mcpServers": {
+                        "local-example": { "command": "some-binary", "args": [] }
+                    }
+                }
+            }
+        });
+        std::fs::write(&claude_json_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_local_scope_mcp_servers(&claude_json_path, &dir);
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].artifact.name, "local-example");
+        assert!(discovered[0].artifact.discovered_by.contains("claude-code"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_local_scope_mcp_servers_ignores_other_projects() {
+        let dir = unique_temp_dir("local-scope-other");
+        std::fs::create_dir_all(&dir).unwrap();
+        let claude_json_path = dir.join("claude.json");
+
+        let config = serde_json::json!({
+            "projects": {
+                "C:\\Users\\Hubby\\Desktop\\some-other-project": {
+                    "mcpServers": {
+                        "not-this-one": { "command": "some-binary", "args": [] }
+                    }
+                }
+            }
+        });
+        std::fs::write(&claude_json_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_local_scope_mcp_servers(&claude_json_path, &dir);
+        assert!(discovered.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn store_with_shell_command(artifact_id: &str, shell_command: &str) -> DecisionStore {

@@ -47,17 +47,36 @@ pub(crate) fn parse_mcp_servers_json(
     agent_id: &str,
     agent_display_name: &str,
 ) -> Vec<DiscoveredArtifact> {
-    let mut out = Vec::new();
     let Ok(text) = std::fs::read_to_string(path) else {
-        return out;
+        return Vec::new();
     };
     let Ok(json) = serde_json::from_str::<Value>(&text) else {
-        return out;
+        return Vec::new();
     };
     let Some(servers) = json.get(top_level_key).and_then(|v| v.as_object()) else {
-        return out;
+        return Vec::new();
     };
+    parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
+}
 
+/// The per-server parsing loop shared by every caller that has already
+/// located its `{ name: { command/args/env | url/serverUrl/httpUrl } }`
+/// map, however it got there — a flat top-level key
+/// (`parse_mcp_servers_json`) or a nested, dynamically-keyed path (Claude
+/// Code's LOCAL-scope servers, nested under `projects["<absolute-project-
+/// path>"].mcpServers` inside `~/.claude.json` — see `claude_code.rs`'s
+/// `parse_local_scope_mcp_servers`). Split out so both paths share
+/// identical remote-detection, command-classification, and capability
+/// logic instead of drifting apart if duplicated.
+pub(crate) fn parse_server_map(
+    servers: &serde_json::Map<String, Value>,
+    path: &Path,
+    base_dir: &Path,
+    kind: ConfigSourceKind,
+    agent_id: &str,
+    agent_display_name: &str,
+) -> Vec<DiscoveredArtifact> {
+    let mut out = Vec::new();
     for (name, cfg) in servers {
         // Remote MCP server — `{ "type": "http" | "sse", "url": "...",
         // "headers": {...} }` instead of a local `command`/`args`. This is
