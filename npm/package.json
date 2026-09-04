@@ -1,0 +1,20 @@
+{
+  "name": "agentguard",
+  "version": "0.1.0",
+  "description": "Cross-agent security scanner and enforcement for AI coding agent artifacts (MCP servers, skills, plugins, hooks).",
+  "license": "UNLICENSED",
+  "bin": {
+    "agentguard": "bin/agentguard.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin/",
+    "scripts/"
+  ]
+}

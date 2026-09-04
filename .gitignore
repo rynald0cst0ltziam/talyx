@@ -2,3 +2,6 @@
 **/target
 .warden/
 *.original
+node_modules/
+npm/.bin-native/
+*.agentguard-backup

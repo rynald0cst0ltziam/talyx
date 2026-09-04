@@ -1,0 +1,93 @@
+# Builds and publishes agentguard + agentguard-shim release binaries when a
+# `v*` tag is pushed. Not run automatically otherwise, and pushing a tag
+# from a local clone is the only thing that triggers it — nothing in this
+# repo runs this workflow on its own. See scripts/install.sh, install.ps1,
+# and npm/scripts/install.js: they download the exact archive names this
+# workflow produces, so a rename here must be mirrored there.
+name: Release
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-13 # Intel
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build agentguard + agentguard-shim
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p agentguard-cli -p agentguard-shim
+
+      - name: Package (tar.gz)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="agentguard-${{ matrix.target }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/agentguard" "$out/"
+          cp "target/${{ matrix.target }}/release/agentguard-shim" "$out/"
+          cp README.md "$out/" 2>/dev/null || true
+          tar czf "$out.tar.gz" "$out"
+
+      - name: Package (zip)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $out = "agentguard-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/agentguard.exe" "$out/"
+          Copy-Item "target/${{ matrix.target }}/release/agentguard-shim.exe" "$out/"
+          if (Test-Path README.md) { Copy-Item README.md "$out/" }
+          Compress-Archive -Path $out -DestinationPath "$out.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentguard-${{ matrix.target }}
+          path: agentguard-${{ matrix.target }}.${{ matrix.archive_ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true # review the draft before publishing — nothing goes live automatically
+          generate_release_notes: true
