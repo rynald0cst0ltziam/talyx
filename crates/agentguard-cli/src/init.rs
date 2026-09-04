@@ -176,14 +176,16 @@ fn rewrite_config(
     let mut already_protected = 0;
 
     for s in artifacts {
-        // Only one rewritable shape exists today; matching it exhaustively
-        // (no wildcard) means adding a ConfigSourceKind variant forces a
-        // deliberate decision here, not a silent no-op.
+        // Both variants use the identical `mcpServers` JSON shape the
+        // rewrite logic below already handles generically. Matching
+        // exhaustively (no wildcard) means a future ConfigSourceKind
+        // variant with a DIFFERENT shape forces a deliberate decision
+        // here, not a silent (and wrong) fallthrough to this same logic.
         let Some(config_source) = &s.config_source else {
             continue;
         };
         match config_source.kind {
-            ConfigSourceKind::ClaudeCodeMcpServersJson => {}
+            ConfigSourceKind::ClaudeCodeMcpServersJson | ConfigSourceKind::CursorMcpJson => {}
         }
         let Some(launch) = &s.launch else { continue };
 

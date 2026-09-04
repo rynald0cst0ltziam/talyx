@@ -59,7 +59,7 @@ otherwise they print the line to add yourself.
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
   agentguard-scanner     static capability extraction (JS/TS, Python; package.json manifest)
-  agentguard-adapters    per-agent discovery: Claude Code, Unknown Agent Mode
+  agentguard-adapters    per-agent discovery: Claude Code, Cursor, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
   agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch

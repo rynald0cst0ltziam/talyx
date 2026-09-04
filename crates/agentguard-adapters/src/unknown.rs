@@ -19,8 +19,11 @@ use std::path::Path;
 /// configures itself here" even when we don't have a dedicated adapter for
 /// that agent. Extend this list opportunistically — it's cheap to maintain
 /// and each entry improves the "we see you" floor for a new ecosystem.
+/// Remove an entry the moment a dedicated adapter picks it up (as
+/// `.cursorrules` did when cursor.rs landed) — otherwise it gets reported
+/// twice, once by the real adapter and once here, which looked like a bug
+/// (and would have been confusing) the first time this was actually run.
 const GENERIC_MARKERS: &[&str] = &[
-    ".cursorrules",
     ".clinerules",
     ".continuerules",
     ".zedrules",

@@ -8,6 +8,8 @@
 //! adding a new agent stay an adapter-sized change instead of a rewrite.
 
 pub mod claude_code;
+pub mod cursor;
+mod mcp_config;
 pub mod unknown;
 
 use agentguard_core::Artifact;
@@ -67,6 +69,14 @@ pub enum ConfigSourceKind {
     /// this writing. See claude_code.rs's module doc comment for the same
     /// caveat about this shape changing across Claude Code versions.
     ClaudeCodeMcpServersJson,
+    /// Same `mcpServers` JSON shape as above, but Cursor's own config
+    /// files — `.cursor/mcp.json` (project scope) or `~/.cursor/mcp.json`
+    /// (user scope) as of this writing. Kept as a distinct variant even
+    /// though the shape is identical today: the two configs are physically
+    /// separate files that could diverge in format over time, and treating
+    /// them as one thing here would undo the "adding a variant forces a
+    /// deliberate decision" property this enum exists for.
+    CursorMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -87,6 +97,7 @@ pub trait AgentAdapter {
 pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
     vec![
         Box::new(claude_code::ClaudeCodeAdapter),
+        Box::new(cursor::CursorAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }
