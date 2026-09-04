@@ -222,18 +222,25 @@ fn remote_mcp_artifact(
 /// seed where every entry is checked against this exact logic, but not a
 /// substitute for a real public-suffix-list-aware parser if this needs to
 /// be precise at scale later.
+/// Extracts the registrable domain (eTLD+1) from a URL's host, e.g.
+/// `https://aws-mcp.us-east-1.api.aws/mcp` -> `api.aws`,
+/// `https://foo.co.uk/mcp` -> `foo.co.uk`. Backed by the `psl` crate's
+/// compiled-in copy of Mozilla's Public Suffix List (no network access,
+/// deterministic, updated with each `psl` release) rather than a "last
+/// two dot-labels" guess — a naive guess is wrong for any multi-label
+/// public suffix (`.co.uk`, `.com.au`, and hundreds more), which would
+/// have made `evil.co.uk` and a real `foo.co.uk` compare equal under
+/// this codebase's exact-match reputation lookup (agentguard-risk's
+/// `reputation_discount`). Verified empirically against every domain in
+/// `data/trust_seed.json` plus `foo.co.uk`/`evil.co.uk` before switching
+/// to this — every existing seed entry round-trips to the identical
+/// string, and the `.co.uk` case, previously indistinguishable, now
+/// correctly separates.
 fn host_registrable_domain(url: &str) -> Option<String> {
     let without_scheme = url.split("://").nth(1).unwrap_or(url);
     let host = without_scheme.split('/').next()?;
     let host = host.split(':').next()?; // strip a port, if present
-    let labels: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
-    if labels.len() >= 2 {
-        Some(format!("{}.{}", labels[labels.len() - 2], labels[labels.len() - 1]))
-    } else if !host.is_empty() {
-        Some(host.to_string())
-    } else {
-        None
-    }
+    psl::domain_str(host).map(|d| d.to_string())
 }
 
 /// If `command`/`args` match agentguard-shim's own invocation convention
@@ -451,6 +458,55 @@ mod tests {
         assert_eq!(
             host_registrable_domain("https://mcp.sentry.dev/mcp/org/project"),
             Some("sentry.dev".to_string())
+        );
+    }
+
+    #[test]
+    fn host_registrable_domain_handles_multi_label_public_suffixes() {
+        // Regression test for a real, previously-documented gap: a naive
+        // "last two dot-labels" heuristic can't tell a multi-label public
+        // suffix (.co.uk, .com.au, ...) from an ordinary two-label domain,
+        // so it would extract "co.uk" as the registrable domain for BOTH
+        // of these -- making them compare equal under the exact-match
+        // reputation lookup in agentguard-risk. Now backed by the `psl`
+        // crate's compiled Mozilla Public Suffix List, they correctly
+        // separate.
+        assert_eq!(
+            host_registrable_domain("https://mcp.foo.co.uk/mcp"),
+            Some("foo.co.uk".to_string())
+        );
+        assert_eq!(
+            host_registrable_domain("https://mcp.evil.co.uk/mcp"),
+            Some("evil.co.uk".to_string())
+        );
+        assert_ne!(
+            host_registrable_domain("https://mcp.foo.co.uk/mcp"),
+            host_registrable_domain("https://mcp.evil.co.uk/mcp"),
+        );
+    }
+
+    #[test]
+    fn host_registrable_domain_handles_the_seeded_aws_region_scoped_host() {
+        // api.aws is a real trust_seed.json entry (BUILD_PLAN.md §7's
+        // AWS MCP Server entry) precisely because `aws` is a real,
+        // Amazon-restricted ICANN TLD -- the public suffix list treats it
+        // as a suffix, so the registrable domain of any
+        // "<anything>.api.aws" host is "api.aws", not "aws" alone and not
+        // the full region-qualified hostname.
+        assert_eq!(
+            host_registrable_domain("https://aws-mcp.us-east-1.api.aws/mcp"),
+            Some("api.aws".to_string())
+        );
+        assert_eq!(
+            host_registrable_domain("https://aws-mcp.eu-central-1.api.aws/mcp"),
+            Some("api.aws".to_string())
+        );
+        // A domain that merely CONTAINS "api-aws" (hyphen, not a
+        // subdomain of api.aws) must NOT collapse to the same registrable
+        // domain -- it's an ordinary .com suffix.
+        assert_eq!(
+            host_registrable_domain("https://aws-mcp.us-east-1.api-aws.example.com/mcp"),
+            Some("example.com".to_string())
         );
     }
 

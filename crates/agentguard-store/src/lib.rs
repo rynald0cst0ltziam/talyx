@@ -16,23 +16,30 @@
 //! diffable, needs no database dependency, and the file sizes involved
 //! (tens to low thousands of artifacts on a single dev machine) don't need
 //! anything heavier. Revisit if/when this needs to be shared across a
-//! daemon and many concurrent shim invocations without a race.
+//! daemon and many concurrent shim invocations at a scale where a single
+//! flat file itself becomes the bottleneck.
 //!
-//! **Known v0 limitation, not yet fixed:** there is no file locking.
-//! `load`/`save` is read-whole-file, mutate in memory, write-whole-file —
-//! two concurrent writers (e.g. two `agentguard init` runs, or `init`
-//! racing a future daemon) can lose one writer's update. The shim only
-//! reads, so this doesn't affect the enforcement path itself, but
-//! concurrent `agentguard scan`/`init`/`allow` invocations are not
-//! currently safe. A test in this file caught the same class of race
-//! (parallel test threads colliding on one temp file) — see `temp_store`'s
-//! comment. Fix before this store is written by more than one process at a
-//! time in practice (e.g. once a daemon exists).
+//! **Concurrency**: every read and write takes a real OS-level advisory
+//! lock on the store file itself (`std::fs::File`'s native `lock`/
+//! `lock_shared`/`unlock` — stable since Rust 1.89, `flock(2)` on Unix /
+//! `LockFileEx` on Windows under the hood; no external crate needed) for
+//! the full duration of that read or read-modify-write cycle. Writers
+//! (`upsert`/`approve`) take an exclusive lock; readers (`get`/`all`)
+//! take a shared lock, so concurrent reads don't block each other but a
+//! writer excludes everyone else, including other writers, for as long
+//! as it holds the lock. This closes a real, previously-documented gap:
+//! two concurrent `agentguard init` runs (or `init` racing `allow`) used
+//! to silently lose one writer's update under a naive
+//! read-whole-file/write-whole-file pattern, proven by a regression test
+//! in this file (`concurrent_writers_do_not_lose_updates`) that spawns
+//! real OS threads hammering one store concurrently and asserts every
+//! single write survived.
 
 use agentguard_core::{Capability, Decision, ProtectionLevel, RiskBand};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -195,49 +202,107 @@ impl DecisionStore {
         Self::open_default().unwrap_or_else(|_| Self::open_at(PathBuf::from(".agentguard-decisions.json")))
     }
 
-    fn load(&self) -> StoreFile {
-        std::fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+    /// Opens the store file read-only and holds a shared lock (`fs4`) for
+    /// the duration of the read, so a reader never observes a writer's
+    /// in-progress truncate-then-rewrite. A missing file is a normal,
+    /// silent "no records yet" — not an error — since `open_default`
+    /// deliberately never creates the file just by being opened.
+    fn read_locked(&self) -> io::Result<StoreFile> {
+        let mut f = match File::open(&self.path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(StoreFile::default()),
+            Err(e) => return Err(e),
+        };
+        f.lock_shared()?;
+        let mut text = String::new();
+        f.read_to_string(&mut text)?;
+        // An empty file (e.g. a writer created it but hasn't written yet —
+        // can't happen with this module's own writers, which always hold
+        // the lock across create+write, but a foreign process truncating
+        // the file some other way is not this store's problem to detect)
+        // parses as "no records" rather than a hard error.
+        if text.trim().is_empty() {
+            return Ok(StoreFile::default());
+        }
+        serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    fn save(&self, file: &StoreFile) -> io::Result<()> {
+    /// Opens (creating if needed) the store file, holds an EXCLUSIVE lock
+    /// across the full read-modify-write cycle, and rewrites the file
+    /// in-place (seek to start, write, truncate to the new length) through
+    /// the same locked handle — never a separate `std::fs::write` call,
+    /// which would open its own handle and defeat the lock. The exclusive
+    /// lock excludes every other reader and writer (this process or any
+    /// other) for the whole cycle, which is what actually closes the
+    /// lost-update race a naive load-then-save split has: two concurrent
+    /// callers of this method serialize completely, so the second one to
+    /// acquire the lock always mutates the FIRST one's already-persisted
+    /// state, never a stale in-memory copy.
+    fn with_exclusive_lock<T>(&self, f: impl FnOnce(&mut StoreFile) -> T) -> io::Result<T> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(file)
+        let mut handle = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&self.path)?;
+        handle.lock()?;
+
+        let mut text = String::new();
+        handle.read_to_string(&mut text)?;
+        let mut store = if text.trim().is_empty() {
+            StoreFile::default()
+        } else {
+            serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+        };
+
+        let result = f(&mut store);
+
+        let serialized = serde_json::to_string_pretty(&store)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        std::fs::write(&self.path, text)
+        handle.seek(SeekFrom::Start(0))?;
+        handle.write_all(serialized.as_bytes())?;
+        handle.set_len(serialized.len() as u64)?;
+        handle.flush()?;
+
+        // The exclusive lock releases when `handle` drops at the end of
+        // this scope (both flock and LockFileEx release on handle close);
+        // no explicit unlock needed, and none would be safe to skip here
+        // anyway since every early-return above is a `?` that already
+        // propagates before this point is reached.
+        Ok(result)
     }
 
     pub fn get(&self, artifact_id: &str) -> Option<DecisionRecord> {
-        self.load().records.get(artifact_id).cloned()
+        self.read_locked()
+            .unwrap_or_default()
+            .records
+            .get(artifact_id)
+            .cloned()
     }
 
     pub fn upsert(&self, record: DecisionRecord) -> io::Result<()> {
-        let mut file = self.load();
-        file.records.insert(record.artifact_id.clone(), record);
-        self.save(&file)
+        self.with_exclusive_lock(|store| {
+            store.records.insert(record.artifact_id.clone(), record);
+        })
     }
 
     /// `agentguard allow <id>`. Returns `false` if the artifact has never
     /// been scanned (nothing to approve) — the caller should tell the user
     /// to run a scan first rather than silently creating a phantom record.
     pub fn approve(&self, artifact_id: &str) -> io::Result<bool> {
-        let mut file = self.load();
-        match file.records.get_mut(artifact_id) {
+        self.with_exclusive_lock(|store| match store.records.get_mut(artifact_id) {
             Some(record) => {
                 record.manually_approved = true;
-                self.save(&file)?;
-                Ok(true)
+                true
             }
-            None => Ok(false),
-        }
+            None => false,
+        })
     }
 
     pub fn all(&self) -> Vec<DecisionRecord> {
-        self.load().records.into_values().collect()
+        self.read_locked().unwrap_or_default().records.into_values().collect()
     }
 }
 
@@ -245,7 +310,7 @@ impl DecisionStore {
 mod tests {
     use super::*;
 
-    fn temp_store() -> DecisionStore {
+    fn temp_store_path() -> PathBuf {
         // A unique path per call, not per second: `cargo test` runs these
         // in parallel threads within one process, so process::id() +
         // now_unix() (1s resolution) can collide and race on the same
@@ -260,7 +325,11 @@ mod tests {
             std::process::id(),
             n
         ));
-        DecisionStore::open_at(path)
+        path
+    }
+
+    fn temp_store() -> DecisionStore {
+        DecisionStore::open_at(temp_store_path())
     }
 
     #[test]
@@ -330,5 +399,113 @@ mod tests {
     fn approving_unknown_artifact_returns_false() {
         let store = temp_store();
         assert!(!store.approve("does-not-exist").unwrap());
+    }
+
+    fn minimal_record(artifact_id: &str) -> DecisionRecord {
+        DecisionRecord {
+            artifact_id: artifact_id.to_string(),
+            name: artifact_id.to_string(),
+            band: RiskBand::Low,
+            decision: Decision::Allow,
+            total_score: 0,
+            protection_level: ProtectionLevel::Balanced,
+            scanned_at_unix: DecisionRecord::now_unix(),
+            reasons: vec![],
+            content_hash: None,
+            capability_snapshot: vec![],
+            shell_command: None,
+            manually_approved: false,
+            remote_entry_snapshot: None,
+            config_path: None,
+            config_entry_key: None,
+            quarantine_original_path: None,
+            quarantine_current_path: None,
+        }
+    }
+
+    /// Proves the fix for the previously-documented "no file locking, two
+    /// concurrent writers can lose one writer's update" gap. Real OS
+    /// threads (not just async tasks in one executor) hammer ONE store
+    /// file concurrently, each writing its own distinct artifact id --
+    /// under the old read-whole-file/mutate/write-whole-file pattern with
+    /// no lock, this reliably lost updates (two writers both loading the
+    /// same stale snapshot, the second one's write clobbering the
+    /// first's). If every one of these survives, the exclusive lock in
+    /// `with_exclusive_lock` is doing its job: each writer's
+    /// read-modify-write cycle is fully serialized against every other
+    /// writer, not just fast enough to usually not collide.
+    #[test]
+    fn concurrent_writers_do_not_lose_updates() {
+        let path = temp_store_path();
+        const WRITER_THREADS: usize = 16;
+
+        let handles: Vec<_> = (0..WRITER_THREADS)
+            .map(|i| {
+                let store = DecisionStore::open_at(path.clone());
+                std::thread::spawn(move || {
+                    let id = format!("artifact-{i}");
+                    store.upsert(minimal_record(&id)).unwrap();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let store = DecisionStore::open_at(path.clone());
+        let all = store.all();
+        assert_eq!(
+            all.len(),
+            WRITER_THREADS,
+            "every concurrent writer's record must survive -- fewer than {WRITER_THREADS} means an update was lost to a race"
+        );
+        for i in 0..WRITER_THREADS {
+            assert!(
+                store.get(&format!("artifact-{i}")).is_some(),
+                "artifact-{i}'s write was lost"
+            );
+        }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Same race, but for `approve` specifically (a read-modify-write on
+    /// an EXISTING record, not an insert) -- a different code path than
+    /// `upsert`, worth its own proof since the two share `with_exclusive_
+    /// lock` but call it with different closures.
+    #[test]
+    fn concurrent_approvals_of_different_records_all_land() {
+        let path = temp_store_path();
+        const RECORD_COUNT: usize = 16;
+
+        let seed_store = DecisionStore::open_at(path.clone());
+        for i in 0..RECORD_COUNT {
+            seed_store.upsert(minimal_record(&format!("artifact-{i}"))).unwrap();
+        }
+
+        let handles: Vec<_> = (0..RECORD_COUNT)
+            .map(|i| {
+                let store = DecisionStore::open_at(path.clone());
+                std::thread::spawn(move || {
+                    assert!(store.approve(&format!("artifact-{i}")).unwrap());
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let store = DecisionStore::open_at(path.clone());
+        for i in 0..RECORD_COUNT {
+            let record = store.get(&format!("artifact-{i}")).unwrap();
+            assert!(
+                record.manually_approved,
+                "artifact-{i}'s approval was lost to a race"
+            );
+        }
+
+        std::fs::remove_file(&path).ok();
     }
 }

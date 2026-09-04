@@ -15,6 +15,11 @@ version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
 authors = ["AgentGuard"]
+# 1.89 is the floor because agentguard-store relies on std::fs::File's
+# native lock/lock_shared/unlock (stabilized in 1.89) for the decision
+# store's cross-process file locking -- see that crate's module doc
+# comment. Verified against the Rust 1.89 release notes, not assumed.
+rust-version = "1.89"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -28,6 +33,7 @@ clap = { version = "4", features = ["derive"] }
 once_cell = "1"
 sha2 = "0.10"
 toml = "0.8"
+psl = "2"
 
 [profile.dev]
 opt-level = 0
