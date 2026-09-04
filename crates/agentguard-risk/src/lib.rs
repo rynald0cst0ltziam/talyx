@@ -140,7 +140,18 @@ impl RiskEngine {
         if let Some(name) = &artifact.publisher.name {
             let name_lower = name.to_lowercase();
             for entry in &self.trust {
-                if name_lower.contains(&entry.matcher) {
+                // Exact match, not substring. A substring match here would
+                // be typosquat-exploitable: "linear" as a matcher would
+                // also match a publisher name like
+                // "totally-fake-linear-stealer" and grant it the same
+                // reputation discount as the real thing. Publisher names
+                // are already normalized to a specific identity (an npm
+                // scope, a git host owner, or a registrable domain — see
+                // agentguard-adapters' guess_publisher/
+                // extract_git_host_owner/host_registrable_domain), so
+                // exact-matching against that normalized value is both
+                // safer and sufficient.
+                if name_lower == entry.matcher.to_lowercase() {
                     return (
                         entry.discount,
                         vec![format!(
@@ -240,7 +251,7 @@ mod tests {
         let engine = RiskEngine::new();
         let artifact = artifact_with(
             ArtifactKind::McpServer,
-            Some("github"),
+            Some("modelcontextprotocol"),
             false,
             &[
                 Capability::ExecuteShell,
@@ -250,14 +261,35 @@ mod tests {
         );
         let breakdown = engine.score(&artifact);
         // 10 (shell) + 25 (secret) + 15 (network) = 50, capped at 40 per
-        // BUILD_PLAN.md §4, minus the trust-seed discount for "github" (35)
-        // => 5, LOW. This is the exact scenario the original plan's
-        // uncapped/no-reputation scoring got wrong (flagged the official
-        // GitHub MCP as HIGH).
+        // BUILD_PLAN.md §4, minus the trust-seed discount for the verified
+        // "modelcontextprotocol" npm scope (30) => 10, LOW. This is the
+        // exact scenario the original plan's uncapped/no-reputation
+        // scoring got wrong (flagged an official reference MCP server as
+        // HIGH).
         assert_eq!(breakdown.static_evidence, 40);
-        assert_eq!(breakdown.reputation_discount, 35);
-        assert_eq!(breakdown.total(), 5);
+        assert_eq!(breakdown.reputation_discount, 30);
+        assert_eq!(breakdown.total(), 10);
         assert_eq!(breakdown.band(), RiskBand::Low);
+    }
+
+    #[test]
+    fn reputation_match_is_exact_not_substring() {
+        // A publisher name that merely CONTAINS a trusted matcher must not
+        // get the discount -- otherwise "totally-fake-linear-app-stealer"
+        // would ride on "linear.app"'s reputation. Security-relevant fix,
+        // not a style preference: see reputation_discount's doc comment.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::McpServer,
+            Some("totally-fake-linear.app-stealer"),
+            false,
+            &[Capability::ExecuteShell, Capability::NetworkExternal],
+        );
+        let breakdown = engine.score(&artifact);
+        assert_eq!(
+            breakdown.reputation_discount, 0,
+            "a publisher name containing a trusted matcher as a substring must not match"
+        );
     }
 
     #[test]

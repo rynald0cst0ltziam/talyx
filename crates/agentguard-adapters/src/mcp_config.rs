@@ -49,6 +49,20 @@ pub(crate) fn parse_mcp_servers_json(
     };
 
     for (name, cfg) in servers {
+        // Remote MCP server — `{ "type": "http" | "sse", "url": "...",
+        // "headers": {...} }` instead of a local `command`/`args`. This is
+        // an increasingly common shape (Notion, Linear, Sentry, and other
+        // vendors ship this way rather than an npm package) that the
+        // original version of this parser didn't recognize at all —
+        // every remote entry was silently dropped. No local content to
+        // scan or hash; the URL's host is the reputation-relevant
+        // identity, and there's nothing here for `agentguard init` to
+        // route through the shim (there's no local process to wrap).
+        if let Some(url) = cfg.get("url").and_then(|u| u.as_str()) {
+            out.push(remote_mcp_artifact(name, url, cfg, path, agent_id, agent_display_name));
+            continue;
+        }
+
         let raw_command = cfg.get("command").and_then(|c| c.as_str()).unwrap_or("");
         let raw_args: Vec<String> = cfg
             .get("args")
@@ -123,6 +137,94 @@ pub(crate) fn parse_mcp_servers_json(
     }
 
     out
+}
+
+/// Builds a `DiscoveredArtifact` for a remote (HTTP/SSE) MCP server entry.
+/// No `scan_root` (nothing local to hash or statically scan) and no
+/// `launch`/`config_source` (the shim wraps a local subprocess launch;
+/// there's no local process here to wrap — gating a remote network
+/// service is a different enforcement problem, out of v0 scope).
+fn remote_mcp_artifact(
+    name: &str,
+    url: &str,
+    cfg: &Value,
+    path: &Path,
+    agent_id: &str,
+    agent_display_name: &str,
+) -> DiscoveredArtifact {
+    let source = ArtifactSource::RemoteUrl(url.to_string());
+
+    let mut capabilities = vec![CapabilityFinding {
+        capability: Capability::NetworkExternal,
+        basis: EvidenceBasis::Declared,
+        evidence: format!("remote MCP server declared by {agent_display_name}'s config (reached over HTTP/SSE, not launched locally)"),
+        location: Some(path.display().to_string()),
+    }];
+    // Headers that look like they carry a credential (Authorization,
+    // X-Api-Key, etc.) are a declared signal this server involves a
+    // secret/token, same spirit as the local-command path's env-var check.
+    let has_auth_header = cfg
+        .get("headers")
+        .and_then(|h| h.as_object())
+        .map(|headers| {
+            headers.keys().any(|k| {
+                let kl = k.to_lowercase();
+                kl.contains("auth") || kl.contains("token") || kl.contains("key")
+            })
+        })
+        .unwrap_or(false);
+    if has_auth_header {
+        capabilities.push(CapabilityFinding {
+            capability: Capability::ApiKeys,
+            basis: EvidenceBasis::Declared,
+            evidence: "config supplies an authorization/token header for this remote server".to_string(),
+            location: Some(path.display().to_string()),
+        });
+    }
+
+    let mut discovered_by = BTreeSet::new();
+    discovered_by.insert(agent_id.to_string());
+
+    let artifact = Artifact {
+        id: Artifact::compute_id(ArtifactKind::McpServer, name, &source),
+        kind: ArtifactKind::McpServer,
+        name: name.to_string(),
+        version: None,
+        publisher: guess_publisher(&source),
+        source,
+        content_hash: None,
+        capabilities,
+        discovered_by,
+    };
+
+    DiscoveredArtifact {
+        display_location: url.to_string(),
+        scan_root: None,
+        artifact,
+        launch: None,
+        config_source: None,
+    }
+}
+
+/// Naive registrable-domain extraction: strips scheme/port/path and takes
+/// the last two dot-separated labels (`mcp.notion.com` -> `notion.com`).
+/// Doesn't handle multi-part public suffixes (`.co.uk` etc.) correctly —
+/// acceptable for v0 matching against a small, manually-verified trust
+/// seed where every entry is checked against this exact logic, but not a
+/// substitute for a real public-suffix-list-aware parser if this needs to
+/// be precise at scale later.
+fn host_registrable_domain(url: &str) -> Option<String> {
+    let without_scheme = url.split("://").nth(1).unwrap_or(url);
+    let host = without_scheme.split('/').next()?;
+    let host = host.split(':').next()?; // strip a port, if present
+    let labels: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
+    if labels.len() >= 2 {
+        Some(format!("{}.{}", labels[labels.len() - 2], labels[labels.len() - 1]))
+    } else if !host.is_empty() {
+        Some(host.to_string())
+    } else {
+        None
+    }
 }
 
 /// If `command`/`args` match agentguard-shim's own invocation convention
@@ -265,13 +367,47 @@ fn guess_publisher(source: &ArtifactSource) -> PublisherIdentity {
                 verified: false,
             }
         }
-        ArtifactSource::GitUrl(url) => PublisherIdentity {
-            name: Some(url.clone()),
-            repo_url: Some(url.clone()),
+        ArtifactSource::GitUrl(url) => {
+            // github.com/<owner>/<repo> (and gitlab.com, bitbucket.org)
+            // name the owner/org explicitly, same spirit as the npm-scope
+            // case above — extract it so this is exact-matchable against
+            // a trust-seed entry, instead of leaving the whole URL as the
+            // "name" (which would never exact-match a short org name).
+            let guessed = extract_git_host_owner(url);
+            PublisherIdentity {
+                name: guessed.or_else(|| Some(url.clone())),
+                repo_url: Some(url.clone()),
+                verified: false,
+            }
+        }
+        ArtifactSource::RemoteUrl(url) => PublisherIdentity {
+            // The registrable domain is the reputation-relevant identity
+            // for a remote MCP server — see host_registrable_domain's doc
+            // comment for the (deliberately simple) extraction logic.
+            name: host_registrable_domain(url),
+            repo_url: None,
             verified: false,
         },
         ArtifactSource::LocalPath(_) => PublisherIdentity::default(),
     }
+}
+
+/// Extracts `<owner>` from a `https://github.com/<owner>/<repo>`-shaped URL
+/// (and the gitlab.com/bitbucket.org equivalents) — `None` for anything
+/// else, which falls back to using the full URL as the publisher name.
+fn extract_git_host_owner(url: &str) -> Option<String> {
+    const KNOWN_HOSTS: &[&str] = &["github.com/", "gitlab.com/", "bitbucket.org/"];
+    for host in KNOWN_HOSTS {
+        if let Some(idx) = url.find(host) {
+            let rest = &url[idx + host.len()..];
+            if let Some(owner) = rest.split('/').next() {
+                if !owner.is_empty() {
+                    return Some(owner.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -291,6 +427,75 @@ mod tests {
             result,
             Some(("node".to_string(), vec!["./x.js".to_string()]))
         );
+    }
+
+    #[test]
+    fn host_registrable_domain_strips_subdomain_scheme_and_path() {
+        assert_eq!(
+            host_registrable_domain("https://mcp.notion.com/mcp"),
+            Some("notion.com".to_string())
+        );
+        assert_eq!(
+            host_registrable_domain("https://mcp.linear.app/mcp/readonly"),
+            Some("linear.app".to_string())
+        );
+        assert_eq!(
+            host_registrable_domain("https://mcp.sentry.dev/mcp/org/project"),
+            Some("sentry.dev".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_git_host_owner_pulls_the_github_org() {
+        assert_eq!(
+            extract_git_host_owner("https://github.com/github/github-mcp-server"),
+            Some("github".to_string())
+        );
+        assert_eq!(extract_git_host_owner("https://example.com/not-a-git-host"), None);
+    }
+
+    #[test]
+    fn discovers_a_remote_http_mcp_server_entry() {
+        // Regression test for a real gap: the original parser only
+        // recognized `{ "command": ..., "args": ... }` and silently
+        // dropped every `{ "type": "http", "url": ... }` remote entry --
+        // an increasingly common shape (Notion, Linear, Sentry and others
+        // ship this way instead of an npm package).
+        let dir = unique_temp_dir("remote-mcp");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let config = serde_json::json!({
+            "mcpServers": {
+                "linear": {
+                    "type": "http",
+                    "url": "https://mcp.linear.app/mcp",
+                    "headers": { "Authorization": "Bearer example" }
+                }
+            }
+        });
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_mcp_servers_json(
+            &config_path,
+            &dir,
+            ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "claude-code",
+            "Claude Code",
+        );
+        assert_eq!(discovered.len(), 1);
+        let d = &discovered[0];
+        assert_eq!(d.scan_root, None);
+        assert_eq!(d.launch, None, "a remote server has no local process to wrap");
+        assert_eq!(d.config_source, None, "a remote server isn't rewritable via the shim");
+        assert_eq!(d.artifact.publisher.name.as_deref(), Some("linear.app"));
+        let caps: Vec<_> = d.artifact.capabilities.iter().map(|c| c.capability).collect();
+        assert!(caps.contains(&Capability::NetworkExternal));
+        assert!(
+            caps.contains(&Capability::ApiKeys),
+            "an Authorization header should be picked up as a declared credential signal"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

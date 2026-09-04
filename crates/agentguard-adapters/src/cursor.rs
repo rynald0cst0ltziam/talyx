@@ -10,6 +10,14 @@
 //! Paths below are documented/common as of this writing — same caveat as
 //! claude_code.rs: treat empty discovery as "check these paths are still
 //! current," not "no Cursor here."
+//!
+//! Which underlying LLM Cursor is configured to use (Claude, GPT, Grok —
+//! Cursor added Grok support at some point) is irrelevant to this adapter
+//! and always has been: discovery operates at the artifact/config layer
+//! (what MCP servers and rules files are on disk), not the model layer.
+//! Nothing here needs updating when Cursor adds or changes model backends
+//! — noted explicitly so that's a documented judgment call, not a silent
+//! assumption.
 
 use crate::mcp_config::parse_mcp_servers_json;
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};

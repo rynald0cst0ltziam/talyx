@@ -183,6 +183,16 @@ pub enum ArtifactSource {
     LocalPath(String),
     GitUrl(String),
     Registry { name: String, registry: String },
+    /// A remote MCP server reached over HTTP/SSE (`{ "type": "http", "url":
+    /// "..." }` in the config) rather than launched as a local subprocess.
+    /// No local content to hash or statically scan — the URL/host itself
+    /// is the reputation-relevant identity. Increasingly the dominant
+    /// shape for vendor-provided MCP servers (Notion, Linear, Sentry,
+    /// Slack, Stripe and others ship this way rather than an npm
+    /// package) — added after discovering the original parser only
+    /// recognized the local `command`/`args` shape and silently missed
+    /// every remote entry entirely.
+    RemoteUrl(String),
 }
 
 /// Publisher/repo identity used by the reputation discount in the risk
@@ -221,6 +231,7 @@ impl Artifact {
             ArtifactSource::LocalPath(p) => format!("local:{p}"),
             ArtifactSource::GitUrl(u) => format!("git:{u}"),
             ArtifactSource::Registry { name, registry } => format!("reg:{registry}:{name}"),
+            ArtifactSource::RemoteUrl(u) => format!("remote:{u}"),
         };
         format!("{kind}:{name}:{source_key}")
     }

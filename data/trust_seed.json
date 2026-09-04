@@ -1,25 +1,25 @@
 {
-  "_comment": "v0 hand-seeded trust graph — BUILD_PLAN.md §7. This is a stand-in for the pre-launch ecosystem-wide scan; entries here are illustrative examples of well-known publishers, not a complete or currently-accurate dataset. Replace/extend via the pre-seed scan job before any real release.",
+  "_comment": "v0 trust graph -- BUILD_PLAN.md §7. Deliberately small and every entry verified against a primary source on the date noted, not guessed from memory or taken from a search-summary. This is NOT the full pre-launch ecosystem scan the plan calls for (that needs a real crawl of the public MCP registry + independent verification at scale) -- it exists to prove the reputation mechanism against real, correct data rather than placeholders. `match` is compared via EXACT string equality (case-insensitive) against the artifact's normalized publisher name (an npm scope, a git host owner, or a registrable domain -- see agentguard-adapters' guess_publisher/extract_git_host_owner/host_registrable_domain), never substring containment -- see agentguard-risk's reputation_discount for why a substring match would be typosquat-exploitable once this list has more than a couple of entries.",
   "publishers": [
     {
-      "match": "github",
-      "discount": 35,
-      "note": "GitHub official MCP server — verified org, widely scanned"
-    },
-    {
-      "match": "linear",
+      "match": "modelcontextprotocol",
       "discount": 30,
-      "note": "Linear official MCP server — verified org"
+      "note": "npm scope @modelcontextprotocol/* -- Anthropic / MCP steering group's official reference servers. Verified 2026-09-04 via GitHub API (github.com/modelcontextprotocol org exists, 'servers' repo present) and the npm registry (@modelcontextprotocol/server-filesystem actively maintained, latest release 2026.8.31). CAVEAT, found during verification: @modelcontextprotocol/server-github specifically is DEPRECATED -- its npm listing states 'Package no longer supported' and development moved to github.com/github/github-mcp-server, a DIFFERENT publisher not covered by this entry. An abandoned package is a higher-risk signal, not a lower one -- do not assume every historical @modelcontextprotocol/* package is still trustworthy just because the scope is."
     },
     {
-      "match": "sentry",
+      "match": "linear.app",
       "discount": 30,
-      "note": "Sentry official MCP server — verified org"
+      "note": "Linear's official remote MCP server (https://mcp.linear.app/mcp). Verified 2026-09-04 directly against linear.app/docs/mcp."
     },
     {
-      "match": "anthropic",
-      "discount": 40,
-      "note": "Anthropic first-party tooling"
+      "match": "sentry.dev",
+      "discount": 30,
+      "note": "Sentry's official remote MCP server (https://mcp.sentry.dev/mcp). Verified 2026-09-04 by fetching mcp.sentry.dev directly (docs.sentry.io/product/sentry-mcp/ redirects there). Note the domain is sentry.dev, not sentry.io -- worth calling out since guessing would very plausibly get this wrong."
+    },
+    {
+      "match": "notion.com",
+      "discount": 25,
+      "note": "Notion's official remote MCP server (https://mcp.notion.com/mcp). Verified 2026-09-04 via Claude Code's own documented example (`claude mcp add --transport http notion https://mcp.notion.com/mcp`), not Notion's own docs directly -- slightly weaker provenance than the other entries here, reflected in a lower discount."
     }
   ]
 }

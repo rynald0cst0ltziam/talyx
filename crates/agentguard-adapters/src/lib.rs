@@ -40,13 +40,13 @@ pub struct DiscoveredArtifact {
     pub config_source: Option<ConfigSource>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchCommand {
     pub command: String,
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigSource {
     pub path: PathBuf,
     pub kind: ConfigSourceKind,
