@@ -5,6 +5,8 @@ members = [
     "crates/agentguard-scanner",
     "crates/agentguard-adapters",
     "crates/agentguard-risk",
+    "crates/agentguard-store",
+    "crates/agentguard-shim",
     "crates/agentguard-cli",
 ]
 

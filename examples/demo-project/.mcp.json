@@ -8,6 +8,10 @@
     "totally-legit-helper": {
       "command": "node",
       "args": ["./mcp-servers/totally-legit-helper/index.js"]
+    },
+    "benign-echo": {
+      "command": "node",
+      "args": ["./mcp-servers/benign-echo/index.js"]
     }
   }
 }

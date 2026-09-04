@@ -1,8 +1,10 @@
 //! Claude Code adapter — the only Tier-1 adapter with full enforcement
 //! planned (BUILD_PLAN.md §0, §5b: `PreToolUse` hooks are a real
-//! interception point). This module only does discovery for now; the
-//! enforcement shim (§5a) and hook integration (§5b) are separate,
-//! not-yet-built pieces that will consume what this adapter finds.
+//! interception point). MCP server discovery here also populates `launch`
+//! and `config_source`, which `agentguard init` (in agentguard-cli) uses to
+//! rewrite `.mcp.json`/`.claude.json` entries through the enforcement shim
+//! (§5a) — that's the config-rewrite mechanism actually being enforced;
+//! hook integration (§5b) is separate and not yet built.
 //!
 //! Config file locations below are the documented/common ones as of this
 //! writing. Claude Code's config layout has changed before and will change
@@ -12,7 +14,7 @@
 //! not a hunt through the codebase (this is the adapter-maintenance
 //! treadmill called out in BUILD_PLAN.md's audit notes).
 
-use crate::{AgentAdapter, DiscoveredArtifact};
+use crate::{AgentAdapter, ConfigSource, ConfigSourceKind, DiscoveredArtifact, LaunchCommand};
 use agentguard_core::{
     Artifact, ArtifactKind, ArtifactSource, Capability, CapabilityFinding, EvidenceBasis,
     PublisherIdentity,
@@ -150,6 +152,15 @@ fn parse_mcp_servers(path: &Path) -> Vec<DiscoveredArtifact> {
             artifact,
             scan_root,
             display_location,
+            launch: Some(LaunchCommand {
+                command: command.to_string(),
+                args,
+            }),
+            config_source: Some(ConfigSource {
+                path: path.to_path_buf(),
+                kind: ConfigSourceKind::ClaudeCodeMcpServersJson,
+                entry_key: name.clone(),
+            }),
         });
     }
 
@@ -324,6 +335,13 @@ fn parse_hooks(path: &Path) -> Vec<DiscoveredArtifact> {
             artifact,
             scan_root: None,
             display_location: cmd,
+            // Hooks are technically rewritable the same way MCP servers
+            // are (single fixed command), but config-rewrite support for
+            // them is out of v0 scope — see BUILD_PLAN.md's scope notes.
+            // Caching a decision for a hook (via `agentguard init`) still
+            // works; nothing currently enforces it.
+            launch: None,
+            config_source: None,
         });
     }
 
@@ -381,6 +399,8 @@ fn discover_skills(dir: &Path) -> Vec<DiscoveredArtifact> {
                 display_location: path.display().to_string(),
                 scan_root: Some(path),
                 artifact,
+                launch: None,
+                config_source: None,
             });
         }
     }

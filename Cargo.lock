@@ -20,7 +20,9 @@ dependencies = [
  "agentguard-core",
  "agentguard-risk",
  "agentguard-scanner",
+ "agentguard-store",
  "clap",
+ "serde_json",
 ]
 
 [[package]]
@@ -50,6 +52,24 @@ dependencies = [
  "serde_json",
  "thiserror",
  "walkdir",
+]
+
+[[package]]
+name = "agentguard-shim"
+version = "0.1.0"
+dependencies = [
+ "agentguard-core",
+ "agentguard-store",
+]
+
+[[package]]
+name = "agentguard-store"
+version = "0.1.0"
+dependencies = [
+ "agentguard-core",
+ "dirs",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

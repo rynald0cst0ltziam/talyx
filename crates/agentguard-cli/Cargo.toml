@@ -13,4 +13,6 @@ agentguard-core = { path = "../agentguard-core" }
 agentguard-scanner = { path = "../agentguard-scanner" }
 agentguard-adapters = { path = "../agentguard-adapters" }
 agentguard-risk = { path = "../agentguard-risk" }
+agentguard-store = { path = "../agentguard-store" }
 clap.workspace = true
+serde_json.workspace = true

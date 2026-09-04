@@ -1,0 +1,13 @@
+[package]
+name = "agentguard-shim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agentguard-shim"
+path = "src/main.rs"
+
+[dependencies]
+agentguard-core = { path = "../agentguard-core" }
+agentguard-store = { path = "../agentguard-store" }

@@ -24,6 +24,49 @@ pub struct DiscoveredArtifact {
     pub scan_root: Option<PathBuf>,
     /// Human-readable location for CLI/UI display even when scan_root is None.
     pub display_location: String,
+    /// The original (command, args) this artifact is launched with, when it
+    /// has a single fixed launch command (currently: MCP servers). This is
+    /// what `agentguard init` needs to rewrite a config entry to route
+    /// through the enforcement shim while preserving the real launch.
+    /// `None` for artifacts with no single subprocess launch (skills,
+    /// unresolved registry packages, config-file fingerprints).
+    pub launch: Option<LaunchCommand>,
+    /// Where this artifact's launch is declared, and enough to find and
+    /// rewrite that exact entry again. `None` when not rewritable — either
+    /// there's no `launch` at all, or the adapter doesn't yet support
+    /// rewriting this config shape (see `ConfigSourceKind`'s doc comment).
+    pub config_source: Option<ConfigSource>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LaunchCommand {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigSource {
+    pub path: PathBuf,
+    pub kind: ConfigSourceKind,
+    /// The key identifying this entry within the config (e.g. the
+    /// `mcpServers` object key) — enough for the rewriter to find and
+    /// replace just this one entry, leaving the rest of the file untouched.
+    pub entry_key: String,
+}
+
+/// The config shapes `agentguard init` knows how to rewrite. Deliberately
+/// an enum, not a trait/callback, so the rewrite logic stays centralized
+/// and auditable in one place (agentguard-cli) rather than scattered across
+/// adapters — a config rewriter is a much more sensitive piece of code than
+/// a discovery-only adapter, and it's worth the extra friction of adding a
+/// variant here + a match arm in the CLI for each new rewritable shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSourceKind {
+    /// A `{ "mcpServers": { "<entry_key>": { command, args, env } } }` file
+    /// — `.mcp.json` (project scope) or `~/.claude.json` (user scope) as of
+    /// this writing. See claude_code.rs's module doc comment for the same
+    /// caveat about this shape changing across Claude Code versions.
+    ClaudeCodeMcpServersJson,
 }
 
 pub trait AgentAdapter {

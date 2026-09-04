@@ -76,6 +76,8 @@ impl AgentAdapter for UnknownAgentAdapter {
                     display_location: path.display().to_string(),
                     scan_root: None,
                     artifact,
+                    launch: None,
+                    config_source: None,
                 });
             }
         }

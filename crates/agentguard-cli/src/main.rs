@@ -1,19 +1,22 @@
 //! agentguard-cli — v0 entry point.
 //!
-//! `agentguard scan`  — discover, statically scan, and score every artifact
-//!                       visible to a supported agent under a project root.
-//! `agentguard status` — short summary, matching the BUILD_PLAN.md §14 UX mock.
-//!
-//! This is deliberately the whole pipeline end to end (adapters → scanner →
-//! risk engine → decision), wired at the smallest useful scope, per
-//! BUILD_PLAN.md §16 step 4: "fastest path to a demoable 'here's everything
-//! installed and its risk' CLI output." Enforcement (§5) is not implemented
-//! yet — this prints decisions, it doesn't act on them.
+//! `agentguard scan`   — discover, statically scan, and score every artifact
+//!                        visible to a supported agent. Read-only.
+//! `agentguard status` — short protection summary. Read-only.
+//! `agentguard init`   — scan, cache decisions, AND rewrite MCP server
+//!                        configs to route through the enforcement shim
+//!                        (BUILD_PLAN.md §5a). The only command that writes
+//!                        anything — see init.rs.
+//! `agentguard allow <id>` — manually approve a flagged artifact.
+//! `agentguard why <id>`   — show the full reasoning behind a cached decision.
 
-use agentguard_adapters::{all_adapters, DiscoveredArtifact};
-use agentguard_core::{Artifact, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
+mod init;
+mod pipeline;
+
+use agentguard_core::{Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
 use clap::{Parser, Subcommand, ValueEnum};
+use pipeline::{collect, ScannedArtifact};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -29,7 +32,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Discover, scan, and score every artifact visible to a supported agent.
+    /// Discover, scan, and score every artifact visible to a supported agent. Read-only.
     Scan {
         /// Project root to scan (in addition to user-level/global config).
         #[arg(long, default_value = ".")]
@@ -38,10 +41,42 @@ enum Command {
         #[arg(long, value_enum, default_value = "balanced")]
         level: ProtectionLevelArg,
     },
-    /// Short protection summary (agents detected, artifact counts).
+    /// Short protection summary (agents detected, artifact counts). Read-only.
     Status {
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+    /// Scan, cache decisions, and route MCP servers through the enforcement
+    /// shim — the only command that modifies an agent's config file(s)
+    /// (with a one-time backup before the first rewrite).
+    Init {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long, value_enum, default_value = "balanced")]
+        level: ProtectionLevelArg,
+        /// Override the decision store location (defaults to
+        /// ~/.agentguard/decisions.json, or $AGENTGUARD_STORE if set).
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Also rewrite MCP server configs found OUTSIDE this project
+        /// (e.g. a user-level ~/.claude.json). Off by default: `init` only
+        /// touches configs inside --project unless you explicitly ask for
+        /// more, because a user-level config affects every project on the
+        /// machine, not just this one.
+        #[arg(long)]
+        include_user_config: bool,
+    },
+    /// Manually approve an artifact flagged ASK/BLOCK (by id, from `scan`/`why`).
+    Allow {
+        artifact_id: String,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// Show the full reasoning behind a cached decision.
+    Why {
+        artifact_id: String,
+        #[arg(long)]
+        store: Option<PathBuf>,
     },
 }
 
@@ -62,79 +97,24 @@ impl From<ProtectionLevelArg> for ProtectionLevel {
     }
 }
 
-struct ScannedArtifact {
-    agent_name: &'static str,
-    artifact: Artifact,
-    breakdown: ScoreBreakdown,
-    band: RiskBand,
-    decision: Decision,
-    location: String,
-}
-
 fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Scan { project, level } => run_scan(&project, level.into()),
         Command::Status { project } => run_status(&project),
+        Command::Init {
+            project,
+            level,
+            store,
+            include_user_config,
+        } => init::run_init(&project, level.into(), store, include_user_config),
+        Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
+        Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
     }
 }
 
 fn resolve_root(project: &Path) -> PathBuf {
     project.canonicalize().unwrap_or_else(|_| project.to_path_buf())
-}
-
-/// Runs discovery + static scan + risk scoring for every detected adapter.
-/// Shared by both subcommands so `scan` and `status` never drift apart on
-/// what counts as "found."
-fn collect(project_root: &Path, engine: &RiskEngine, level: ProtectionLevel) -> Vec<ScannedArtifact> {
-    let mut out = Vec::new();
-
-    for adapter in all_adapters() {
-        if !adapter.detect(project_root) {
-            continue;
-        }
-        for discovered in adapter.discover(project_root) {
-            let DiscoveredArtifact {
-                mut artifact,
-                scan_root,
-                display_location,
-            } = discovered;
-
-            if let Some(root) = &scan_root {
-                if root.is_dir() {
-                    let result = agentguard_scanner::scan_dir(root);
-                    artifact.capabilities.extend(result.findings);
-                    let pkg_json = root.join("package.json");
-                    if pkg_json.exists() {
-                        artifact
-                            .capabilities
-                            .extend(agentguard_scanner::scan_package_json(&pkg_json));
-                    }
-                } else if root.is_file() {
-                    if let Ok(findings) = agentguard_scanner::scan_file(root) {
-                        artifact.capabilities.extend(findings);
-                    }
-                }
-            }
-
-            let breakdown = engine.score(&artifact);
-            let band = breakdown.band();
-            let decision = level.decision_for(band);
-
-            out.push(ScannedArtifact {
-                agent_name: adapter.agent_name(),
-                artifact,
-                breakdown,
-                band,
-                decision,
-                location: display_location,
-            });
-        }
-    }
-
-    // Worst risk first — that's what a human should see first.
-    out.sort_by(|a, b| b.band.cmp(&a.band));
-    out
 }
 
 fn run_scan(project: &Path, level: ProtectionLevel) {
@@ -176,6 +156,7 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
         critical,
         high
     );
+    println!("(read-only — run `agentguard init` to also cache decisions and enable enforcement)");
 
     let flagged: Vec<&ScannedArtifact> = scanned
         .iter()
@@ -186,8 +167,8 @@ fn run_scan(project: &Path, level: ProtectionLevel) {
         println!("\nWhy these were flagged:");
         for s in flagged {
             println!(
-                "\n--- {} ({}) via {} — {} => {} ---",
-                s.artifact.name, s.artifact.kind, s.agent_name, s.band, s.decision
+                "\n--- {} ({}) via {} — {} => {} [id: {}] ---",
+                s.artifact.name, s.artifact.kind, s.agent_name, s.band, s.decision, s.artifact.id
             );
             for r in &s.breakdown.static_evidence_reasons {
                 println!("  {r}");
@@ -235,10 +216,16 @@ fn run_status(project: &Path) {
 
     let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
     let blocked = scanned.iter().filter(|s| s.decision == Decision::Block).count();
-    println!(
-        "\nCritical risk: {critical}    Blocked (Balanced preset): {blocked}"
-    );
-    println!("\nProtection: \u{25cf} Active (static scan only — enforcement not yet wired, see BUILD_PLAN.md \u{a7}5)");
+    println!("\nCritical risk: {critical}    Blocked (Balanced preset): {blocked}");
+
+    let rewritable = scanned.iter().filter(|s| s.launch.is_some() && s.config_source.is_some()).count();
+    if rewritable > 0 {
+        println!(
+            "\nProtection: \u{25cf} Static scan cached in-memory only — run `agentguard init` to route {rewritable} MCP server(s) through enforcement."
+        );
+    } else {
+        println!("\nProtection: \u{25cf} Active (static scan only — enforcement not applicable to what was found here)");
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {
