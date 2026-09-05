@@ -10,12 +10,12 @@ Read first:
 
 ## Status
 
-v0: discovery across 23 agents (Claude Code, Claude Desktop, Cursor,
+v0: discovery across 24 agents (Claude Code, Claude Desktop, Cursor,
 Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI,
 GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q
 Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI
-Assistant, opencode, Tabnine, Cody, plus a generic Unknown Agent Mode
-fallback), static
+Assistant, opencode, Tabnine, Cody, Goose, plus a generic Unknown Agent
+Mode fallback), static
 capability extraction (JS/TS/Python/Ruby/Perl/shell heuristics,
 registry-resolved npm/PyPI packages), the risk engine (capped evidence +
 reputation discount + context modifiers), and real enforcement —
@@ -73,7 +73,7 @@ otherwise they print the line to add yourself.
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
   agentguard-scanner     static capability extraction (JS/TS, Python, shell scripts; package.json manifest)
-  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Unknown Agent Mode
+  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)

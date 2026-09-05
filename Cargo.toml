@@ -35,6 +35,18 @@ once_cell = "1"
 sha2 = "0.10"
 toml = "0.8"
 psl = "2"
+# YAML support for agents whose native config format is YAML (Goose,
+# Continue.dev, Aider). serde_yaml is deprecated by its own maintainer
+# (last release 2024, marked "+deprecated" on crates.io) and serde_yml (a
+# once-popular fork) was archived after unsoundness issues were raised --
+# neither is acceptable for a security tool. serde-saphyr was chosen
+# instead: actively maintained (v1.2.0, stable semver), explicitly
+# emphasizes panic-free parsing (a real security-relevant property here,
+# since this parses config files that could be attacker-controlled), and
+# deserializes directly into serde_json::Value -- letting every existing
+# JSON-shaped parser (parse_server_map etc.) be reused unmodified for YAML
+# input, verified directly against its own docs before adding it.
+serde-saphyr = "1"
 ureq = { version = "3", features = ["json"] }
 tar = "0.4"
 flate2 = "1"

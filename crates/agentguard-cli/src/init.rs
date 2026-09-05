@@ -135,7 +135,10 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         // "remove," not "remove and reliably restore" until this restore
         // path is generalized to a nested key path, not just a single
         // string).
-        ConfigSourceKind::OpenClawJson | ConfigSourceKind::OpenCodeMcpJson => None,
+        ConfigSourceKind::OpenClawJson
+        | ConfigSourceKind::OpenCodeMcpJson
+        | ConfigSourceKind::GooseMcpJson
+        | ConfigSourceKind::ContinueYamlMcpJson => None,
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
@@ -288,8 +291,34 @@ fn rewrite_config(
             .map(|cs| cs.kind == ConfigSourceKind::CodexMcpServersToml)
             .unwrap_or(false)
     });
+    // A group whose file is real YAML (Goose/Continue.dev's native
+    // format) would otherwise reach rewrite_config_json, which parses the
+    // raw file text with serde_json::from_str -- guaranteed to fail on
+    // YAML and surface as a confusing "failed to rewrite" error, even
+    // though this is an intentional, documented scope limit (see
+    // ConfigSourceKind::GooseMcpJson's doc comment), not a real failure.
+    // Short-circuit to a clean, silent no-op instead, the same outcome
+    // OpenClaw/opencode's nested-shape limitation already produces.
+    let is_yaml_only = artifacts.iter().all(|s| {
+        s.config_source
+            .as_ref()
+            .map(|cs| {
+                matches!(
+                    cs.kind,
+                    ConfigSourceKind::GooseMcpJson | ConfigSourceKind::ContinueYamlMcpJson
+                )
+            })
+            .unwrap_or(false)
+    });
     if is_toml {
         rewrite_config_toml(config_path, artifacts, shim_path, store)
+    } else if is_yaml_only {
+        Ok(RewriteOutcome {
+            newly_protected: 0,
+            already_protected: 0,
+            removed_remote: 0,
+            backup_path: None,
+        })
     } else {
         rewrite_config_json(config_path, artifacts, shim_path, store)
     }
@@ -524,7 +553,18 @@ fn rewrite_config_json(
             // later, rather than forcing a real shape mismatch through a
             // mechanism that doesn't fit it. A future nested-path-aware
             // rewrite function would close this, not a quick patch here.
-            ConfigSourceKind::OpenClawJson | ConfigSourceKind::OpenCodeMcpJson => {}
+            //
+            // GooseMcpJson/ContinueYamlMcpJson are a different reason for
+            // the same "discovery-only for now" outcome: their source
+            // files are real YAML, and this whole function parses with
+            // serde_json::from_str, which fails outright on YAML text.
+            // Rewriting one back out would need YAML re-serialization
+            // too -- a real, separate mechanism this codebase doesn't
+            // have yet, not a nesting problem like OpenClaw/opencode's.
+            ConfigSourceKind::OpenClawJson
+            | ConfigSourceKind::OpenCodeMcpJson
+            | ConfigSourceKind::GooseMcpJson
+            | ConfigSourceKind::ContinueYamlMcpJson => {}
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson

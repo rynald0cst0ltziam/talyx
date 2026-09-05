@@ -59,6 +59,35 @@ pub(crate) fn parse_mcp_servers_json(
     parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
 }
 
+/// YAML counterpart of `parse_mcp_servers_json` — same contract, same
+/// shared `parse_server_map` underneath, just parsed with `serde_saphyr`
+/// (see this crate's `Cargo.toml` for why that crate, not the deprecated
+/// `serde_yaml`) into the identical `serde_json::Value` the JSON path
+/// produces. Exists as its own function (not a branch inside the JSON
+/// one) so a YAML-specific parse failure is handled the same
+/// fail-empty-not-panic way, and so callers are explicit about which
+/// format they're reading rather than the function guessing from a file
+/// extension.
+pub(crate) fn parse_mcp_servers_yaml(
+    path: &Path,
+    base_dir: &Path,
+    kind: ConfigSourceKind,
+    top_level_key: &str,
+    agent_id: &str,
+    agent_display_name: &str,
+) -> Vec<DiscoveredArtifact> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_saphyr::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(servers) = json.get(top_level_key).and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
+}
+
 /// The per-server parsing loop shared by every caller that has already
 /// located its `{ name: { command/args/env | url/serverUrl/httpUrl } }`
 /// map, however it got there — a flat top-level key

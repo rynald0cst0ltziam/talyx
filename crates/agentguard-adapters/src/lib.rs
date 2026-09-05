@@ -20,6 +20,7 @@ pub mod cursor;
 pub mod devin_cli;
 pub mod gemini_cli;
 pub mod github_copilot_cli;
+pub mod goose;
 mod hooks_config;
 pub mod jetbrains;
 pub mod kiro;
@@ -514,6 +515,42 @@ pub enum ConfigSourceKind {
     /// source. Reuses `parse_mcp_servers_json` via `top_level_key`, the
     /// same mechanism already proven for Amp/VS Code Copilot/Zed.
     CodyMcpJson,
+    /// Goose (Block's AI agent) — verified 2026-09-05 against multiple
+    /// independent sources agreeing: `~/.config/goose/config.yaml`, user
+    /// scope, real YAML (not JSON) but a name-keyed MAP under
+    /// `mcpServers:` — the SAME shape every JSON-based agent uses,
+    /// serialized differently, unlike Continue.dev's genuinely
+    /// LIST-shaped `mcpServers` in YAML (see `ContinueMcpJson`'s doc
+    /// comment). Parsed via `serde_saphyr::from_str::<serde_json::
+    /// Value>()` (see this crate's `Cargo.toml` for why that YAML crate
+    /// was chosen over the deprecated `serde_yaml`/unsound `serde_yml`)
+    /// directly into the same `Value` shared parsers already operate on
+    /// -- `parse_server_map` is reused completely unmodified, the first
+    /// YAML-native agent that needed zero shape-specific transform code.
+    /// Discovery/scoring only, like `OpenClawJson`/`OpenCodeMcpJson` --
+    /// NOT for a nesting reason this time, but because `init.rs`'s JSON
+    /// rewrite path parses a config file with `serde_json::from_str`,
+    /// which fails outright on a real YAML file. Writing a rewritten
+    /// config back out would need YAML re-serialization too, a real
+    /// separate mechanism this codebase doesn't have yet -- caught before
+    /// it could ship as a silent rewrite failure by tracing through what
+    /// `rewrite_config_json` actually does to the file, not assuming a
+    /// `ConfigSourceKind` with a `top_level_key` is automatically
+    /// rewritable.
+    GooseMcpJson,
+    /// Continue.dev's YAML surfaces specifically -- `config.yaml` and the
+    /// `.continue/mcpServers/*.yaml`/`*.yml` bundle files (see
+    /// `ContinueMcpJson`'s doc comment for the JSON-glob variant this is
+    /// deliberately kept separate from). Same rewrite limitation as
+    /// `GooseMcpJson` -- discovery/scoring only. Kept as its OWN variant
+    /// rather than folded into `ContinueMcpJson` for the same reason
+    /// Devin CLI's two hook shapes needed separate kinds: `ContinueMcpJson`
+    /// artifacts from the JSON glob path ARE safely rewritable (real JSON
+    /// files, the existing mechanism works), so merging the two would
+    /// make one `ConfigSourceKind` mean two different things depending on
+    /// which physical file an artifact happened to come from -- exactly
+    /// the bug shape already caught and fixed once this session.
+    ContinueYamlMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -555,6 +592,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(opencode::OpenCodeAdapter),
         Box::new(tabnine::TabnineAdapter),
         Box::new(cody::CodyAdapter),
+        Box::new(goose::GooseAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }
