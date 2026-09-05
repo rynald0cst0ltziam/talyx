@@ -88,6 +88,23 @@ pub(crate) fn parse_mcp_servers_yaml(
     parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
 }
 
+/// Converts a LIST-shaped `mcpServers` (`[{name, command, args}, ...]` --
+/// Continue.dev's and Aider's own YAML convention, genuinely different
+/// from every other agent's name-keyed MAP) into the map `parse_server_map`
+/// expects, keyed by each entry's `"name"` field. An entry missing `name`
+/// is skipped -- there's no key to file it under, and both agents' own
+/// docs treat `name` as required.
+pub(crate) fn list_to_server_map(list: &[Value]) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    for entry in list {
+        let Some(name) = entry.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        out.insert(name.to_string(), entry.clone());
+    }
+    out
+}
+
 /// The per-server parsing loop shared by every caller that has already
 /// located its `{ name: { command/args/env | url/serverUrl/httpUrl } }`
 /// map, however it got there — a flat top-level key

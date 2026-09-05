@@ -7,6 +7,7 @@
 //! shim/daemon — see BUILD_PLAN.md §5). Keeping that boundary is what lets
 //! adding a new agent stay an adapter-sized change instead of a rewrite.
 
+pub mod aider;
 pub mod amazon_q;
 pub mod amp;
 pub mod antigravity;
@@ -551,6 +552,22 @@ pub enum ConfigSourceKind {
     /// which physical file an artifact happened to come from -- exactly
     /// the bug shape already caught and fixed once this session.
     ContinueYamlMcpJson,
+    /// Aider -- verified 2026-09-05 against aider.chat's own docs
+    /// (aider.chat/docs/config/aider_conf.html) and a real example file
+    /// referenced from a third-party MCP server's own docs. Config:
+    /// `.aider.conf.yml`, checked in the user's home directory, the git
+    /// repo root, and the current directory (Aider's own docs say all
+    /// three are loaded, in that order, with later ones taking priority
+    /// for Aider's own runtime -- for discovery purposes this codebase
+    /// checks all of them independently rather than picking a "winner").
+    /// Real YAML, top-level key `"mcp-server"` (hyphenated, genuinely
+    /// different from every other agent's `mcpServers`/`context_servers`/
+    /// `cody.mcpServers`/etc.), and LIST-shaped like Continue.dev's own
+    /// native format, not a name-keyed map -- reuses the same
+    /// `list_to_server_map` conversion. Discovery/scoring only, same
+    /// reason as `GooseMcpJson`/`ContinueYamlMcpJson`: `init.rs`'s JSON
+    /// rewrite path can't parse or write real YAML.
+    AiderMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -593,6 +610,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(tabnine::TabnineAdapter),
         Box::new(cody::CodyAdapter),
         Box::new(goose::GooseAdapter),
+        Box::new(aider::AiderAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

@@ -138,7 +138,8 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         ConfigSourceKind::OpenClawJson
         | ConfigSourceKind::OpenCodeMcpJson
         | ConfigSourceKind::GooseMcpJson
-        | ConfigSourceKind::ContinueYamlMcpJson => None,
+        | ConfigSourceKind::ContinueYamlMcpJson
+        | ConfigSourceKind::AiderMcpJson => None,
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
@@ -305,7 +306,9 @@ fn rewrite_config(
             .map(|cs| {
                 matches!(
                     cs.kind,
-                    ConfigSourceKind::GooseMcpJson | ConfigSourceKind::ContinueYamlMcpJson
+                    ConfigSourceKind::GooseMcpJson
+                        | ConfigSourceKind::ContinueYamlMcpJson
+                        | ConfigSourceKind::AiderMcpJson
                 )
             })
             .unwrap_or(false)
@@ -564,7 +567,8 @@ fn rewrite_config_json(
             ConfigSourceKind::OpenClawJson
             | ConfigSourceKind::OpenCodeMcpJson
             | ConfigSourceKind::GooseMcpJson
-            | ConfigSourceKind::ContinueYamlMcpJson => {}
+            | ConfigSourceKind::ContinueYamlMcpJson
+            | ConfigSourceKind::AiderMcpJson => {}
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson

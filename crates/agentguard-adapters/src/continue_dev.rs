@@ -27,7 +27,7 @@
 //! than assuming it matches either the JSON glob files or config.yaml's
 //! list; left as a known, named gap rather than guessed at.
 
-use crate::mcp_config::{parse_mcp_servers_json, parse_server_map};
+use crate::mcp_config::{list_to_server_map, parse_mcp_servers_json, parse_server_map};
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
 use serde_json::Value;
 use std::path::Path;
@@ -62,21 +62,6 @@ impl AgentAdapter for ContinueDevAdapter {
 
         out
     }
-}
-
-/// Converts Continue's LIST-shaped `mcpServers` (`[{name, command,
-/// args}, ...]`) into the name-keyed MAP `parse_server_map` expects. An
-/// entry missing a `name` field is skipped -- there's no key to file it
-/// under, and Continue's own docs treat `name` as required.
-fn list_to_server_map(list: &[Value]) -> serde_json::Map<String, Value> {
-    let mut out = serde_json::Map::new();
-    for entry in list {
-        let Some(name) = entry.get("name").and_then(|n| n.as_str()) else {
-            continue;
-        };
-        out.insert(name.to_string(), entry.clone());
-    }
-    out
 }
 
 fn parse_config_yaml(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifact> {
