@@ -137,6 +137,7 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         // string).
         ConfigSourceKind::OpenClawJson
         | ConfigSourceKind::OpenCodeMcpJson
+        | ConfigSourceKind::CrushMcpJson
         | ConfigSourceKind::GooseMcpJson
         | ConfigSourceKind::ContinueYamlMcpJson
         | ConfigSourceKind::AiderMcpJson
@@ -570,6 +571,7 @@ fn rewrite_config_json(
             // have yet, not a nesting problem like OpenClaw/opencode's.
             ConfigSourceKind::OpenClawJson
             | ConfigSourceKind::OpenCodeMcpJson
+            | ConfigSourceKind::CrushMcpJson
             | ConfigSourceKind::GooseMcpJson
             | ConfigSourceKind::ContinueYamlMcpJson
             | ConfigSourceKind::AiderMcpJson

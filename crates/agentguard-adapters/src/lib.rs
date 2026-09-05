@@ -16,6 +16,7 @@ pub mod claude_desktop;
 pub mod cline;
 pub mod cody;
 pub mod codex;
+pub mod crush;
 pub mod continue_dev;
 pub mod cursor;
 pub mod devin_cli;
@@ -592,6 +593,28 @@ pub enum ConfigSourceKind {
     /// synthetic name would work but wasn't done without deciding that
     /// deliberately, not as an afterthought).
     OpenHandsMcpToml,
+    /// Crush (Charmbracelet) -- verified 2026-09-05 by reading the REAL
+    /// source (github.com/charmbracelet/crush's `internal/config/
+    /// config.go`/`load.go`), not docs, after search results only vaguely
+    /// described the format. `type MCPs map[string]MCPConfig` confirms a
+    /// standard name-keyed map nested one level under `"mcp"` --
+    /// `{"mcp": {"<name>": {command, args, env, type, url, headers,
+    /// disabled, ...}}}` -- close enough to the familiar shape that this
+    /// reuses `parse_server_map` after a one-level unwrap (same pattern
+    /// as opencode's own `"mcp"` key), including its existing `"disabled":
+    /// true` skip (Crush's own field, confirmed in the struct, needs no
+    /// new code). Paths: `crush.json`/`.crush.json` (project root, the
+    /// dotfile variant taking priority per the source) or
+    /// `<config_dir>/crush/crush.json` (user/global, via `dirs::
+    /// config_dir()`). Crush's CURRENT primary format is actually
+    /// `crushrc`, a Bash SCRIPT (not a declarative file at all) that
+    /// `crush.json` is now deprecated in favor of, though still
+    /// supported -- `crushrc` is NOT covered here: parsing arbitrary
+    /// shell-script logic to know what it declares is a fundamentally
+    /// different, harder problem than every other adapter in this
+    /// codebase solves, not a quick extension, and is left as an
+    /// honestly-named gap rather than guessed at.
+    CrushMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -636,6 +659,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(goose::GooseAdapter),
         Box::new(aider::AiderAdapter),
         Box::new(openhands::OpenHandsAdapter),
+        Box::new(crush::CrushAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }
