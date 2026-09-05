@@ -116,7 +116,10 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::ClaudeDesktopMcpJson
         | ConfigSourceKind::KiroMcpJson
         | ConfigSourceKind::AmazonQMcpJson
-        | ConfigSourceKind::ContinueMcpJson => Some("mcpServers".to_string()),
+        | ConfigSourceKind::ContinueMcpJson
+        | ConfigSourceKind::DevinCliMcpJson
+        | ConfigSourceKind::ClineMcpJson
+        | ConfigSourceKind::RooCodeMcpJson => Some("mcpServers".to_string()),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
         ConfigSourceKind::AmpMcpJson => Some("amp.mcpServers".to_string()),
         // OpenClaw's shape is nested two levels (`mcp.servers`), not a
@@ -133,6 +136,8 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::AntigravityHooksJson
         | ConfigSourceKind::GeminiCliHooksJson
         | ConfigSourceKind::GitHubCopilotCliHooksJson
+        | ConfigSourceKind::DevinCliHooksJson
+        | ConfigSourceKind::DevinCliProjectHooksJson
         | ConfigSourceKind::CodexMcpServersToml => None,
     }
 }
@@ -163,6 +168,8 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
                     | ConfigSourceKind::AntigravityHooksJson
                     | ConfigSourceKind::GeminiCliHooksJson
                     | ConfigSourceKind::GitHubCopilotCliHooksJson
+                    | ConfigSourceKind::DevinCliHooksJson
+                    | ConfigSourceKind::DevinCliProjectHooksJson
             )
         })
         .unwrap_or(false);
@@ -449,7 +456,10 @@ fn rewrite_config_json(
             | ConfigSourceKind::ClaudeDesktopMcpJson
             | ConfigSourceKind::KiroMcpJson
             | ConfigSourceKind::AmazonQMcpJson
-            | ConfigSourceKind::ContinueMcpJson => {
+            | ConfigSourceKind::ContinueMcpJson
+            | ConfigSourceKind::DevinCliMcpJson
+            | ConfigSourceKind::ClineMcpJson
+            | ConfigSourceKind::RooCodeMcpJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
@@ -494,12 +504,13 @@ fn rewrite_config_json(
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson
-            | ConfigSourceKind::GitHubCopilotCliHooksJson => {
+            | ConfigSourceKind::GitHubCopilotCliHooksJson
+            | ConfigSourceKind::DevinCliHooksJson => {
                 if s.launch.is_some() {
                     hook_artifacts.push(*s);
                 }
             }
-            ConfigSourceKind::AntigravityHooksJson => {
+            ConfigSourceKind::AntigravityHooksJson | ConfigSourceKind::DevinCliProjectHooksJson => {
                 hooks_wrapper_key = None;
                 if s.launch.is_some() {
                     hook_artifacts.push(*s);

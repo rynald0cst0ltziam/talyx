@@ -12,15 +12,18 @@ pub mod amp;
 pub mod antigravity;
 pub mod claude_code;
 pub mod claude_desktop;
+pub mod cline;
 pub mod codex;
 pub mod continue_dev;
 pub mod cursor;
+pub mod devin_cli;
 pub mod gemini_cli;
 pub mod github_copilot_cli;
 mod hooks_config;
 pub mod kiro;
 mod mcp_config;
 pub mod openclaw;
+pub mod roo_code;
 pub mod unknown;
 pub mod vscode_copilot;
 pub mod windsurf;
@@ -376,6 +379,64 @@ pub enum ConfigSourceKind {
     /// a deliberate, documented follow-up rather than guessed at or
     /// silently skipped without a record.
     ContinueMcpJson,
+    /// Devin CLI's own MCP config — a SEPARATE product from Windsurf/Devin
+    /// Desktop/Cascade (the IDE `WindsurfMcpJson` targets), confirmed via
+    /// two independent sources agreeing (2026-09-05): docs.devin.ai/cli/
+    /// extensibility/configuration directly, and cross-validated against
+    /// Warden-AI's own real, working registration code
+    /// (rynald0cst0ltziam/Warden-AI's `src/cli/register.ts`), which
+    /// registers into these exact paths under the label "Devin CLI" as a
+    /// target distinct from its own separate "Windsurf/Devin" entry.
+    /// Project scope: `.devin/config.json`. User scope: `~/.config/devin/
+    /// config.json` (macOS/Linux) or `%APPDATA%\devin\config.json`
+    /// (Windows), with `mcp_config.json` as a confirmed legacy/alternative
+    /// filename at the same user-scope directory. Standard `{"mcpServers":
+    /// {...}}` shape, reusing mcp_config.rs.
+    DevinCliMcpJson,
+    /// Devin CLI's USER-scope hooks — nested under a `"hooks"` key INSIDE
+    /// `~/.config/devin/config.json` (the same file already read for MCP
+    /// servers under `DevinCliMcpJson`), WITH a wrapper — the same
+    /// convention as Claude Code/Codex/Gemini CLI. Kept as its own variant
+    /// distinct from the project-scope file (`DevinCliProjectHooksJson`)
+    /// specifically because that file uses the OPPOSITE convention (no
+    /// wrapper) — one `ConfigSourceKind` must always mean one consistent
+    /// rewrite shape, so two genuinely different shapes for "Devin CLI
+    /// hooks" get two variants, not one overloaded by which file it came
+    /// from.
+    DevinCliHooksJson,
+    /// Devin CLI's PROJECT-scope hooks — the standalone `.devin/
+    /// hooks.v1.json` file. Verified 2026-09-05 directly against
+    /// docs.devin.ai/cli/extensibility/hooks/overview AND independently
+    /// confirmed by reading Warden-AI's own real, in-repo
+    /// `.devin/hooks.v1.json` file (a working product's actual config, not
+    /// docs prose): the root object IS the event map directly, e.g.
+    /// `{"PreToolUse": [{"matcher": ..., "hooks": [{"type": "command",
+    /// "command": ...}]}]}}` — NO `"hooks"` wrapper key, same shape family
+    /// as `AntigravityHooksJson`. See `DevinCliHooksJson`'s doc comment
+    /// for why the user-scope file needs a separate variant instead.
+    DevinCliProjectHooksJson,
+    /// Cline (a VS Code extension, `saoudrizwan.claude-dev`) — verified
+    /// 2026-09-05 by cross-referencing Warden-AI's own real registration
+    /// code, which embeds this exact, specific VS Code extension id in a
+    /// `globalStorage` path (not a generic guessed location — a real
+    /// extension id is not something to guess by accident, unlike the
+    /// batch of unverified `~/.config/<name>/mcp.json`-shaped entries the
+    /// same file also lists for several other tools, which this codebase
+    /// does NOT build on without independent per-product verification;
+    /// one of those, Claude Desktop's path, was directly checked and
+    /// found WRONG). Path: `<VS Code globalStorage>/saoudrizwan.claude-dev/
+    /// settings/cline_mcp_settings.json`, OS-specific base per VS Code's
+    /// own convention (`%APPDATA%\Code\User\globalStorage` on Windows,
+    /// `~/Library/Application Support/Code/User/globalStorage` on macOS,
+    /// `~/.config/Code/User/globalStorage` on Linux). Standard `{
+    /// "mcpServers": {...}}` shape.
+    ClineMcpJson,
+    /// Roo Code — "the same architecture as Cline, a different VS Code
+    /// extension id" per Warden-AI's own code comment, confirmed the same
+    /// way as `ClineMcpJson`: `rooveterinaryinc.roo-cline` in the
+    /// identical `globalStorage` path shape, same `cline_mcp_settings.json`
+    /// filename, same `{"mcpServers": {...}}` shape.
+    RooCodeMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -409,6 +470,9 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(kiro::KiroAdapter),
         Box::new(openclaw::OpenClawAdapter),
         Box::new(continue_dev::ContinueDevAdapter),
+        Box::new(devin_cli::DevinCliAdapter),
+        Box::new(cline::ClineAdapter),
+        Box::new(roo_code::RooCodeAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

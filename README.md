@@ -10,10 +10,11 @@ Read first:
 
 ## Status
 
-v0: discovery across 15 agents (Claude Code, Claude Desktop, Cursor,
-Codex, Windsurf/Devin Desktop, Antigravity, Gemini CLI, GitHub Copilot
-CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q Developer CLI,
-Continue.dev, plus a generic Unknown Agent Mode fallback), static
+v0: discovery across 18 agents (Claude Code, Claude Desktop, Cursor,
+Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI,
+GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q
+Developer CLI, Continue.dev, Cline, Roo Code, plus a generic Unknown
+Agent Mode fallback), static
 capability extraction (JS/TS/Python/Ruby/Perl/shell heuristics,
 registry-resolved npm/PyPI packages), the risk engine (capped evidence +
 reputation discount + context modifiers), and real enforcement —
@@ -71,7 +72,7 @@ otherwise they print the line to add yourself.
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
   agentguard-scanner     static capability extraction (JS/TS, Python, shell scripts; package.json manifest)
-  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Unknown Agent Mode
+  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
