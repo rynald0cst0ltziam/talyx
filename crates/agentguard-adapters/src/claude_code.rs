@@ -84,9 +84,25 @@ impl AgentAdapter for ClaudeCodeAdapter {
             out.extend(parse_local_scope_mcp_servers(&h.join(".claude.json"), project_root));
         }
 
-        // Hooks — project and user settings.json.
+        // Hooks — project settings.json + settings.local.json, and user
+        // settings.json. settings.local.json (project-scope, gitignored by
+        // convention) was a real, previously-unhandled gap — confirmed
+        // 2026-09-05 directly against code.claude.com/docs/en/hooks's own
+        // "Hook locations" table, which lists it as a distinct, real
+        // location alongside settings.json, not a variant of it. Found
+        // while investigating VS Code Copilot's hooks (which read this
+        // same file directly, per its own docs) — fixing it here closes
+        // the gap for Claude Code itself AND, since VS Code just parses
+        // Claude Code's file format from Claude Code's own paths, means no
+        // separate VS-Code-specific adapter code is needed for this
+        // location at all (see STATUS.md's write-up).
         out.extend(parse_hooks_json(
             &project_root.join(".claude").join("settings.json"),
+            ConfigSourceKind::ClaudeCodeHooksJson,
+            "claude-code",
+        ));
+        out.extend(parse_hooks_json(
+            &project_root.join(".claude").join("settings.local.json"),
             ConfigSourceKind::ClaudeCodeHooksJson,
             "claude-code",
         ));
@@ -324,4 +340,45 @@ mod tests {
     // Hook parsing (parse_hooks_json), its shim-unwrap logic, and the
     // command-hashing scheme now live in hooks_config.rs, shared with
     // Codex — see that module's own tests for that coverage.
+
+    #[test]
+    fn discovers_hooks_from_settings_local_json_even_without_settings_json() {
+        // Regression test for a real gap found while investigating VS Code
+        // Copilot's hooks (which read .claude/settings.local.json
+        // directly, per its own docs) -- Claude Code's own docs confirm
+        // this is a distinct, real project-scope hook location (gitignored
+        // by convention), not a variant of settings.json, and it was never
+        // discovered before this fix.
+        let dir = unique_temp_dir("settings-local-hooks");
+        let claude_dir = dir.join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let hooks = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "./scripts/local-only.sh" } ] }
+                ]
+            }
+        });
+        std::fs::write(
+            claude_dir.join("settings.local.json"),
+            serde_json::to_string_pretty(&hooks).unwrap(),
+        )
+        .unwrap();
+
+        let discovered = ClaudeCodeAdapter.discover(&dir);
+        let hooks_found: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::Hook)
+            .filter(|d| {
+                d.config_source
+                    .as_ref()
+                    .map(|cs| cs.path.starts_with(&dir))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(hooks_found.len(), 1);
+        assert_eq!(hooks_found[0].launch.as_ref().unwrap().command, "./scripts/local-only.sh");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
