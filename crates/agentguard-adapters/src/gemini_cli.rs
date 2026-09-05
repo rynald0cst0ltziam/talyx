@@ -1,14 +1,8 @@
-//! Gemini CLI adapter — same locked v0 scope as Cursor/Windsurf/
-//! Antigravity (BUILD_PLAN.md §0): discovery + config-gating only, no
-//! hook-level enforcement claim. No hooks/skills/plugins mechanism is
-//! documented for Gemini CLI as of this writing (verified against
-//! google-gemini/gemini-cli's own docs, not assumed absent).
-//!
-//! Config paths — `.gemini/settings.json` (project scope) and
-//! `~/.gemini/settings.json` (user scope), both confirmed directly
-//! against the tool's own docs (github.com/google-gemini/gemini-cli/
-//! blob/main/docs/tools/mcp-server.md). `settings.json` carries other
-//! Gemini CLI settings alongside `mcpServers` — irrelevant here since
+//! Gemini CLI adapter. Config paths — `.gemini/settings.json` (project
+//! scope) and `~/.gemini/settings.json` (user scope), both confirmed
+//! directly against the tool's own docs (github.com/google-gemini/
+//! gemini-cli/blob/main/docs/tools/mcp-server.md). `settings.json` carries
+//! other Gemini CLI settings alongside `mcpServers` — irrelevant here since
 //! `parse_mcp_servers_json` only ever looks at that one key, the same as
 //! Claude Code's `~/.claude.json` (also a general settings file, not an
 //! MCP-only one). Distinct from Antigravity's config despite sharing a
@@ -18,7 +12,18 @@
 //! Remote servers split into `url` (SSE) and `httpUrl` (HTTP streaming)
 //! — two distinct field names, neither of which is `serverUrl` — both
 //! now handled by the shared parser's remote-detection fallback chain.
+//!
+//! Hooks — verified 2026-09-05 directly against the real source
+//! (google-gemini/gemini-cli's own `packages/core/src/config/config.ts`
+//! and `packages/core/src/hooks/types.ts`, not docs prose): hooks live
+//! INLINE in the same `settings.json` files above, under a sibling
+//! `"hooks"` key, `{"hooks": {"<EventName>": [...]}}` — same wrapper
+//! shape as Claude Code/Codex, different event names (see
+//! `ConfigSourceKind::GeminiCliHooksJson`'s doc comment for the full
+//! citation and a real, honestly-scoped limitation around a separate
+//! `hooksConfig.disabled` list this doesn't cross-reference).
 
+use crate::hooks_config::parse_hooks_json;
 use crate::mcp_config::parse_mcp_servers_json;
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
 use agentguard_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity};
@@ -66,6 +71,20 @@ impl AgentAdapter for GeminiCliAdapter {
                 "mcpServers",
                 "gemini-cli",
                 "Gemini CLI",
+            ));
+        }
+
+        // Hooks — same settings.json files as above, sibling "hooks" key.
+        out.extend(parse_hooks_json(
+            &project_root.join(".gemini").join("settings.json"),
+            ConfigSourceKind::GeminiCliHooksJson,
+            "gemini-cli",
+        ));
+        if let Some(h) = &home {
+            out.extend(parse_hooks_json(
+                &h.join(".gemini").join("settings.json"),
+                ConfigSourceKind::GeminiCliHooksJson,
+                "gemini-cli",
             ));
         }
 
@@ -199,6 +218,56 @@ mod tests {
         assert_eq!(remote.len(), 1);
         assert!(remote[0].launch.is_none());
         assert!(remote[0].config_source.is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn discovers_hooks_and_mcp_servers_from_the_same_settings_file() {
+        // Gemini CLI's hooks live inline in the same settings.json already
+        // used for mcpServers, under a sibling "hooks" key -- with
+        // genuinely different event names from Claude Code/Codex
+        // (BeforeTool, not PreToolUse) but the identical {"hooks": {...}}
+        // wrapper shape.
+        let dir = unique_temp_dir("discover-hooks");
+        let gemini_dir = dir.join(".gemini");
+        std::fs::create_dir_all(&gemini_dir).unwrap();
+        let config = serde_json::json!({
+            "mcpServers": { "example": { "command": "some-binary", "args": [] } },
+            "hooks": {
+                "BeforeTool": [
+                    { "matcher": "run_shell_command", "hooks": [ { "type": "command", "command": "./scripts/audit-log.sh" } ] }
+                ]
+            }
+        });
+        std::fs::write(
+            gemini_dir.join("settings.json"),
+            serde_json::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
+
+        let discovered = GeminiCliAdapter.discover(&dir);
+        let in_fixture = |d: &&DiscoveredArtifact| {
+            d.config_source.as_ref().map(|cs| cs.path.starts_with(&dir)).unwrap_or(false)
+        };
+        let mcp: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::McpServer)
+            .filter(in_fixture)
+            .collect();
+        let hooks: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::Hook)
+            .filter(in_fixture)
+            .collect();
+        assert_eq!(mcp.len(), 1);
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].launch.as_ref().unwrap().command, "./scripts/audit-log.sh");
+        assert!(hooks[0].artifact.discovered_by.contains("gemini-cli"));
+        assert_eq!(
+            hooks[0].config_source.as_ref().unwrap().kind,
+            ConfigSourceKind::GeminiCliHooksJson
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

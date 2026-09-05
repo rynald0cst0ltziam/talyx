@@ -117,6 +117,7 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
+        | ConfigSourceKind::GeminiCliHooksJson
         | ConfigSourceKind::CodexMcpServersToml => None,
     }
 }
@@ -145,6 +146,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
                 ConfigSourceKind::ClaudeCodeHooksJson
                     | ConfigSourceKind::CodexHooksJson
                     | ConfigSourceKind::AntigravityHooksJson
+                    | ConfigSourceKind::GeminiCliHooksJson
             )
         })
         .unwrap_or(false);
@@ -448,7 +450,9 @@ fn rewrite_config_json(
                     remote_artifacts.push(*s);
                 }
             }
-            ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexHooksJson => {
+            ConfigSourceKind::ClaudeCodeHooksJson
+            | ConfigSourceKind::CodexHooksJson
+            | ConfigSourceKind::GeminiCliHooksJson => {
                 if s.launch.is_some() {
                     hook_artifacts.push(*s);
                 }

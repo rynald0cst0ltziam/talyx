@@ -198,6 +198,35 @@ pub enum ConfigSourceKind {
     /// and `init.rs`'s `rewrite_hooks`, both parameterized by an optional
     /// wrapper key for exactly this reason.
     AntigravityHooksJson,
+    /// Gemini CLI's hooks — INLINE in the same `.gemini/settings.json` /
+    /// `~/.gemini/settings.json` files already used for `mcpServers`
+    /// (`GeminiCliSettingsJson`), under a sibling top-level `"hooks"` key.
+    /// Verified 2026-09-05 directly against the real source, not docs
+    /// prose (a docs-summary claim from earlier this session that Gemini
+    /// CLI shares Claude Code's exact `PreToolUse`/`PostToolUse`/`Stop`/
+    /// `UserPromptSubmit` event taxonomy did NOT hold up: the real event
+    /// names, straight from `packages/core/src/hooks/types.ts`'s
+    /// `HookEventName` enum, are `BeforeTool`/`AfterTool`/`BeforeAgent`/
+    /// `AfterAgent`/`SessionStart`/`SessionEnd`/`PreCompress`/
+    /// `BeforeModel`/`AfterModel`/`BeforeToolSelection`/`Notification` —
+    /// genuinely different names, even though the wrapper shape itself
+    /// (`{"hooks": {"<EventName>": [{"matcher": ..., "hooks": [{"type":
+    /// "command", "command": ...}]}]}}`) is identical to Claude Code/
+    /// Codex, confirmed via `packages/cli/src/config/config.ts`'s
+    /// `hooks: settings.hooks || {}` and a real example file,
+    /// `packages/cli/src/commands/extensions/examples/hooks/hooks/
+    /// hooks.json`). Since the wrapper shape matches, this reuses
+    /// `hooks_config.rs`'s `Some("hooks")` path unmodified — only the
+    /// event names differ, and this codebase's command-discovery walk
+    /// never inspects event names at all. One real, honestly-scoped
+    /// limitation: Gemini CLI also supports disabling a hook by name via a
+    /// SEPARATE, sibling `settings.hooksConfig.disabled: string[]` list
+    /// (confirmed in the same `config.ts`) — unlike Antigravity's inline
+    /// per-hook `"enabled"` field, this lives outside the `"hooks"`
+    /// subtree entirely and is NOT currently cross-referenced, so a hook
+    /// disabled only via that list is still discovered/enforced as if
+    /// live. Documented, not silently assumed correct.
+    GeminiCliHooksJson,
 }
 
 pub trait AgentAdapter {
