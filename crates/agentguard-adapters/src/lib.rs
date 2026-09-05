@@ -13,6 +13,7 @@ pub mod antigravity;
 pub mod claude_code;
 pub mod claude_desktop;
 pub mod cline;
+pub mod cody;
 pub mod codex;
 pub mod continue_dev;
 pub mod cursor;
@@ -495,6 +496,24 @@ pub enum ConfigSourceKind {
     /// `~/.tabnine/mcp_servers.json` (user scope). Standard `{
     /// "mcpServers": {...}}` shape, reusing mcp_config.rs unmodified.
     TabnineMcpJson,
+    /// Sourcegraph Cody — verified 2026-09-05 via search results quoting
+    /// a complete, consistent example (cross-checked across independent
+    /// pages, since a direct fetch of Sourcegraph's own docs page 403'd).
+    /// Top-level key is the dotted string `"cody.mcpServers"` — same
+    /// VS-Code-settings convention as Amp's `"amp.mcpServers"` and Cline/
+    /// Roo Code's extension-scoped settings — but Cody's lives in VS
+    /// Code's OWN general settings file, not a dedicated one: `.vscode/
+    /// settings.json` (project/workspace scope) or `<VS Code User dir>/
+    /// settings.json` (global scope, sibling to the `globalStorage`
+    /// directory `ClineMcpJson`/`RooCodeMcpJson` use). Deliberately a
+    /// DIFFERENT file from VS Code Copilot's own `.vscode/mcp.json`
+    /// (`VsCodeCopilotMcpJson`) — no double-reporting risk, confirmed one
+    /// notable detail while researching this: VS Code's native Copilot
+    /// integration is "the only major client" using `"servers"` as its
+    /// root key instead of an `mcpServers`-family name, per the same
+    /// source. Reuses `parse_mcp_servers_json` via `top_level_key`, the
+    /// same mechanism already proven for Amp/VS Code Copilot/Zed.
+    CodyMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -535,6 +554,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(jetbrains::JetBrainsAdapter),
         Box::new(opencode::OpenCodeAdapter),
         Box::new(tabnine::TabnineAdapter),
+        Box::new(cody::CodyAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

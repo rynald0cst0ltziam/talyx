@@ -124,6 +124,7 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::TabnineMcpJson => Some("mcpServers".to_string()),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
         ConfigSourceKind::AmpMcpJson => Some("amp.mcpServers".to_string()),
+        ConfigSourceKind::CodyMcpJson => Some("cody.mcpServers".to_string()),
         ConfigSourceKind::ZedMcpJson => Some("context_servers".to_string()),
         // OpenClaw's shape is nested two levels (`mcp.servers`) and
         // opencode's one level (`mcp`), neither a single flat top-level
@@ -488,6 +489,14 @@ fn rewrite_config_json(
             }
             ConfigSourceKind::AmpMcpJson => {
                 top_level_key = "amp.mcpServers";
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
+            }
+            ConfigSourceKind::CodyMcpJson => {
+                top_level_key = "cody.mcpServers";
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
