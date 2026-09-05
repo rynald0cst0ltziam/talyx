@@ -1,15 +1,6 @@
-//! Google Antigravity adapter — same locked v0 scope as Cursor/Windsurf
-//! (BUILD_PLAN.md §0): discovery + config-gating only, no hook-level
-//! enforcement claim. Antigravity's own docs (verified 2026-09-05,
-//! antigravity.google/docs/mcp/) describe separate Skills/Hooks/Plugins
-//! extensibility systems in passing but without concrete file paths or
-//! payload shapes to build real discovery against — deliberately not
-//! guessed at here, same principle as this whole codebase's "fall
-//! through rather than guess" design. Revisit once that's documented
-//! concretely or can be verified against a real installation.
-//!
-//! Config paths — `~/.gemini/config/mcp_config.json` (global/user scope)
-//! and `.agents/mcp_config.json` (project scope), both confirmed directly
+//! Google Antigravity adapter. Config paths —
+//! `~/.gemini/config/mcp_config.json` (global/user scope) and
+//! `.agents/mcp_config.json` (project scope), both confirmed directly
 //! against Antigravity's own docs, not assumed. Same `{ "mcpServers": {
 //! "<name>": { command, args, env } } }` shape as Claude Code/Cursor,
 //! reusing mcp_config.rs — Antigravity's remote-server field is
@@ -18,10 +9,41 @@
 //! comment for the deliberate distinction from Gemini CLI's own,
 //! differently-shaped config that happens to share the `~/.gemini/`
 //! parent directory).
+//!
+//! Hooks — `.agents/hooks.json` (project) / `~/.gemini/config/hooks.json`
+//! (user), verified 2026-09-05 via two independent, mutually-agreeing
+//! fetches (see `ConfigSourceKind::AntigravityHooksJson`'s doc comment for
+//! why that cross-check mattered here). Unlike Claude Code/Codex, there's
+//! no `"hooks"` wrapper key — the root object itself is a map of hook name
+//! -> event map, so this reads the file directly and hands the whole root
+//! to `hooks_config::parse_hooks_value` instead of going through
+//! `parse_hooks_json`'s `"hooks"`-key extraction.
 
+use crate::hooks_config::parse_hooks_value;
 use crate::mcp_config::parse_mcp_servers_json;
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
+use serde_json::Value;
+use std::fs;
 use std::path::Path;
+
+/// Antigravity's `hooks.json` has no `"hooks"` wrapper key — the root
+/// object IS the hook-name -> event-map (see this module's doc comment and
+/// `ConfigSourceKind::AntigravityHooksJson`), so the whole parsed root is
+/// handed straight to the shared per-entry walk. `parse_hooks_value`'s own
+/// `enabled: false` skip (in `collect_command_strings`) already handles a
+/// disabled hook name correctly — no separate filtering needed here.
+fn parse_antigravity_hooks(path: &Path) -> Vec<DiscoveredArtifact> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    if !json.is_object() {
+        return Vec::new();
+    }
+    parse_hooks_value(&json, path, ConfigSourceKind::AntigravityHooksJson, "antigravity")
+}
 
 pub struct AntigravityAdapter;
 
@@ -63,6 +85,15 @@ impl AgentAdapter for AntigravityAdapter {
                 "mcpServers",
                 "antigravity",
                 "Antigravity",
+            ));
+        }
+
+        out.extend(parse_antigravity_hooks(
+            &project_root.join(".agents").join("hooks.json"),
+        ));
+        if let Some(h) = &home {
+            out.extend(parse_antigravity_hooks(
+                &h.join(".gemini").join("config").join("hooks.json"),
             ));
         }
 
@@ -155,6 +186,47 @@ mod tests {
         assert_eq!(remote.len(), 1);
         assert!(remote[0].launch.is_none());
         assert!(remote[0].config_source.is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn discovers_an_enabled_hook_and_skips_a_disabled_one() {
+        // Antigravity's hooks.json has no "hooks" wrapper key -- the root
+        // IS the hook-name -> event-map -- and a hook name can carry
+        // "enabled": false to disable it without deleting it. A disabled
+        // hook never runs, so it must not be surfaced as live risk.
+        let dir = unique_temp_dir("hooks");
+        let agents_dir = dir.join(".agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        let hooks = serde_json::json!({
+            "my-linter-hook": {
+                "PostToolUse": [
+                    { "matcher": "run_command", "hooks": [ { "type": "command", "command": "./scripts/lint.sh", "timeout": 10 } ] }
+                ]
+            },
+            "safety-gate": {
+                "enabled": false,
+                "PreToolUse": [
+                    { "matcher": "run_command", "hooks": [ { "command": "./scripts/safety-check.sh" } ] }
+                ]
+            }
+        });
+        std::fs::write(agents_dir.join("hooks.json"), serde_json::to_string_pretty(&hooks).unwrap())
+            .unwrap();
+
+        let discovered = AntigravityAdapter.discover(&dir);
+        let hooks: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::Hook)
+            .collect();
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].launch.as_ref().unwrap().command, "./scripts/lint.sh");
+        assert!(hooks[0].artifact.discovered_by.contains("antigravity"));
+        assert_eq!(
+            hooks[0].config_source.as_ref().unwrap().kind,
+            ConfigSourceKind::AntigravityHooksJson
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

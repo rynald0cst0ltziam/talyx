@@ -116,6 +116,7 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
+        | ConfigSourceKind::AntigravityHooksJson
         | ConfigSourceKind::CodexMcpServersToml => None,
     }
 }
@@ -141,7 +142,9 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         .map(|cs| {
             matches!(
                 cs.kind,
-                ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexHooksJson
+                ConfigSourceKind::ClaudeCodeHooksJson
+                    | ConfigSourceKind::CodexHooksJson
+                    | ConfigSourceKind::AntigravityHooksJson
             )
         })
         .unwrap_or(false);
@@ -385,13 +388,14 @@ fn move_skill_directory(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
-/// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and the
-/// `{"hooks": {...}}` tree used by both Claude Code and Codex (nested, no
-/// flat key — identical shape, confirmed against Codex's own docs, so one
-/// rewrite path covers both). Matching `config_source.kind` exhaustively
-/// (no wildcard) means a future variant with a different shape forces a
-/// deliberate decision here, not a silent (and wrong) fallthrough into
-/// this logic.
+/// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and the hook
+/// trees used by Claude Code, Codex, and Antigravity (nested, no flat key
+/// — Claude Code/Codex share an identical `{"hooks": {...}}` wrapper,
+/// confirmed against each vendor's own docs; Antigravity's root has no
+/// wrapper at all, see `rewrite_hooks`'s `wrapper_key` parameter). Matching
+/// `config_source.kind` exhaustively (no wildcard) means a future variant
+/// with a different shape forces a deliberate decision here, not a silent
+/// (and wrong) fallthrough into this logic.
 fn rewrite_config_json(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
@@ -407,6 +411,12 @@ fn rewrite_config_json(
     let mut hook_artifacts = Vec::new();
     let mut remote_artifacts = Vec::new();
     let mut top_level_key = "mcpServers";
+    // `Some("hooks")` for Claude Code/Codex's `{"hooks": {...}}` wrapper;
+    // `None` for Antigravity, whose hooks.json root IS the event tree with
+    // no wrapper key at all — see `ConfigSourceKind::AntigravityHooksJson`'s
+    // doc comment. A config-file group is always homogeneous, same
+    // reasoning as `top_level_key` above.
+    let mut hooks_wrapper_key: Option<&str> = Some("hooks");
     for s in artifacts {
         let Some(config_source) = &s.config_source else {
             continue;
@@ -443,6 +453,12 @@ fn rewrite_config_json(
                     hook_artifacts.push(*s);
                 }
             }
+            ConfigSourceKind::AntigravityHooksJson => {
+                hooks_wrapper_key = None;
+                if s.launch.is_some() {
+                    hook_artifacts.push(*s);
+                }
+            }
             // Never reached: rewrite_config routes any group containing a
             // Codex artifact to rewrite_config_toml instead, and a group
             // is always homogeneous. Matched anyway so a shape genuinely
@@ -457,7 +473,7 @@ fn rewrite_config_json(
         None => (0, 0),
     };
     let (hook_new, hook_already) = match &shim_str {
-        Some(s) => rewrite_hooks(&mut json, &hook_artifacts, s),
+        Some(s) => rewrite_hooks(&mut json, &hook_artifacts, s, hooks_wrapper_key),
         None => (0, 0),
     };
     let removed_remote =
@@ -708,18 +724,24 @@ fn rewrite_mcp_servers(
     (newly_protected, already_protected)
 }
 
-/// Rewrites hook entries — shared by Claude Code's `settings.json` and
-/// Codex's `hooks.json` (identical `{"hooks": {...}}` shape). There's no
-/// flat key to look up by — a hook's `entry_key` is `"hook-<i>"`, its index
-/// in the same depth-first, object-then-array traversal order
-/// hooks_config.rs's `collect_command_strings` uses to assign it in the
-/// first place — so this walks `json["hooks"]` in that identical order and
+/// Rewrites hook entries — shared by Claude Code's `settings.json`, Codex's
+/// `hooks.json` (identical `{"hooks": {...}}` shape), and Antigravity's
+/// `hooks.json` (no wrapper key at all — the root object IS the event
+/// tree, see `ConfigSourceKind::AntigravityHooksJson`'s doc comment).
+/// `wrapper_key` is `Some("hooks")` for the first two, `None` for
+/// Antigravity. There's no flat key to look up by — a hook's `entry_key`
+/// is `"hook-<i>"`, its index in the same depth-first, object-then-array
+/// traversal order hooks_config.rs's `collect_command_strings` uses to
+/// assign it in the first place (including its `"enabled": false` skip,
+/// mirrored below so index numbering always matches what discovery
+/// assigned) — so this walks the hooks tree in that identical order and
 /// rewrites the i-th `"command"` field found for any index we have a
 /// target for.
 fn rewrite_hooks(
     json: &mut serde_json::Value,
     artifacts: &[&ScannedArtifact],
     shim_str: &str,
+    wrapper_key: Option<&str>,
 ) -> (usize, usize) {
     let mut targets: BTreeMap<usize, &ScannedArtifact> = BTreeMap::new();
     for s in artifacts {
@@ -734,8 +756,12 @@ fn rewrite_hooks(
         return (0, 0);
     }
 
-    let Some(hooks_val) = json.get_mut("hooks") else {
-        return (0, 0);
+    let hooks_val = match wrapper_key {
+        Some(key) => match json.get_mut(key) {
+            Some(v) => v,
+            None => return (0, 0),
+        },
+        None => json,
     };
 
     let mut newly_protected = 0;
@@ -762,6 +788,14 @@ fn walk_and_rewrite_hook_commands(
 ) {
     match value {
         serde_json::Value::Object(map) => {
+            // Mirrors hooks_config.rs's collect_command_strings: a hook
+            // (Antigravity's shape) carrying "enabled": false never runs,
+            // so it must be skipped here exactly as discovery skipped it —
+            // otherwise the index numbering the two sides agree on would
+            // silently drift apart.
+            if matches!(map.get("enabled"), Some(serde_json::Value::Bool(false))) {
+                return;
+            }
             let has_command = matches!(map.get("command"), Some(serde_json::Value::String(_)));
             if has_command {
                 let this_index = *index;

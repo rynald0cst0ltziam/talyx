@@ -179,6 +179,25 @@ pub enum ConfigSourceKind {
     /// `"hook-<index>"`, same traversal-order convention as
     /// `ClaudeCodeHooksJson`.
     CodexHooksJson,
+    /// Antigravity's own hooks file — `.agents/hooks.json` (project scope)
+    /// or `~/.gemini/config/hooks.json` (user scope) as of this writing.
+    /// Verified 2026-09-05 via two independent, mutually-agreeing fetches
+    /// (antigravity.google/docs/hooks and .../docs/ide/hooks — cross-
+    /// checked deliberately after Windsurf's equivalent claim did NOT
+    /// survive the same scrutiny, see STATUS.md's retraction note). The
+    /// shape is genuinely different from `ClaudeCodeHooksJson`/
+    /// `CodexHooksJson`, not just a new file path: there's no top-level
+    /// `"hooks"` wrapper key at all — the root object IS the map, keyed by
+    /// an arbitrary hook NAME, e.g. `{"my-hook": {"PreToolUse": [...]}}`.
+    /// Each hook name may also carry a top-level `"enabled": false` to
+    /// disable it without deleting it (defaults true) — a real semantic
+    /// this codebase's discovery/rewrite must respect (a disabled hook
+    /// never runs, so treating it as live risk would be a false positive,
+    /// not caution). See `hooks_config.rs`'s `parse_hooks_value` (the root-
+    /// extraction step is agent-specific; the per-entry walk is shared)
+    /// and `init.rs`'s `rewrite_hooks`, both parameterized by an optional
+    /// wrapper key for exactly this reason.
+    AntigravityHooksJson,
 }
 
 pub trait AgentAdapter {

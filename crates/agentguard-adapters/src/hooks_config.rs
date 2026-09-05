@@ -34,17 +34,30 @@ fn short_hash(text: &str) -> String {
 /// Recursively pull every `"command"` string found under a JSON `hooks`
 /// subtree. Deliberately schema-loose rather than modeling each agent's
 /// exact hook config shape field-by-field — that shape has changed before
-/// (Claude Code's own docs), and "find every command hooks would run"
-/// degrades gracefully across schema versions where a strict struct would
-/// just fail to parse.
+/// (Claude Code's own docs), and differs outright between agents
+/// (Antigravity's per-hook-name map has no `"hooks"` wrapper at all — see
+/// `parse_hooks_value`), so "find every command hooks would run" degrades
+/// gracefully across schema shapes where a strict struct would just fail
+/// to parse or need a bespoke walker per agent.
+///
+/// An object carrying `"enabled": false` is skipped entirely — not
+/// descended into at all — since that's Antigravity's confirmed (2026-09-
+/// 05, antigravity.google/docs/hooks) way of disabling a hook without
+/// deleting it; a disabled hook never runs, so surfacing it as live risk
+/// would be a false positive. Harmless for Claude Code/Codex, which never
+/// populate this field.
 ///
 /// Each hook's `entry_key` (`"hook-<i>"`) is its index in this traversal
 /// order — there's no flat map key the way `mcpServers` entries have one,
 /// so the rewrite step in agentguard-cli's init.rs walks the tree in this
-/// same order to find the matching occurrence.
+/// same order (with the same enabled-skip rule) to find the matching
+/// occurrence.
 fn collect_command_strings(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
+            if matches!(map.get("enabled"), Some(Value::Bool(false))) {
+                return;
+            }
             if let Some(Value::String(s)) = map.get("command") {
                 out.push(s.clone());
             }
@@ -110,24 +123,41 @@ fn unwrap_shim_hook_invocation(command_str: &str, store: &DecisionStore) -> Opti
 /// Parses a `{"hooks": {...}}`-shaped hook config file into `DiscoveredArtifact`s.
 /// Shared by Claude Code (`settings.json`) and Codex (`hooks.json`) — both
 /// verified to use the identical JSON shape (see `ConfigSourceKind::
-/// CodexHooksJson`'s doc comment for the citation). `kind`/`agent_id`/
-/// `agent_display_name` are the only per-agent differences.
+/// CodexHooksJson`'s doc comment for the citation). `kind`/`agent_id` are
+/// the only per-agent differences. Antigravity's `hooks.json` has no
+/// `"hooks"` wrapper key at all (see `ConfigSourceKind::
+/// AntigravityHooksJson`'s doc comment) — its own adapter reads the root
+/// object directly and calls `parse_hooks_value` instead of this wrapper.
 pub(crate) fn parse_hooks_json(
     path: &Path,
     kind: ConfigSourceKind,
     agent_id: &str,
 ) -> Vec<DiscoveredArtifact> {
-    let mut out = Vec::new();
     let Ok(text) = fs::read_to_string(path) else {
-        return out;
+        return Vec::new();
     };
     let Ok(json) = serde_json::from_str::<Value>(&text) else {
-        return out;
+        return Vec::new();
     };
     let Some(hooks_val) = json.get("hooks") else {
-        return out;
+        return Vec::new();
     };
+    parse_hooks_value(hooks_val, path, kind, agent_id)
+}
 
+/// The shared per-entry walk: given the JSON value that actually holds the
+/// hook event tree (already unwrapped from whatever agent-specific
+/// container it started in — a `"hooks"` key for Claude Code/Codex, the
+/// bare root object for Antigravity), finds every command, builds one
+/// `DiscoveredArtifact` per command with the same hash-based-identity
+/// safety property for every caller.
+pub(crate) fn parse_hooks_value(
+    hooks_val: &Value,
+    path: &Path,
+    kind: ConfigSourceKind,
+    agent_id: &str,
+) -> Vec<DiscoveredArtifact> {
+    let mut out = Vec::new();
     let mut raw_commands = Vec::new();
     collect_command_strings(hooks_val, &mut raw_commands);
 
