@@ -31,21 +31,22 @@ fn short_hash(text: &str) -> String {
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// Recursively pull every `"command"` string found under a JSON `hooks`
-/// subtree. Deliberately schema-loose rather than modeling each agent's
-/// exact hook config shape field-by-field — that shape has changed before
-/// (Claude Code's own docs), and differs outright between agents
-/// (Antigravity's per-hook-name map has no `"hooks"` wrapper at all — see
-/// `parse_hooks_value`), so "find every command hooks would run" degrades
-/// gracefully across schema shapes where a strict struct would just fail
-/// to parse or need a bespoke walker per agent.
+/// Recursively pull every command string (see `crate::HOOK_COMMAND_FIELDS`) found
+/// under a JSON `hooks` subtree. Deliberately schema-loose rather than
+/// modeling each agent's exact hook config shape field-by-field — that
+/// shape has changed before (Claude Code's own docs), and differs
+/// outright between agents (Antigravity's per-hook-name map has no
+/// `"hooks"` wrapper at all — see `parse_hooks_value`), so "find every
+/// command hooks would run" degrades gracefully across schema shapes
+/// where a strict struct would just fail to parse or need a bespoke
+/// walker per agent.
 ///
 /// An object carrying `"enabled": false` is skipped entirely — not
 /// descended into at all — since that's Antigravity's confirmed (2026-09-
 /// 05, antigravity.google/docs/hooks) way of disabling a hook without
 /// deleting it; a disabled hook never runs, so surfacing it as live risk
-/// would be a false positive. Harmless for Claude Code/Codex, which never
-/// populate this field.
+/// would be a false positive. Harmless for every other agent, which
+/// doesn't populate this field.
 ///
 /// Each hook's `entry_key` (`"hook-<i>"`) is its index in this traversal
 /// order — there's no flat map key the way `mcpServers` entries have one,
@@ -58,8 +59,10 @@ fn collect_command_strings(value: &Value, out: &mut Vec<String>) {
             if matches!(map.get("enabled"), Some(Value::Bool(false))) {
                 return;
             }
-            if let Some(Value::String(s)) = map.get("command") {
-                out.push(s.clone());
+            for field in crate::HOOK_COMMAND_FIELDS {
+                if let Some(Value::String(s)) = map.get(field) {
+                    out.push(s.clone());
+                }
             }
             for v in map.values() {
                 collect_command_strings(v, out);

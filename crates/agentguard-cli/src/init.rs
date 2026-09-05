@@ -118,6 +118,7 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
         | ConfigSourceKind::GeminiCliHooksJson
+        | ConfigSourceKind::GitHubCopilotCliHooksJson
         | ConfigSourceKind::CodexMcpServersToml => None,
     }
 }
@@ -147,6 +148,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
                     | ConfigSourceKind::CodexHooksJson
                     | ConfigSourceKind::AntigravityHooksJson
                     | ConfigSourceKind::GeminiCliHooksJson
+                    | ConfigSourceKind::GitHubCopilotCliHooksJson
             )
         })
         .unwrap_or(false);
@@ -452,7 +454,8 @@ fn rewrite_config_json(
             }
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
-            | ConfigSourceKind::GeminiCliHooksJson => {
+            | ConfigSourceKind::GeminiCliHooksJson
+            | ConfigSourceKind::GitHubCopilotCliHooksJson => {
                 if s.launch.is_some() {
                     hook_artifacts.push(*s);
                 }
@@ -800,12 +803,21 @@ fn walk_and_rewrite_hook_commands(
             if matches!(map.get("enabled"), Some(serde_json::Value::Bool(false))) {
                 return;
             }
-            let has_command = matches!(map.get("command"), Some(serde_json::Value::String(_)));
-            if has_command {
+            // Mirrors hooks_config.rs's collect_command_strings: GitHub
+            // Copilot CLI's own canonical examples use "bash"/"powershell"
+            // instead of "command" — see agentguard_adapters::
+            // HOOK_COMMAND_FIELDS's doc comment. Each present field is its
+            // own indexed target, same as discovery treats each one as a
+            // separate raw command.
+            for field in agentguard_adapters::HOOK_COMMAND_FIELDS {
+                let has_command = matches!(map.get(field), Some(serde_json::Value::String(_)));
+                if !has_command {
+                    continue;
+                }
                 let this_index = *index;
                 *index += 1;
                 if let Some(s) = targets.get(&this_index) {
-                    let current = map.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                    let current = map.get(field).and_then(|c| c.as_str()).unwrap_or("");
                     if current.starts_with(&format!("\"{shim_str}\"")) {
                         *already_protected += 1;
                     } else {
@@ -818,7 +830,7 @@ fn walk_and_rewrite_hook_commands(
                         // see hooks_config.rs's short_hash) and a literal
                         // flag, nothing else.
                         let wrapped = format!("\"{shim_str}\" \"{}\" --shell", s.artifact.id);
-                        map.insert("command".to_string(), serde_json::Value::String(wrapped));
+                        map.insert(field.to_string(), serde_json::Value::String(wrapped));
                         *newly_protected += 1;
                     }
                 }

@@ -22,6 +22,18 @@ pub mod windsurf;
 use agentguard_core::Artifact;
 use std::path::{Path, PathBuf};
 
+/// Field names, in a fixed order, that carry a shell-command STRING inside
+/// one hook definition object across every agent this codebase enforces
+/// hooks for. `"command"` is the cross-platform field Claude Code/Codex/
+/// Antigravity/Gemini CLI all use; `"bash"`/`"powershell"` are GitHub
+/// Copilot CLI's OS-specific alternatives (see `ConfigSourceKind::
+/// GitHubCopilotCliHooksJson`'s doc comment for the citation). Exported at
+/// the crate root — rather than kept private inside `hooks_config.rs` —
+/// specifically so agentguard-cli's `init.rs` rewrite path can iterate the
+/// exact same field list discovery used, with no risk of the two drifting
+/// apart.
+pub const HOOK_COMMAND_FIELDS: [&str; 3] = ["command", "bash", "powershell"];
+
 /// One artifact found by an adapter, plus enough to hand it to the scanner.
 #[derive(Debug, Clone)]
 pub struct DiscoveredArtifact {
@@ -227,6 +239,38 @@ pub enum ConfigSourceKind {
     /// disabled only via that list is still discovered/enforced as if
     /// live. Documented, not silently assumed correct.
     GeminiCliHooksJson,
+    /// GitHub Copilot CLI's standalone hook files — `.github/hooks/*.json`
+    /// (project scope, any number of files, glob-matched — NOT one fixed
+    /// filename like every other agent) and `~/.copilot/hooks/*.json`
+    /// (user scope; `%USERPROFILE%\.copilot\hooks\` on Windows, or
+    /// `$COPILOT_HOME/hooks/` if that env var is set). Verified 2026-09-05
+    /// against the real, live docs.github.com/en/copilot/reference/
+    /// hooks-reference page (fetched and grepped directly, not summarized
+    /// — after two other agents' docs-summary claims failed to hold up
+    /// earlier this session): each file wraps as `{"version": 1, "hooks":
+    /// {"<camelCase-event>": [...]}}` — same `"hooks"`-wrapper shape as
+    /// Claude Code/Codex/Gemini CLI. Two real differences from every other
+    /// hook-enforced agent so far: (1) the shell-command field in the
+    /// docs' own examples is `"bash"` (Unix) or `"powershell"` (Windows),
+    /// not `"command"` — a cross-platform `"command"` field is also
+    /// accepted, per the docs, but isn't what the canonical examples show,
+    /// so `hooks_config.rs`'s `collect_command_strings` was extended to
+    /// recognize all three field names, not just `"command"`; (2)
+    /// discovery is a directory of files, not one fixed path, so this
+    /// adapter enumerates and parses each `*.json` file independently
+    /// (each file's own artifact indexing already resets to 0, and
+    /// `init.rs`'s `by_config` grouping is keyed by exact file path, so no
+    /// entry_key collision is possible across files). Copilot CLI's docs
+    /// also confirm it independently reads Claude Code's own `.claude/
+    /// settings.json`/`.claude/settings.local.json` for cross-tool hook
+    /// compatibility — deliberately NOT re-checked by this adapter, same
+    /// non-duplication principle already applied to the shared `.mcp.json`
+    /// (see `GitHubCopilotCliMcpJson`'s doc comment), and an inline
+    /// `"hooks"` field inside `.github/copilot/settings.json`/
+    /// `~/.copilot/settings.json` is a third, real location this v1
+    /// deliberately does not cover yet — the standalone-file mechanism is
+    /// the primary, most concretely documented one.
+    GitHubCopilotCliHooksJson,
 }
 
 pub trait AgentAdapter {

@@ -23,10 +23,54 @@
 //! entry discovered — just attributed to Claude Code's adapter rather
 //! than this one, a real but honestly-documented attribution gap, not a
 //! missed detection.
+//!
+//! Hooks — verified 2026-09-05 directly against the live docs.github.com/
+//! en/copilot/reference/hooks-reference page (fetched and grepped
+//! directly, not summarized): `.github/hooks/*.json` (project scope) and
+//! `~/.copilot/hooks/*.json` (user scope; `$COPILOT_HOME/hooks/*.json` if
+//! that env var is set) — see `ConfigSourceKind::
+//! GitHubCopilotCliHooksJson`'s doc comment for the full citation,
+//! including the real `"bash"`/`"powershell"` command-field difference and
+//! the deliberately-not-yet-covered inline-`.github/copilot/settings.json`
+//! hooks location. Same `.claude/settings.json` non-duplication principle
+//! as this module's MCP-server discovery applies here too — Copilot CLI's
+//! own docs confirm it separately reads Claude Code's hook files for
+//! cross-tool compatibility, so this adapter deliberately never looks at
+//! `.claude/` at all.
 
+use crate::hooks_config::parse_hooks_json;
 use crate::mcp_config::parse_mcp_servers_json;
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
 use std::path::Path;
+
+/// Enumerates every `*.json` file directly inside `dir` (GitHub Copilot
+/// CLI's hooks directories are a glob of files, not one fixed filename —
+/// see this module's doc comment) and parses each independently. Sorted
+/// for deterministic output; each file gets its own 0-based `hook-<i>`
+/// indexing (see `ConfigSourceKind::GitHubCopilotCliHooksJson`'s doc
+/// comment for why that's safe — `init.rs`'s rewrite grouping is keyed by
+/// exact file path, so there's no cross-file index collision to worry
+/// about).
+fn parse_hooks_dir(dir: &Path) -> Vec<DiscoveredArtifact> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    let mut json_files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    json_files.sort();
+    for path in json_files {
+        out.extend(parse_hooks_json(
+            &path,
+            ConfigSourceKind::GitHubCopilotCliHooksJson,
+            "github-copilot-cli",
+        ));
+    }
+    out
+}
 
 pub struct GitHubCopilotCliAdapter;
 
@@ -40,18 +84,34 @@ impl AgentAdapter for GitHubCopilotCliAdapter {
     }
 
     fn detect(&self, project_root: &Path) -> bool {
+        // A project with hooks but no MCP servers (or vice versa) must
+        // still be detected -- found live: a fixture with only
+        // .github/hooks/*.json and no .github/mcp.json was silently never
+        // scanned at all, since discover() is only ever called after
+        // detect() returns true (see agentguard-cli's pipeline.rs).
         project_root.join(".github").join("mcp.json").exists()
+            || project_root.join(".github").join("hooks").exists()
+            || dirs::home_dir()
+                .map(|h| h.join(".copilot").join("hooks").exists())
+                .unwrap_or(false)
     }
 
     fn discover(&self, project_root: &Path) -> Vec<DiscoveredArtifact> {
-        parse_mcp_servers_json(
+        let mut out = parse_mcp_servers_json(
             &project_root.join(".github").join("mcp.json"),
             project_root,
             ConfigSourceKind::GitHubCopilotCliMcpJson,
             "mcpServers",
             "github-copilot-cli",
             "GitHub Copilot CLI",
-        )
+        );
+
+        out.extend(parse_hooks_dir(&project_root.join(".github").join("hooks")));
+        if let Some(h) = dirs::home_dir() {
+            out.extend(parse_hooks_dir(&h.join(".copilot").join("hooks")));
+        }
+
+        out
     }
 }
 
@@ -90,6 +150,92 @@ mod tests {
         assert_eq!(mcp_entries.len(), 1);
         assert_eq!(mcp_entries[0].artifact.name, "example");
         assert!(mcp_entries[0].artifact.discovered_by.contains("github-copilot-cli"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_a_project_with_only_hooks_and_no_mcp_json() {
+        // Regression test for a real bug found live: detect() only
+        // checked .github/mcp.json, so a project with only
+        // .github/hooks/*.json was never scanned at all (discover() is
+        // only called after detect() returns true).
+        let dir = unique_temp_dir("detect-hooks-only");
+        std::fs::create_dir_all(dir.join(".github").join("hooks")).unwrap();
+
+        assert!(GitHubCopilotCliAdapter.detect(&dir));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn discovers_hooks_from_multiple_files_in_the_hooks_directory() {
+        // Copilot CLI's hooks directory is a glob of *.json files, not one
+        // fixed filename -- two separate files here must both surface,
+        // each keeping its own independent hook-<i> indexing.
+        let dir = unique_temp_dir("hooks-multi");
+        let hooks_dir = dir.join(".github").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(
+            hooks_dir.join("a.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "hooks": { "preToolUse": [ { "type": "command", "bash": "./scripts/a.sh" } ] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            hooks_dir.join("b.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "hooks": { "postToolUse": [ { "type": "command", "command": "./scripts/b.sh" } ] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let discovered = GitHubCopilotCliAdapter.discover(&dir);
+        let hooks: Vec<_> = discovered.iter().filter(|d| d.artifact.kind == ArtifactKind::Hook).collect();
+        assert_eq!(hooks.len(), 2);
+        let commands: Vec<_> = hooks.iter().map(|d| d.launch.as_ref().unwrap().command.as_str()).collect();
+        assert!(commands.contains(&"./scripts/a.sh"));
+        assert!(commands.contains(&"./scripts/b.sh"));
+        for h in &hooks {
+            assert!(h.artifact.discovered_by.contains("github-copilot-cli"));
+            assert_eq!(
+                h.config_source.as_ref().unwrap().kind,
+                ConfigSourceKind::GitHubCopilotCliHooksJson
+            );
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn recognizes_the_bash_field_not_just_command() {
+        // The docs' own canonical examples use "bash", not "command" -- a
+        // adapter that only recognized "command" would silently discover
+        // nothing from the shape most real-world files actually use.
+        let dir = unique_temp_dir("hooks-bash-field");
+        let hooks_dir = dir.join(".github").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(
+            hooks_dir.join("hooks.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "hooks": {
+                    "preToolUse": [ { "type": "command", "bash": "./scripts/log-tool.sh" } ]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let discovered = GitHubCopilotCliAdapter.discover(&dir);
+        let hooks: Vec<_> = discovered.iter().filter(|d| d.artifact.kind == ArtifactKind::Hook).collect();
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].launch.as_ref().unwrap().command, "./scripts/log-tool.sh");
 
         std::fs::remove_dir_all(&dir).ok();
     }
