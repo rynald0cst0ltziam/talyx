@@ -139,7 +139,8 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::OpenCodeMcpJson
         | ConfigSourceKind::GooseMcpJson
         | ConfigSourceKind::ContinueYamlMcpJson
-        | ConfigSourceKind::AiderMcpJson => None,
+        | ConfigSourceKind::AiderMcpJson
+        | ConfigSourceKind::OpenHandsMcpToml => None,
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
@@ -293,14 +294,16 @@ fn rewrite_config(
             .unwrap_or(false)
     });
     // A group whose file is real YAML (Goose/Continue.dev's native
-    // format) would otherwise reach rewrite_config_json, which parses the
-    // raw file text with serde_json::from_str -- guaranteed to fail on
-    // YAML and surface as a confusing "failed to rewrite" error, even
-    // though this is an intentional, documented scope limit (see
+    // format) or a TOML shape the existing TOML rewriter doesn't know
+    // (OpenHands' array-of-tables, genuinely different from Codex's
+    // table-of-tables) would otherwise reach rewrite_config_json, which
+    // parses the raw file text with serde_json::from_str -- guaranteed to
+    // fail and surface as a confusing "failed to rewrite" error, even
+    // though this is an intentional, documented scope limit (see e.g.
     // ConfigSourceKind::GooseMcpJson's doc comment), not a real failure.
     // Short-circuit to a clean, silent no-op instead, the same outcome
     // OpenClaw/opencode's nested-shape limitation already produces.
-    let is_yaml_only = artifacts.iter().all(|s| {
+    let is_discovery_only_shape = artifacts.iter().all(|s| {
         s.config_source
             .as_ref()
             .map(|cs| {
@@ -309,13 +312,14 @@ fn rewrite_config(
                     ConfigSourceKind::GooseMcpJson
                         | ConfigSourceKind::ContinueYamlMcpJson
                         | ConfigSourceKind::AiderMcpJson
+                        | ConfigSourceKind::OpenHandsMcpToml
                 )
             })
             .unwrap_or(false)
     });
     if is_toml {
         rewrite_config_toml(config_path, artifacts, shim_path, store)
-    } else if is_yaml_only {
+    } else if is_discovery_only_shape {
         Ok(RewriteOutcome {
             newly_protected: 0,
             already_protected: 0,
@@ -568,7 +572,8 @@ fn rewrite_config_json(
             | ConfigSourceKind::OpenCodeMcpJson
             | ConfigSourceKind::GooseMcpJson
             | ConfigSourceKind::ContinueYamlMcpJson
-            | ConfigSourceKind::AiderMcpJson => {}
+            | ConfigSourceKind::AiderMcpJson
+            | ConfigSourceKind::OpenHandsMcpToml => {}
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson

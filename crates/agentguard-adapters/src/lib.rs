@@ -28,6 +28,7 @@ pub mod kiro;
 mod mcp_config;
 pub mod opencode;
 pub mod openclaw;
+pub mod openhands;
 pub mod roo_code;
 pub mod tabnine;
 pub mod unknown;
@@ -568,6 +569,29 @@ pub enum ConfigSourceKind {
     /// reason as `GooseMcpJson`/`ContinueYamlMcpJson`: `init.rs`'s JSON
     /// rewrite path can't parse or write real YAML.
     AiderMcpJson,
+    /// OpenHands -- verified 2026-09-05 against docs.openhands.dev's own
+    /// MCP settings page and independent config-location sources. Config:
+    /// `./config.toml` (project/current directory) or `~/.openhands/
+    /// config.toml` (user). A genuinely different TOML shape from Codex's
+    /// `[mcp_servers.<name>]` (a table keyed by name): OpenHands uses
+    /// `[mcp]` with THREE array fields -- `stdio_servers` (an array of
+    /// inline tables, each with `name`/`command`/`args`/`env`, the ONLY
+    /// one this variant covers), `sse_servers`, and `shttp_servers`
+    /// (remote; each array ELEMENT is either a bare URL string or an
+    /// inline table with `url`/`api_key`/`timeout` -- crucially, with NO
+    /// name field at all, unlike every other agent's remote entries,
+    /// which are always keyed by name inside a map). `stdio_servers`
+    /// converts cleanly through the same `list_to_server_map` pattern
+    /// (via a TOML->JSON `Value` bridge, the same conversion already
+    /// proven in `codex.rs`'s `raw_config_entry` capture) since it's
+    /// name-keyed like Continue.dev's/Aider's own lists. The two remote
+    /// arrays are deliberately NOT covered -- deriving a stable identity
+    /// for an unnamed URL-only entry is a different problem, not a quick
+    /// extension of the existing name-keyed machinery, left as a named,
+    /// honest gap rather than guessed at (e.g. hashing the URL as a
+    /// synthetic name would work but wasn't done without deciding that
+    /// deliberately, not as an afterthought).
+    OpenHandsMcpToml,
 }
 
 pub trait AgentAdapter {
@@ -611,6 +635,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(cody::CodyAdapter),
         Box::new(goose::GooseAdapter),
         Box::new(aider::AiderAdapter),
+        Box::new(openhands::OpenHandsAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }
