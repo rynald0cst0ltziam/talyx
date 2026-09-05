@@ -119,18 +119,22 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::ContinueMcpJson
         | ConfigSourceKind::DevinCliMcpJson
         | ConfigSourceKind::ClineMcpJson
-        | ConfigSourceKind::RooCodeMcpJson => Some("mcpServers".to_string()),
+        | ConfigSourceKind::RooCodeMcpJson
+        | ConfigSourceKind::JetBrainsMcpJson
+        | ConfigSourceKind::TabnineMcpJson => Some("mcpServers".to_string()),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
         ConfigSourceKind::AmpMcpJson => Some("amp.mcpServers".to_string()),
-        // OpenClaw's shape is nested two levels (`mcp.servers`), not a
-        // single flat top-level key -- there's no single string this
-        // string-keyed restore path can express, so `agentguard allow`
-        // can't currently restore a removed OpenClaw remote entry this
-        // way. A real, documented limitation (OpenClaw's remote-entry
-        // enforcement is scoped to "remove," not "remove and reliably
-        // restore" until this restore path is generalized to a nested key
-        // path, not just a single string).
-        ConfigSourceKind::OpenClawJson => None,
+        ConfigSourceKind::ZedMcpJson => Some("context_servers".to_string()),
+        // OpenClaw's shape is nested two levels (`mcp.servers`) and
+        // opencode's one level (`mcp`), neither a single flat top-level
+        // key -- there's no single string this string-keyed restore path
+        // can express, so `agentguard allow` can't currently restore a
+        // removed remote entry for either this way. A real, documented
+        // limitation (their remote-entry enforcement is scoped to
+        // "remove," not "remove and reliably restore" until this restore
+        // path is generalized to a nested key path, not just a single
+        // string).
+        ConfigSourceKind::OpenClawJson | ConfigSourceKind::OpenCodeMcpJson => None,
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
@@ -459,7 +463,9 @@ fn rewrite_config_json(
             | ConfigSourceKind::ContinueMcpJson
             | ConfigSourceKind::DevinCliMcpJson
             | ConfigSourceKind::ClineMcpJson
-            | ConfigSourceKind::RooCodeMcpJson => {
+            | ConfigSourceKind::RooCodeMcpJson
+            | ConfigSourceKind::JetBrainsMcpJson
+            | ConfigSourceKind::TabnineMcpJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
@@ -488,19 +494,28 @@ fn rewrite_config_json(
                     remote_artifacts.push(*s);
                 }
             }
+            ConfigSourceKind::ZedMcpJson => {
+                top_level_key = "context_servers";
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
+            }
             // OpenClaw's shape is nested two levels (`{"mcp": {"servers":
-            // {...}}}`), not a single flat top-level key — the shared
+            // {...}}}`) and opencode's one level (`{"mcp": {...}}`),
+            // neither a single flat top-level key — the shared
             // `rewrite_mcp_servers`/`remove_blocked_remote_entries_json`
             // functions below only know how to look up ONE string key at
             // `json`'s own root, so they can't reach into a nested path.
-            // Discovery/scoring still works fully (openclaw.rs handles its
-            // own nested lookup independently) — this is scoped as
-            // discovery-only for now, matching how Cursor/Codex had
-            // discovery-only before their own enforcement was added later,
-            // rather than forcing a real shape mismatch through a
+            // Discovery/scoring still works fully (openclaw.rs/opencode.rs
+            // each handle their own nested lookup independently) — this is
+            // scoped as discovery-only for now, matching how Cursor/Codex
+            // had discovery-only before their own enforcement was added
+            // later, rather than forcing a real shape mismatch through a
             // mechanism that doesn't fit it. A future nested-path-aware
             // rewrite function would close this, not a quick patch here.
-            ConfigSourceKind::OpenClawJson => {}
+            ConfigSourceKind::OpenClawJson | ConfigSourceKind::OpenCodeMcpJson => {}
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson

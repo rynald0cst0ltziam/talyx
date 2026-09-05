@@ -20,13 +20,17 @@ pub mod devin_cli;
 pub mod gemini_cli;
 pub mod github_copilot_cli;
 mod hooks_config;
+pub mod jetbrains;
 pub mod kiro;
 mod mcp_config;
+pub mod opencode;
 pub mod openclaw;
 pub mod roo_code;
+pub mod tabnine;
 pub mod unknown;
 pub mod vscode_copilot;
 pub mod windsurf;
+pub mod zed;
 
 use agentguard_core::Artifact;
 use std::path::{Path, PathBuf};
@@ -437,6 +441,60 @@ pub enum ConfigSourceKind {
     /// identical `globalStorage` path shape, same `cline_mcp_settings.json`
     /// filename, same `{"mcpServers": {...}}` shape.
     RooCodeMcpJson,
+    /// Zed editor — verified 2026-09-05 directly against zed.dev/docs/
+    /// assistant/model-context-protocol. Zed calls MCP servers "context
+    /// servers"; the top-level key is `"context_servers"`, NOT
+    /// `"mcpServers"` and NOT `"mcp_servers"` either — Warden-AI's own
+    /// registration code guessed the latter, and this direct fetch of
+    /// Zed's own docs shows neither guess was right, reinforcing why this
+    /// codebase doesn't build on that file's unverified batch without
+    /// independently checking (see `RooCodeMcpJson`'s doc comment).
+    /// Otherwise the per-server shape is the familiar one (`command`/
+    /// `args`/`env` for local, `url`/`headers` for remote), so this
+    /// reuses `parse_mcp_servers_json` unmodified via its `top_level_key`
+    /// parameter — the same mechanism already proven for VS Code
+    /// Copilot's `"servers"` and Amp's `"amp.mcpServers"`. Settings path
+    /// is `dirs::config_dir()`-based (the second agent after Claude
+    /// Desktop confirmed to use each OS's proper special config folder,
+    /// not a plain home-relative dot-directory): `~/Library/Application
+    /// Support/Zed/settings.json` (macOS), `~/.config/zed/settings.json`
+    /// (Linux), `%APPDATA%\Zed\settings.json` (Windows).
+    ZedMcpJson,
+    /// JetBrains AI Assistant / Junie — verified 2026-09-05 directly
+    /// against junie.jetbrains.com/docs/junie-plugin-mcp-settings.html
+    /// and junie-cli-mcp-configuration.html. Path: `.junie/mcp/mcp.json`
+    /// (project scope) and `~/.junie/mcp/mcp.json` (user/global scope) —
+    /// a completely different, more specific path than Warden-AI's own
+    /// generic, unverified guess (`~/AppData/Roaming/JetBrains/mcp.json`
+    /// or platform equivalent) for the same product, a second concrete
+    /// case (after Claude Desktop) proving that file's unverified batch
+    /// shouldn't be trusted without independent checking. Standard `{
+    /// "mcpServers": {...}}` shape, reusing mcp_config.rs unmodified.
+    JetBrainsMcpJson,
+    /// opencode — verified 2026-09-05 against opencode.ai's own docs
+    /// (open-code.ai/en/docs/config, /docs/mcp-servers) and independently
+    /// cross-validated by Snyk's `agent-scan` also listing "OpenCode" in
+    /// its own supported-agent set (see STATUS.md #31's competitive
+    /// research). Config: `opencode.json` (project root) or
+    /// `~/.config/opencode/opencode.json` (user/global) — servers sit
+    /// under a `"mcp"` key, ONE level of nesting (`{"mcp": {"<name>": {
+    /// "type": "local"|"remote", "command"|"url": ...}}}}`), not a flat
+    /// top-level `mcpServers` map. Doesn't reuse `parse_mcp_servers_json`'s
+    /// single-key lookup for this reason — `opencode.rs` navigates the
+    /// one level itself, then hands the inner map to the same shared
+    /// `parse_server_map` every other agent uses, the same pattern
+    /// already proven for OpenClaw's (two-level) nesting. A `.jsonc`
+    /// variant (JSON with comments) is also documented but not handled --
+    /// `serde_json` doesn't parse comments, and this hasn't been
+    /// special-cased; a `.jsonc` file with real comments in it will fail
+    /// to parse and be silently skipped, same as any malformed JSON file
+    /// elsewhere in this codebase.
+    OpenCodeMcpJson,
+    /// Tabnine — verified 2026-09-05 against docs.tabnine.com's own MCP
+    /// setup docs. Path: `.tabnine/mcp_servers.json` (project scope) and
+    /// `~/.tabnine/mcp_servers.json` (user scope). Standard `{
+    /// "mcpServers": {...}}` shape, reusing mcp_config.rs unmodified.
+    TabnineMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -473,6 +531,10 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(devin_cli::DevinCliAdapter),
         Box::new(cline::ClineAdapter),
         Box::new(roo_code::RooCodeAdapter),
+        Box::new(zed::ZedAdapter),
+        Box::new(jetbrains::JetBrainsAdapter),
+        Box::new(opencode::OpenCodeAdapter),
+        Box::new(tabnine::TabnineAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }
