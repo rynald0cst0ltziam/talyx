@@ -17,11 +17,14 @@ generic Unknown Agent Mode fallback), static capability extraction
 packages), the risk engine (capped evidence + reputation discount + context
 modifiers), and real enforcement — MCP-server config-rewrite through
 `agentguard-shim` (BUILD_PLAN.md §5a), remote-entry removal, skill
-quarantine, drift detection, and hook enforcement (Claude Code and Codex so
-far, sharing one discovery/rewrite path — see STATUS.md #26) — are
-implemented and tested end-to-end, several proven against live adversarial
-fixtures, not just unit tests. See STATUS.md for what's proven vs. still
-open, and BUILD_PLAN.md §14 for the full picture.
+quarantine, drift detection, and hook enforcement across five agents
+(Claude Code, Codex, Antigravity, Gemini CLI, GitHub Copilot CLI, sharing
+one discovery/rewrite path — see STATUS.md #26-#30; VS Code Copilot rides
+on Claude Code's and Copilot CLI's own hook files for free) — are
+implemented and tested end-to-end, most proven against live adversarial
+fixtures (real SSH-exfiltration payloads genuinely blocked, benign hooks
+genuinely running), not just unit tests. See STATUS.md for what's proven
+vs. still open, and BUILD_PLAN.md §14 for the full picture.
 
 No published release exists yet — the install methods below (`curl`/`irm`,
 npm) are complete and tested as scripts, but will fail at the download step
