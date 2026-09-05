@@ -1,17 +1,34 @@
-//! Windsurf adapter — same locked v0 scope as Cursor (BUILD_PLAN.md §0):
-//! discovery + config-gating only, no hook-level enforcement claim.
-//! Windsurf's own docs (verified 2026-09-05, see `ConfigSourceKind::
-//! WindsurfMcpJson`'s doc comment for the redirect-to-Devin caveat) don't
-//! document any hooks/skills/plugins extensibility mechanism beyond MCP
-//! servers themselves, so there's nothing else to discover here — a
-//! narrower surface than Claude Code or even Cursor, not an oversight.
+//! Windsurf/Devin Desktop adapter — same locked v0 scope as Cursor
+//! (BUILD_PLAN.md §0): discovery + config-gating only, no hook-level
+//! enforcement claim. "Windsurf" was rebranded to "Devin Desktop" on
+//! 2026-06-02 (Cognition, which also makes Devin, acquired Windsurf in
+//! 2025) — shipped as an automatic over-the-air update, no reinstall, no
+//! new install path. Re-verified 2026-09-05 directly against the CURRENT
+//! docs.devin.ai/desktop/cascade/mcp page (the IDE's AI feature is called
+//! "Cascade") that the rebrand did NOT change the config path or shape at
+//! all: still `~/.codeium/windsurf/mcp_config.json`, still `{"mcpServers":
+//! {...}}`. This module is kept under its original "windsurf" name/agent
+//! id rather than renamed, since that's still the literal path component
+//! and is how the product is referenced across this codebase's trust
+//! seed/tests; "Devin Desktop" is documented here as the current product
+//! name for anyone searching for it.
+//!
+//! An EARLIER note in this session's investigation claimed Devin
+//! Desktop's hooks use "the same format as Claude Code hooks" — that
+//! claim did NOT survive re-verification (see STATUS.md's retraction) and
+//! is NOT repeated here: whether Cascade has any hook mechanism at all
+//! remains genuinely unresolved, not built, not guessed at. Windsurf's
+//! own docs (as re-checked) don't document any hooks/skills/plugins
+//! extensibility mechanism beyond MCP servers themselves, so there's
+//! nothing else to discover here — a narrower surface than Claude Code or
+//! even Cursor, not an oversight.
 //!
 //! Config path: `~/.codeium/windsurf/mcp_config.json`, user scope ONLY —
-//! confirmed directly (not assumed) that Windsurf has no project-scoped
+//! confirmed directly (not assumed) that there's no project-scoped
 //! equivalent, unlike Claude Code/Cursor/Codex. Same `{ "mcpServers": {
 //! "<name>": { command, args, env } } }` shape, reusing mcp_config.rs —
-//! Windsurf's remote-server field is documented as accepting either `url`
-//! or `serverUrl`, both handled by the shared parser already.
+//! the remote-server field is documented as accepting either `url` or
+//! `serverUrl`, both handled by the shared parser already.
 //!
 //! Rules-file visibility: Windsurf's project-root rules file is
 //! `.windsurfrules` (legacy, but confirmed still read as of this

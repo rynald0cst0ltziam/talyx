@@ -7,14 +7,20 @@
 //! shim/daemon — see BUILD_PLAN.md §5). Keeping that boundary is what lets
 //! adding a new agent stay an adapter-sized change instead of a rewrite.
 
+pub mod amazon_q;
+pub mod amp;
 pub mod antigravity;
 pub mod claude_code;
+pub mod claude_desktop;
 pub mod codex;
+pub mod continue_dev;
 pub mod cursor;
 pub mod gemini_cli;
 pub mod github_copilot_cli;
 mod hooks_config;
+pub mod kiro;
 mod mcp_config;
+pub mod openclaw;
 pub mod unknown;
 pub mod vscode_copilot;
 pub mod windsurf;
@@ -271,6 +277,105 @@ pub enum ConfigSourceKind {
     /// deliberately does not cover yet — the standalone-file mechanism is
     /// the primary, most concretely documented one.
     GitHubCopilotCliHooksJson,
+    /// Claude Desktop's own `claude_desktop_config.json` — DISTINCT from
+    /// Claude Code (a separate product: a chat-only desktop app, no coding-
+    /// agent tool-execution loop, no hooks/skills mechanism). Verified
+    /// 2026-09-05 against multiple independent sources agreeing on the
+    /// same three OS-specific paths: `~/Library/Application Support/
+    /// Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\
+    /// claude_desktop_config.json` (Windows), `~/.config/Claude/
+    /// claude_desktop_config.json` (Linux) — i.e. `dirs::config_dir()`,
+    /// NOT `dirs::home_dir()` like every other agent covered so far (the
+    /// first one that isn't a plain home-relative dot-directory). User-
+    /// scope only — Claude Desktop has no per-project concept. Same `{
+    /// "mcpServers": {...} }` shape as Claude Code/Cursor. A known,
+    /// documented limitation carried over from the primary source: on
+    /// Windows MSIX installs, the app may read from a different location
+    /// inside the MSIX virtualized filesystem than this path — not
+    /// resolved further here, matching this codebase's "record real,
+    /// honest limitations" discipline.
+    ClaudeDesktopMcpJson,
+    /// OpenClaw's `~/.openclaw/openclaw.json` — verified 2026-09-05
+    /// against docs.openclaw.ai/tools/mcp. Genuinely different nesting
+    /// from every other agent: servers sit under `mcp.servers` (TWO levels
+    /// deep — `{"mcp": {"servers": {"<name>": {...}}}}`), not a flat
+    /// top-level `mcpServers` key, so this doesn't reuse
+    /// `parse_mcp_servers_json`'s single-key lookup — `openclaw.rs`
+    /// navigates the two levels itself, then hands the inner map straight
+    /// to the same shared `parse_server_map` every other agent uses. Each
+    /// server entry can carry a `"transport"` field (`"stdio"`, `"sse"`,
+    /// `"streamable-http"`) and its own `"enabled"` boolean, inverted from
+    /// Kiro's `"disabled"` (see `KiroMcpJson`'s doc comment) -- `openclaw.rs`
+    /// checks for `"enabled": false` itself before handing entries to the
+    /// shared parser, since `parse_server_map`'s own check looks for the
+    /// opposite field name. OpenClaw itself has some gateway/router characteristics
+    /// (per-agent server routing, a scoped config editor) but ships its
+    /// own CLI end users install directly, matching Snyk agent-scan's own
+    /// classification of it as a scannable agent, not purely an
+    /// enterprise-deployed gateway.
+    OpenClawJson,
+    /// Sourcegraph Amp's settings files — `~/.config/amp/settings.json`
+    /// (user scope) and `.amp/settings.json` (project/workspace scope).
+    /// Verified 2026-09-05 against ampcode.com/docs/customize/mcp: the
+    /// top-level key is LITERALLY the dotted string `"amp.mcpServers"`
+    /// (VS-Code-settings-style flat key, not a nested `{"amp": {...}}`
+    /// object) — reuses `parse_mcp_servers_json`'s existing `top_level_key`
+    /// parameter unmodified, the same mechanism already proven for VS
+    /// Code Copilot's `"servers"` key. A real, documented trust
+    /// distinction from Amp's own docs: servers in the WORKSPACE file
+    /// (`.amp/settings.json`) require explicit approval before running;
+    /// servers in the GLOBAL file do not — noted here, not enforced
+    /// differently by this adapter (same as Codex's analogous "trusted
+    /// projects only" caveat, which this codebase's adapters document but
+    /// don't independently re-implement). A separate `.amp/mcp.json` file
+    /// for bundling servers with skills is mentioned in Amp's docs without
+    /// a confirmed JSON shape — deliberately not covered, not guessed at.
+    AmpMcpJson,
+    /// Kiro's `.kiro/settings/mcp.json` (project scope) and
+    /// `~/.kiro/settings/mcp.json` (user scope) — verified 2026-09-05
+    /// against kiro.dev/docs/mcp/. Standard `{"mcpServers": {"<name>": {
+    /// command, args, env, disabled }}}` shape, identical in structure to
+    /// Claude Code/Cursor — the closest fit yet to the already-proven
+    /// shape, zero new parsing logic needed beyond the shared `"disabled"`
+    /// skip in `mcp_config.rs`'s `parse_server_map` (added specifically
+    /// because Kiro's own example config includes `"disabled": false`
+    /// inline).
+    KiroMcpJson,
+    /// Amazon Q Developer CLI — TWO real, distinct MCP surfaces, both
+    /// verified 2026-09-05 directly against AWS's own docs and the
+    /// aws/amazon-q-developer-cli GitHub repo's `agent-format.md`: (1) the
+    /// "legacy" fixed-path files, `~/.aws/amazonq/mcp.json` (global) and
+    /// `.amazonq/mcp.json` (workspace) — AWS's own docs call these
+    /// "legacy" but they remain a real, currently-functional config
+    /// surface, not removed; (2) the newer named "custom agent" files,
+    /// each an arbitrarily-NAMED `*.json` file (the filename becomes the
+    /// agent's name) inside `~/.aws/amazonq/cli-agents/` (CLI) or
+    /// `~/.aws/amazonq/agents/` (IDE) — same `"mcpServers"` field, nested
+    /// inside a larger per-agent config object alongside unrelated
+    /// fields. Both surfaces use the identical `{"mcpServers": {"<name>":
+    /// {command, args, env, timeout}}}` shape for the servers themselves,
+    /// so `amazon_q.rs` handles the "arbitrary filename" surface the same
+    /// way `github_copilot_cli.rs` handles Copilot CLI's own glob-of-files
+    /// hooks directory — enumerate `*.json`, parse each independently.
+    AmazonQMcpJson,
+    /// Continue.dev — JSON-only, PARTIAL coverage, deliberately: `.continue/
+    /// mcpServers/*.json` (project) and `~/.continue/mcpServers/*.json`
+    /// (user), a glob of files exactly like Amazon Q's/Copilot CLI's own
+    /// pattern, standard `{"mcpServers": {...}}` shape when a file in that
+    /// directory happens to be JSON (Continue's own docs explicitly permit
+    /// dropping in "JSON MCP configuration from another tool" here
+    /// unchanged). Verified 2026-09-05 against docs.continue.dev/
+    /// customize/deep-dives/mcp: Continue's NATIVE, preferred format is
+    /// actually YAML (`config.yaml`'s own `mcpServers` key is a LIST of
+    /// `{name, command, args}` objects, not a name-keyed map — a
+    /// genuinely different shape from every other agent this codebase
+    /// covers) and `.continue/mcpServers/*.yaml`/`*.yml` files use the
+    /// same list shape. Neither YAML surface is covered by this variant —
+    /// would need a YAML parsing dependency this workspace doesn't have
+    /// yet, plus a bespoke list-shaped (not map-shaped) parser — scoped as
+    /// a deliberate, documented follow-up rather than guessed at or
+    /// silently skipped without a record.
+    ContinueMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -291,6 +396,7 @@ pub trait AgentAdapter {
 pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
     vec![
         Box::new(claude_code::ClaudeCodeAdapter),
+        Box::new(claude_desktop::ClaudeDesktopAdapter),
         Box::new(cursor::CursorAdapter),
         Box::new(codex::CodexAdapter),
         Box::new(windsurf::WindsurfAdapter),
@@ -298,6 +404,11 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(gemini_cli::GeminiCliAdapter),
         Box::new(github_copilot_cli::GitHubCopilotCliAdapter),
         Box::new(vscode_copilot::VsCodeCopilotAdapter),
+        Box::new(amazon_q::AmazonQAdapter),
+        Box::new(amp::AmpAdapter),
+        Box::new(kiro::KiroAdapter),
+        Box::new(openclaw::OpenClawAdapter),
+        Box::new(continue_dev::ContinueDevAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

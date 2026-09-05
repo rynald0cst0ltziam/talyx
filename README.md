@@ -10,21 +10,26 @@ Read first:
 
 ## Status
 
-v0: discovery across nine agents (Claude Code, Cursor, Codex, Windsurf,
-Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code Copilot, plus a
-generic Unknown Agent Mode fallback), static capability extraction
-(JS/TS/Python/Ruby/Perl/shell heuristics, registry-resolved npm/PyPI
-packages), the risk engine (capped evidence + reputation discount + context
-modifiers), and real enforcement — MCP-server config-rewrite through
-`agentguard-shim` (BUILD_PLAN.md §5a), remote-entry removal, skill
-quarantine, drift detection, and hook enforcement across five agents
-(Claude Code, Codex, Antigravity, Gemini CLI, GitHub Copilot CLI, sharing
-one discovery/rewrite path — see STATUS.md #26-#30; VS Code Copilot rides
-on Claude Code's and Copilot CLI's own hook files for free) — are
-implemented and tested end-to-end, most proven against live adversarial
-fixtures (real SSH-exfiltration payloads genuinely blocked, benign hooks
-genuinely running), not just unit tests. See STATUS.md for what's proven
-vs. still open, and BUILD_PLAN.md §14 for the full picture.
+v0: discovery across 15 agents (Claude Code, Claude Desktop, Cursor,
+Codex, Windsurf/Devin Desktop, Antigravity, Gemini CLI, GitHub Copilot
+CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q Developer CLI,
+Continue.dev, plus a generic Unknown Agent Mode fallback), static
+capability extraction (JS/TS/Python/Ruby/Perl/shell heuristics,
+registry-resolved npm/PyPI packages), the risk engine (capped evidence +
+reputation discount + context modifiers), and real enforcement —
+MCP-server config-rewrite through `agentguard-shim` (BUILD_PLAN.md §5a),
+remote-entry removal, skill quarantine, drift detection, and hook
+enforcement across five agents (Claude Code, Codex, Antigravity, Gemini
+CLI, GitHub Copilot CLI, sharing one discovery/rewrite path — see
+STATUS.md #26-#30; VS Code Copilot rides on Claude Code's and Copilot
+CLI's own hook files for free) — are implemented and tested end-to-end,
+most proven against live adversarial fixtures (real SSH-exfiltration
+payloads genuinely blocked, benign hooks genuinely running), not just
+unit tests. Agent coverage was directly benchmarked against the live
+competitive landscape (Snyk's `agent-scan`, Invariant Labs' `mcp-scan`,
+others — see STATUS.md #31) rather than assumed comprehensive. See
+STATUS.md for what's proven vs. still open, and BUILD_PLAN.md §14 for the
+full picture.
 
 No published release exists yet — the install methods below (`curl`/`irm`,
 npm) are complete and tested as scripts, but will fail at the download step
@@ -66,7 +71,7 @@ otherwise they print the line to add yourself.
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
   agentguard-scanner     static capability extraction (JS/TS, Python, shell scripts; package.json manifest)
-  agentguard-adapters    per-agent discovery: Claude Code, Cursor, Codex, Windsurf, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), Unknown Agent Mode
+  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)

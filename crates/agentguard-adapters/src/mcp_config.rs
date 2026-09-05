@@ -78,6 +78,16 @@ pub(crate) fn parse_server_map(
 ) -> Vec<DiscoveredArtifact> {
     let mut out = Vec::new();
     for (name, cfg) in servers {
+        // A server marked "disabled": true never runs -- Kiro's and
+        // OpenClaw's own docs confirm this per-server flag (verified
+        // 2026-09-05), and surfacing a disabled entry as live risk would
+        // be a false positive, same principle as hooks_config.rs's
+        // "enabled": false skip for hooks. Harmless for every other agent,
+        // which doesn't populate this field.
+        if matches!(cfg.get("disabled"), Some(Value::Bool(true))) {
+            continue;
+        }
+
         // Remote MCP server — `{ "type": "http" | "sse", "url": "...",
         // "headers": {...} }` instead of a local `command`/`args`. This is
         // an increasingly common shape (Notion, Linear, Sentry, and other
@@ -900,6 +910,33 @@ mod tests {
             discovered[0].config_source.as_ref().unwrap().kind,
             ConfigSourceKind::CursorMcpJson
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn skips_a_server_marked_disabled_true() {
+        let dir = unique_temp_dir("disabled-server");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let config = serde_json::json!({
+            "mcpServers": {
+                "live": { "command": "some-binary", "args": [] },
+                "turned-off": { "command": "some-binary", "args": [], "disabled": true }
+            }
+        });
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_mcp_servers_json(
+            &config_path,
+            &dir,
+            ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "mcpServers",
+            "claude-code",
+            "Claude Code",
+        );
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].artifact.name, "live");
 
         std::fs::remove_dir_all(&dir).ok();
     }

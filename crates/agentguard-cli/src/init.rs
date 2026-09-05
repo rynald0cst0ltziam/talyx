@@ -112,8 +112,22 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::WindsurfMcpJson
         | ConfigSourceKind::AntigravityMcpJson
         | ConfigSourceKind::GeminiCliSettingsJson
-        | ConfigSourceKind::GitHubCopilotCliMcpJson => Some("mcpServers".to_string()),
+        | ConfigSourceKind::GitHubCopilotCliMcpJson
+        | ConfigSourceKind::ClaudeDesktopMcpJson
+        | ConfigSourceKind::KiroMcpJson
+        | ConfigSourceKind::AmazonQMcpJson
+        | ConfigSourceKind::ContinueMcpJson => Some("mcpServers".to_string()),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
+        ConfigSourceKind::AmpMcpJson => Some("amp.mcpServers".to_string()),
+        // OpenClaw's shape is nested two levels (`mcp.servers`), not a
+        // single flat top-level key -- there's no single string this
+        // string-keyed restore path can express, so `agentguard allow`
+        // can't currently restore a removed OpenClaw remote entry this
+        // way. A real, documented limitation (OpenClaw's remote-entry
+        // enforcement is scoped to "remove," not "remove and reliably
+        // restore" until this restore path is generalized to a nested key
+        // path, not just a single string).
+        ConfigSourceKind::OpenClawJson => None,
         ConfigSourceKind::ClaudeCodeHooksJson
         | ConfigSourceKind::CodexHooksJson
         | ConfigSourceKind::AntigravityHooksJson
@@ -431,14 +445,18 @@ fn rewrite_config_json(
             | ConfigSourceKind::WindsurfMcpJson
             | ConfigSourceKind::AntigravityMcpJson
             | ConfigSourceKind::GeminiCliSettingsJson
-            | ConfigSourceKind::GitHubCopilotCliMcpJson => {
+            | ConfigSourceKind::GitHubCopilotCliMcpJson
+            | ConfigSourceKind::ClaudeDesktopMcpJson
+            | ConfigSourceKind::KiroMcpJson
+            | ConfigSourceKind::AmazonQMcpJson
+            | ConfigSourceKind::ContinueMcpJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
                     remote_artifacts.push(*s);
                 }
             }
-            // The one shape with a different top-level key — see
+            // The shapes with a different top-level key — see
             // `parse_mcp_servers_json`'s `top_level_key` doc comment. A
             // config-file group is always homogeneous (one physical file
             // only ever holds one agent's config), so it's safe to just
@@ -452,6 +470,27 @@ fn rewrite_config_json(
                     remote_artifacts.push(*s);
                 }
             }
+            ConfigSourceKind::AmpMcpJson => {
+                top_level_key = "amp.mcpServers";
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
+            }
+            // OpenClaw's shape is nested two levels (`{"mcp": {"servers":
+            // {...}}}`), not a single flat top-level key — the shared
+            // `rewrite_mcp_servers`/`remove_blocked_remote_entries_json`
+            // functions below only know how to look up ONE string key at
+            // `json`'s own root, so they can't reach into a nested path.
+            // Discovery/scoring still works fully (openclaw.rs handles its
+            // own nested lookup independently) — this is scoped as
+            // discovery-only for now, matching how Cursor/Codex had
+            // discovery-only before their own enforcement was added later,
+            // rather than forcing a real shape mismatch through a
+            // mechanism that doesn't fit it. A future nested-path-aware
+            // rewrite function would close this, not a quick patch here.
+            ConfigSourceKind::OpenClawJson => {}
             ConfigSourceKind::ClaudeCodeHooksJson
             | ConfigSourceKind::CodexHooksJson
             | ConfigSourceKind::GeminiCliHooksJson
