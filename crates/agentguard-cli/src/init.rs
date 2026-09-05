@@ -114,7 +114,9 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::GeminiCliSettingsJson
         | ConfigSourceKind::GitHubCopilotCliMcpJson => Some("mcpServers".to_string()),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
-        ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexMcpServersToml => None,
+        ConfigSourceKind::ClaudeCodeHooksJson
+        | ConfigSourceKind::CodexHooksJson
+        | ConfigSourceKind::CodexMcpServersToml => None,
     }
 }
 
@@ -136,7 +138,12 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
     let is_hook_shell_command = s
         .config_source
         .as_ref()
-        .map(|cs| cs.kind == ConfigSourceKind::ClaudeCodeHooksJson)
+        .map(|cs| {
+            matches!(
+                cs.kind,
+                ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexHooksJson
+            )
+        })
         .unwrap_or(false);
     let shell_command = if is_hook_shell_command {
         s.launch.as_ref().map(|l| l.command.clone())
@@ -378,11 +385,13 @@ fn move_skill_directory(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
-/// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and Claude
-/// Code's hooks tree (nested, no flat key). Matching `config_source.kind`
-/// exhaustively (no wildcard) means a future variant with a different
-/// shape forces a deliberate decision here, not a silent (and wrong)
-/// fallthrough into this logic.
+/// JSON path: Claude Code / Cursor's `mcpServers` (flat map) and the
+/// `{"hooks": {...}}` tree used by both Claude Code and Codex (nested, no
+/// flat key — identical shape, confirmed against Codex's own docs, so one
+/// rewrite path covers both). Matching `config_source.kind` exhaustively
+/// (no wildcard) means a future variant with a different shape forces a
+/// deliberate decision here, not a silent (and wrong) fallthrough into
+/// this logic.
 fn rewrite_config_json(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
@@ -429,7 +438,7 @@ fn rewrite_config_json(
                     remote_artifacts.push(*s);
                 }
             }
-            ConfigSourceKind::ClaudeCodeHooksJson => {
+            ConfigSourceKind::ClaudeCodeHooksJson | ConfigSourceKind::CodexHooksJson => {
                 if s.launch.is_some() {
                     hook_artifacts.push(*s);
                 }
@@ -699,10 +708,11 @@ fn rewrite_mcp_servers(
     (newly_protected, already_protected)
 }
 
-/// Rewrites Claude Code hook entries. There's no flat key to look up by —
-/// a hook's `entry_key` is `"hook-<i>"`, its index in the same
-/// depth-first, object-then-array traversal order
-/// claude_code.rs's `collect_command_strings` uses to assign it in the
+/// Rewrites hook entries — shared by Claude Code's `settings.json` and
+/// Codex's `hooks.json` (identical `{"hooks": {...}}` shape). There's no
+/// flat key to look up by — a hook's `entry_key` is `"hook-<i>"`, its index
+/// in the same depth-first, object-then-array traversal order
+/// hooks_config.rs's `collect_command_strings` uses to assign it in the
 /// first place — so this walks `json["hooks"]` in that identical order and
 /// rewrites the i-th `"command"` field found for any index we have a
 /// target for.
@@ -763,12 +773,12 @@ fn walk_and_rewrite_hook_commands(
                     } else {
                         // Deliberately does NOT embed the real command —
                         // see DecisionRecord.shell_command's doc comment.
-                        // This string is safe for Claude Code's own shell
-                        // to re-parse: two quoted tokens (no
-                        // metacharacters possible in either — the shim
-                        // path is a filesystem path, the artifact id is
-                        // hash-based, see claude_code.rs's short_hash) and
-                        // a literal flag, nothing else.
+                        // This string is safe for the agent's own shell to
+                        // re-parse: two quoted tokens (no metacharacters
+                        // possible in either — the shim path is a
+                        // filesystem path, the artifact id is hash-based,
+                        // see hooks_config.rs's short_hash) and a literal
+                        // flag, nothing else.
                         let wrapped = format!("\"{shim_str}\" \"{}\" --shell", s.artifact.id);
                         map.insert("command".to_string(), serde_json::Value::String(wrapped));
                         *newly_protected += 1;

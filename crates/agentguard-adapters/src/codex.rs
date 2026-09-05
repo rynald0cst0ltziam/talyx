@@ -1,9 +1,7 @@
-//! Codex CLI adapter — discovery + config-gating, same locked v0 scope as
-//! Cursor (BUILD_PLAN.md §0): no hook-level enforcement claim, since Codex
-//! has no confirmed equivalent to Claude Code's `PreToolUse` hooks. MCP
-//! server config lives in `config.toml` (verified against OpenAI's own
-//! docs, learn.chatgpt.com/docs/extend/mcp) — TOML, not the `mcpServers`
-//! JSON shape Claude Code/Cursor use, so this doesn't reuse mcp_config.rs's
+//! Codex CLI adapter — discovery + config-gating. MCP server config lives
+//! in `config.toml` (verified against OpenAI's own docs,
+//! learn.chatgpt.com/docs/extend/mcp) — TOML, not the `mcpServers` JSON
+//! shape Claude Code/Cursor use, so this doesn't reuse mcp_config.rs's
 //! parser, though it does reuse its command/args classification and
 //! publisher-guessing logic (same underlying concept once parsed: a name
 //! mapped to a command+args or a remote url).
@@ -13,6 +11,12 @@
 //! empty discovery as a path check, not absence" caveat as the other
 //! adapters.
 //!
+//! Codex also has a real, confirmed `PreToolUse`-equivalent hook mechanism
+//! (`.codex/hooks.json` / `~/.codex/hooks.json`, verified 2026-09-05 —
+//! see `ConfigSourceKind::CodexHooksJson`'s doc comment), the same shape
+//! as Claude Code's, so hook discovery/enforcement is now shared with
+//! Claude Code via `hooks_config.rs` rather than a second implementation.
+//!
 //! Local stdio servers: `[mcp_servers.<id>]` with `command`, `args`, `env`
 //! (a nested table), `env_vars` (an array of host env var NAMES to
 //! forward). Remote servers: `url`, `bearer_token_env_var`,
@@ -21,6 +25,7 @@
 //! secret values out of the config file, referencing an env var name
 //! instead — noted, not modeled further here).
 
+use crate::hooks_config::parse_hooks_json;
 use crate::mcp_config::{classify_command, guess_publisher, unwrap_shim_invocation};
 use crate::{AgentAdapter, ConfigSource, ConfigSourceKind, DiscoveredArtifact, LaunchCommand};
 use agentguard_core::{
@@ -62,6 +67,29 @@ impl AgentAdapter for CodexAdapter {
             out.extend(parse_codex_mcp_servers(
                 &h.join(".codex").join("config.toml"),
                 h,
+            ));
+        }
+
+        // Hooks — verified 2026-09-05 directly against OpenAI's own docs
+        // (learn.chatgpt.com/docs/hooks, two independent fetches): a
+        // standalone `.codex/hooks.json` (project scope) / `~/.codex/
+        // hooks.json` (user scope), same `{"hooks": {...}}` JSON shape as
+        // Claude Code's settings.json hooks tree — see
+        // `ConfigSourceKind::CodexHooksJson`'s doc comment. Codex's docs
+        // also mention inline `[hooks]` TOML tables in config.toml as an
+        // alternative location; deliberately not covered here yet (a
+        // second, differently-shaped parse path), same "don't build what
+        // hasn't been verified" discipline as everything else in this pass.
+        out.extend(parse_hooks_json(
+            &project_root.join(".codex").join("hooks.json"),
+            ConfigSourceKind::CodexHooksJson,
+            "codex",
+        ));
+        if let Some(h) = &home {
+            out.extend(parse_hooks_json(
+                &h.join(".codex").join("hooks.json"),
+                ConfigSourceKind::CodexHooksJson,
+                "codex",
             ));
         }
 
@@ -486,6 +514,36 @@ args = ["proxy", "--", "C:\\Users\\Hubby\\Desktop\\Bastion-AI\\bastion.exe", "mc
         std::fs::write(codex_dir.join("config.toml"), "[mcp_servers.x]\ncommand = \"y\"\n").unwrap();
 
         assert!(CodexAdapter.detect(&dir));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn discover_finds_project_scope_hooks_json() {
+        let dir = unique_temp_dir("hooks");
+        let codex_dir = dir.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let hooks = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "./scripts/audit-log.sh" } ] }
+                ]
+            }
+        });
+        std::fs::write(codex_dir.join("hooks.json"), serde_json::to_string_pretty(&hooks).unwrap())
+            .unwrap();
+
+        let discovered = CodexAdapter.discover(&dir);
+        let hook = discovered
+            .iter()
+            .find(|d| d.artifact.kind == ArtifactKind::Hook)
+            .expect("hook should be discovered");
+        assert_eq!(hook.launch.as_ref().unwrap().command, "./scripts/audit-log.sh");
+        assert!(hook.artifact.discovered_by.contains("codex"));
+        assert_eq!(
+            hook.config_source.as_ref().unwrap().kind,
+            ConfigSourceKind::CodexHooksJson
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

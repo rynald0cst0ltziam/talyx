@@ -10,14 +10,18 @@ Read first:
 
 ## Status
 
-v0: discovery (Claude Code adapter + generic Unknown Agent Mode), static
-capability extraction (JS/TS + Python heuristics), the risk engine (capped
-evidence + reputation discount + context modifiers), and real config-time
-**enforcement** (BUILD_PLAN.md §5a — `agentguard init` routes MCP servers
-through `agentguard-shim`, which genuinely blocks or allows them) are
-implemented and tested end-to-end. Not yet built: hook/skill enforcement,
-Cursor/Codex adapters, drift detection, the daemon, cloud sync. See
-BUILD_PLAN.md §14 for the full picture.
+v0: discovery across nine agents (Claude Code, Cursor, Codex, Windsurf,
+Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code Copilot, plus a
+generic Unknown Agent Mode fallback), static capability extraction
+(JS/TS/Python/Ruby/Perl/shell heuristics, registry-resolved npm/PyPI
+packages), the risk engine (capped evidence + reputation discount + context
+modifiers), and real enforcement — MCP-server config-rewrite through
+`agentguard-shim` (BUILD_PLAN.md §5a), remote-entry removal, skill
+quarantine, drift detection, and hook enforcement (Claude Code and Codex so
+far, sharing one discovery/rewrite path — see STATUS.md #26) — are
+implemented and tested end-to-end, several proven against live adversarial
+fixtures, not just unit tests. See STATUS.md for what's proven vs. still
+open, and BUILD_PLAN.md §14 for the full picture.
 
 No published release exists yet — the install methods below (`curl`/`irm`,
 npm) are complete and tested as scripts, but will fail at the download step

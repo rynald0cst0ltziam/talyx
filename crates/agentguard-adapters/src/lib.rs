@@ -13,6 +13,7 @@ pub mod codex;
 pub mod cursor;
 pub mod gemini_cli;
 pub mod github_copilot_cli;
+mod hooks_config;
 mod mcp_config;
 pub mod unknown;
 pub mod vscode_copilot;
@@ -164,6 +165,20 @@ pub enum ConfigSourceKind {
     /// (see `parse_mcp_servers_json`'s `top_level_key` parameter, added
     /// specifically to support this without forking the parser).
     VsCodeCopilotMcpJson,
+    /// A Codex CLI hooks file — `.codex/hooks.json` (project scope) or
+    /// `~/.codex/hooks.json` (user scope) as of this writing. Verified
+    /// 2026-09-05 directly against OpenAI's own docs
+    /// (learn.chatgpt.com/docs/hooks) via two independent fetches: the
+    /// JSON shape is `{"hooks": {"PreToolUse": [{"matcher": ..., "hooks":
+    /// [{"type": "command", "command": ...}]}]}}` — identical in structure
+    /// to `ClaudeCodeHooksJson` (a `command` shell-string nested the same
+    /// way, PascalCase event names, an optional top-level `description`
+    /// field that's irrelevant here), so this variant reuses the same
+    /// shared discovery/rewrite logic (`hooks_config.rs`) parameterized by
+    /// this kind rather than a second copy of it. `entry_key` is
+    /// `"hook-<index>"`, same traversal-order convention as
+    /// `ClaudeCodeHooksJson`.
+    CodexHooksJson,
 }
 
 pub trait AgentAdapter {
