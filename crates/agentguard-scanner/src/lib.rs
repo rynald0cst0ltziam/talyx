@@ -460,15 +460,26 @@ pub fn scan_file(path: &Path) -> Result<Vec<CapabilityFinding>, ScanError> {
     })?;
     let mut findings = apply_rules(&source, rules, path);
 
-    // AST layer (Phase 3) — runs alongside the regex rules for JS/TS and
-    // Python. Adds source-to-sink taint (a secret read that reaches a
-    // network sink) and structural capability detection the regex can't
-    // do (a sensitive path split across `path.join` arguments, a `curl`
-    // exfil string inside an `exec` call). Additive: its findings carry
-    // an `AST:` / `AST taint:` evidence prefix and never remove a
-    // regex finding.
+    // AST layer (Phase 3) — the authoritative capability/taint pass for
+    // JS/TS, Python and Ruby. It parses with tree-sitter and adds
+    // source-to-sink taint (a secret read that reaches a network sink,
+    // across function and helper-return boundaries) plus structural
+    // detection the regex can't do (a sensitive path split across
+    // `path.join` arguments, a `curl`/`/dev/tcp` string inside `exec`, a
+    // parameter forwarded to the wire). When the AST parse succeeds and
+    // reports a capability, the coarser regex finding for that same
+    // capability is dropped so the reasoning shown is the structural one.
+    // The regex rules stay as the fallback for a file tree-sitter can't
+    // parse (truncated / heavily obfuscated source) — see the parity
+    // test `ast_layer_is_a_superset_of_the_regex_layer_*`.
     if let Some(lang) = ast::lang_for_ext(&ext) {
-        findings.extend(ast::analyze(&source, lang, path));
+        let ast_findings = ast::analyze(&source, lang, path);
+        if !ast_findings.is_empty() {
+            let ast_caps: std::collections::BTreeSet<_> =
+                ast_findings.iter().map(|f| f.capability).collect();
+            findings.retain(|f| !ast_caps.contains(&f.capability));
+        }
+        findings.extend(ast_findings);
     }
 
     // If this file registers MCP tools, its declared tool DESCRIPTIONS are
@@ -859,6 +870,117 @@ mod tests {
         let findings = scan_file(&f).unwrap();
         assert!(!findings.iter().any(|x| x.capability == Capability::ReadSsh));
         assert!(!findings.iter().any(|x| x.evidence.contains("taint")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ast_layer_is_a_superset_of_the_regex_layer_for_js_and_python() {
+        // Parity audit backing the "AST is authoritative" decision: for a
+        // battery of representative snippets, every capability the tuned
+        // regex rules find, the AST layer finds too (it may find more).
+        // If this ever fails, the AST has a gap that must be closed
+        // before the regex fallback can be narrowed further.
+        let js_cases = [
+            "const cp = require('child_process'); cp.execSync('ls');",
+            "const fs = require('fs'); fs.readFileSync('/home/u/.ssh/id_rsa');",
+            "const k = require('fs').readFileSync(process.env.HOME + '/.aws/credentials');",
+            "fetch('https://x.example.com'); const https = require('https'); https.request({});",
+            "const x = process.env.TOKEN;",
+            "eval('1+1'); const f = new Function('return 1');",
+            "const { execSync } = require('child_process'); execSync('npm install evil');",
+            "require('fs').appendFileSync('/home/u/.bashrc', 'x');",
+            "const cron = require('node-cron'); cron.schedule('* * * * *', () => {});",
+            "const t = process.env.AWS_SECRET_ACCESS_KEY;",
+            "new WebSocket('wss://x.example.com');",
+        ];
+        let py_cases = [
+            "import subprocess\nsubprocess.run(['ls'])",
+            "open('/home/u/.ssh/id_rsa').read()",
+            "import os\nx = os.environ['TOKEN']",
+            "import requests\nrequests.post('https://x', data={})",
+            "import os\nos.system('pip install evil')",
+            "open('/home/u/.bashrc', 'a').write('x')",
+            "import boto3\nboto3.client('s3')",
+            "import schedule\nschedule.every().day.do(lambda: None)",
+        ];
+
+        let check = |cases: &[&str], lang: crate::ast::AstLang, tag: &str| {
+            for src in cases {
+                let regex_rules: &[PatternRule] = if tag == "js" {
+                    JS_RULES.as_slice()
+                } else {
+                    PY_RULES.as_slice()
+                };
+                // `.aws/credentials`-style reads: the regex tags them
+                // `CloudCredentials`, the AST tags the raw-file read
+                // `ReadCredentials` (a strictly stronger, better-fitting
+                // signal — it counts as raw secret material). Canonicalise
+                // both so the parity check compares like for like.
+                let canon = |c: Capability| match c {
+                    Capability::CloudCredentials => Capability::ReadCredentials,
+                    other => other,
+                };
+                let regex_caps: std::collections::BTreeSet<_> =
+                    apply_rules(src, regex_rules, Path::new("t"))
+                        .into_iter()
+                        .map(|f| canon(f.capability))
+                        .collect();
+                let ast_caps: std::collections::BTreeSet<_> =
+                    crate::ast::analyze(src, lang, Path::new("t"))
+                        .into_iter()
+                        .map(|f| canon(f.capability))
+                        .collect();
+                let missing: Vec<_> = regex_caps.difference(&ast_caps).collect();
+                assert!(
+                    missing.is_empty(),
+                    "[{tag}] AST misses {missing:?} that regex found for:\n  {src}\n  regex={regex_caps:?} ast={ast_caps:?}"
+                );
+            }
+        };
+        check(&js_cases, crate::ast::AstLang::JavaScript, "js");
+        check(&py_cases, crate::ast::AstLang::Python, "py");
+    }
+
+    #[test]
+    fn ruby_ast_covers_the_core_of_the_ruby_regex_rules() {
+        // Ruby's AST layer is newer/narrower than JS/Python's. This
+        // documents exactly which core cases it does cover; the regex
+        // fallback carries the rest (scan_file only drops a regex finding
+        // when the AST found the same capability, so nothing regresses).
+        let cases: [(&str, Capability); 5] = [
+            ("system('ls')", Capability::ExecuteShell),
+            ("key = File.read('/home/u/.ssh/id_rsa')", Capability::ReadSsh),
+            ("t = ENV['TOKEN']", Capability::EnvironmentVariables),
+            ("require 'net/http'\nNet::HTTP.post(uri, body)", Capability::NetworkExternal),
+            ("File.read(File.join(Dir.home, '.aws', 'credentials'))", Capability::ReadCredentials),
+        ];
+        for (src, want) in cases {
+            let ast_caps: Vec<_> = crate::ast::analyze(src, crate::ast::AstLang::Ruby, Path::new("t"))
+                .into_iter()
+                .map(|f| f.capability)
+                .collect();
+            assert!(ast_caps.contains(&want), "ruby AST missed {want:?} for `{src}` (got {ast_caps:?})");
+        }
+    }
+
+    #[test]
+    fn scan_file_prefers_the_ast_evidence_when_both_layers_agree() {
+        // AST-authoritative output: when the AST layer reports a
+        // capability, scan_file drops the coarser regex finding for that
+        // same capability so the reasoning shown to a user is the
+        // structural one, not a duplicate.
+        let dir = std::env::temp_dir().join(format!("agentguard-p3-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("s.js");
+        std::fs::write(&f, "const cp = require('child_process'); cp.execSync('whoami');\n").unwrap();
+        let findings = scan_file(&f).unwrap();
+        let shell: Vec<_> = findings
+            .iter()
+            .filter(|x| x.capability == Capability::ExecuteShell)
+            .collect();
+        // exactly one ExecuteShell finding, and it's the AST one
+        assert_eq!(shell.len(), 1, "{findings:?}");
+        assert!(shell[0].evidence.starts_with("AST:"), "{:?}", shell[0]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

