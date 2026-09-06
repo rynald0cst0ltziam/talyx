@@ -134,6 +134,13 @@ pub struct DecisionRecord {
     /// present — serde drops unknown fields.)
     #[serde(default)]
     pub config_key_path: Option<Vec<String>>,
+    /// Whether the removed remote entry was an element of a LIST (keyed by
+    /// its own `name` field — Continue.dev's / Aider's YAML `mcpServers`)
+    /// rather than a value in a name-keyed MAP (every other agent). The
+    /// restore path appends to the list vs. inserts at the map key.
+    /// `false` for a map (the default, and correct for every JSON agent).
+    #[serde(default)]
+    pub config_entry_is_list_element: bool,
     /// Where a Skill artifact's directory originally lived (its
     /// `scan_root` at scan time). A Skill has no `PreToolUse`-style
     /// interception point at all — Claude Code's own hooks reference
@@ -368,6 +375,7 @@ mod tests {
             config_path: None,
             config_entry_key: None,
             config_key_path: None,
+            config_entry_is_list_element: false,
             quarantine_original_path: None,
             quarantine_current_path: None,
         };
@@ -400,6 +408,7 @@ mod tests {
                 config_path: None,
                 config_entry_key: None,
             config_key_path: None,
+            config_entry_is_list_element: false,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
@@ -437,6 +446,7 @@ mod tests {
             config_path: None,
             config_entry_key: None,
             config_key_path: None,
+            config_entry_is_list_element: false,
             quarantine_original_path: None,
             quarantine_current_path: None,
         }

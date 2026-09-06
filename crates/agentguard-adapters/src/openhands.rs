@@ -54,7 +54,12 @@ fn parse_openhands_config(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifac
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(root) = toml::from_str::<toml::Value>(&text) else {
+    // Lenient parse (strict first, then a backslash-repair retry) — the
+    // same real-world Windows breakage `codex.rs` handles: a raw path
+    // pasted into a TOML basic string without escaping its backslashes
+    // (`"C:\Users\..."`, `\U` is an invalid escape). Found via a fixture,
+    // 2026-09-06 (STATUS.md 5e).
+    let Some(root) = crate::codex::parse_toml_leniently(&text) else {
         return Vec::new();
     };
     let Some(stdio_servers) = root.get("mcp").and_then(|m| m.get("stdio_servers")).and_then(|s| s.as_array())
@@ -122,6 +127,32 @@ stdio_servers = [
         assert!(names.contains(&"fetch"));
         assert!(names.contains(&"filesystem"));
         assert!(mcp.iter().all(|d| d.artifact.discovered_by.contains("openhands")));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn recovers_a_config_with_unescaped_windows_paths() {
+        // STATUS.md 5e: a real Windows config.toml often has a raw path in
+        // a basic string (`"C:\Users\..."`) -- `\U` is an invalid TOML
+        // escape, so strict `toml::from_str` fails and the whole file
+        // (and every server in it) was silently skipped. Lenient parse
+        // (shared with codex.rs) recovers it.
+        let dir = unique_temp_dir("winpath");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[mcp]\nstdio_servers = [\n  { name = \"fs\", command = \"node\", args = [\"C:\\Users\\dev\\mcp\\server.js\"] },\n]\n",
+        )
+        .unwrap();
+
+        let discovered = OpenHandsAdapter.discover(&dir);
+        let mcp: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.config_source.as_ref().map(|cs| cs.path.starts_with(&dir)).unwrap_or(false))
+            .collect();
+        assert_eq!(mcp.len(), 1, "the server must be discovered despite the unescaped path");
+        assert_eq!(mcp[0].artifact.name, "fs");
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -187,6 +187,21 @@ fn servers_map_mut_or_create<'a>(
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "target of the config key path is not a JSON object"))
 }
 
+/// Where a REMOTE MCP entry for `kind` lives, for the snapshot / removal /
+/// restore path: the key path to its container, and whether that
+/// container is a name-keyed MAP (`false`) or a LIST whose elements carry
+/// their own `name` field (`true`). `None` for a kind that can't hold a
+/// removable remote entry (OpenHands — `stdio_servers` is local-only;
+/// Codex TOML — its own restore path; hooks).
+fn remote_entry_location(kind: ConfigSourceKind) -> Option<(&'static [&'static str], bool)> {
+    match kind {
+        ConfigSourceKind::GooseMcpJson => Some((&["mcpServers"], false)),
+        ConfigSourceKind::ContinueYamlMcpJson => Some((&["mcpServers"], true)),
+        ConfigSourceKind::AiderMcpJson => Some((&["mcp-server"], true)),
+        _ => json_key_path(kind).map(|p| (p, false)),
+    }
+}
+
 fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel) -> DecisionRecord {
     let mut reasons = Vec::new();
     reasons.extend(s.breakdown.static_evidence_reasons.clone());
@@ -230,18 +245,29 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
     // this saved now, at scan time, rather than re-reading the config
     // later (by the time it's approved the entry may already be gone).
     let is_remote = s.launch.is_none() && s.config_source.is_some();
-    let (remote_entry_snapshot, config_path, config_entry_key, config_key_path) = if is_remote {
+    let location = if is_remote {
+        s.config_source
+            .as_ref()
+            .and_then(|cs| remote_entry_location(cs.kind))
+    } else {
+        None
+    };
+    let (
+        remote_entry_snapshot,
+        config_path,
+        config_entry_key,
+        config_key_path,
+        config_entry_is_list_element,
+    ) = if is_remote {
         (
             s.raw_config_entry.clone(),
             s.config_source.as_ref().map(|cs| cs.path.clone()),
             s.config_source.as_ref().map(|cs| cs.entry_key.clone()),
-            s.config_source
-                .as_ref()
-                .and_then(|cs| json_key_path(cs.kind))
-                .map(|p| p.iter().map(|s| s.to_string()).collect()),
+            location.map(|(p, _)| p.iter().map(|s| s.to_string()).collect()),
+            location.map(|(_, is_list)| is_list).unwrap_or(false),
         )
     } else {
-        (None, None, None, None)
+        (None, None, None, None, false)
     };
 
     // A Skill has no launch/config_source at all (see DecisionRecord's
@@ -273,6 +299,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         config_path,
         config_entry_key,
         config_key_path,
+        config_entry_is_list_element,
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
     }
@@ -343,7 +370,7 @@ fn rewrite_config(
     if is_toml {
         rewrite_config_toml(config_path, artifacts, shim_path, store)
     } else if let Some(format) = value_format {
-        rewrite_config_value(config_path, artifacts, shim_path, format)
+        rewrite_config_value(config_path, artifacts, shim_path, store, format)
     } else {
         rewrite_config_json(config_path, artifacts, shim_path, store)
     }
@@ -390,17 +417,17 @@ struct ValueConfigFormat {
 /// Rewrite path for a real-YAML config (Goose / Continue.dev / Aider) or
 /// OpenHands' array-of-tables TOML: parse the file into a
 /// `serde_json::Value` (via `serde_saphyr` for YAML, `toml` for TOML),
-/// shim-wrap the flagged local servers, and re-emit in the same format.
+/// shim-wrap the flagged local servers, remove any BLOCK/unapproved-ASK
+/// remote entry (STATUS.md 5d), and re-emit in the same format.
 ///
-/// Same limits the JSON path has: comments and exact formatting in the
+/// Same limit the JSON path has: comments and exact formatting in the
 /// user's file are not preserved (the `.agentguard-backup` written before
-/// the first rewrite is the safety net), and remote-entry removal is not
-/// done here yet — STATUS.md 5c's remaining half. Only local
-/// `command`/`args` servers are wrapped.
+/// the first rewrite is the safety net).
 fn rewrite_config_value(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: Option<&Path>,
+    store: &DecisionStore,
     format: ValueConfigFormat,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
@@ -414,19 +441,23 @@ fn rewrite_config_value(
         }
     };
 
-    let Some(shim_str) = shim_path.map(|p| p.display().to_string()) else {
-        return Ok(RewriteOutcome {
-            newly_protected: 0,
-            already_protected: 0,
-            removed_remote: 0,
-            backup_path: None,
-        });
+    let (local, remote): (Vec<&ScannedArtifact>, Vec<&ScannedArtifact>) =
+        artifacts.iter().partition(|s| s.launch.is_some());
+
+    // The shim is only needed to WRAP a local server; removing a remote
+    // entry doesn't need it (there's no process to launch), same as the
+    // JSON path.
+    let (newly_protected, already_protected) = match shim_path.map(|p| p.display().to_string()) {
+        Some(shim_str) => {
+            rewrite_servers_in_value(&mut root, &local, &shim_str, format.path, format.shape)
+        }
+        None => (0, 0),
     };
 
-    let (newly_protected, already_protected) =
-        rewrite_servers_in_value(&mut root, artifacts, &shim_str, format.path, format.shape);
+    let removed_remote =
+        remove_flagged_remote_in_value(&mut root, &remote, store, format.path, format.shape);
 
-    if newly_protected == 0 {
+    if newly_protected == 0 && removed_remote == 0 {
         return Ok(RewriteOutcome {
             newly_protected: 0,
             already_protected,
@@ -461,9 +492,60 @@ fn rewrite_config_value(
     Ok(RewriteOutcome {
         newly_protected,
         already_protected,
-        removed_remote: 0,
+        removed_remote,
         backup_path: Some(backup_path),
     })
+}
+
+/// Removes each remote artifact's entry from a `serde_json::Value` config
+/// (a YAML map / list) when its effective decision doesn't allow it to run
+/// — the value-format analog of `remove_blocked_remote_entries_json`. The
+/// entry was snapshotted into the store at scan time (`record_for`), so
+/// `agentguard allow` can restore it via `restore_remote_entry_value`.
+fn remove_flagged_remote_in_value(
+    root: &mut serde_json::Value,
+    remote_artifacts: &[&ScannedArtifact],
+    store: &DecisionStore,
+    path: &[&str],
+    shape: ServerContainer,
+) -> usize {
+    if remote_artifacts.is_empty() {
+        return 0;
+    }
+    let mut cur = &mut *root;
+    for seg in path {
+        cur = match cur.get_mut(*seg) {
+            Some(v) => v,
+            None => return 0,
+        };
+    }
+
+    let mut removed = 0;
+    for s in remote_artifacts {
+        let key = &s.config_source.as_ref().unwrap().entry_key; // filtered by caller
+        if !decision_requires_removal(effective_decision_for(store, s)) {
+            continue;
+        }
+        match shape {
+            ServerContainer::Map => {
+                if let Some(map) = cur.as_object_mut() {
+                    if map.remove(key).is_some() {
+                        removed += 1;
+                    }
+                }
+            }
+            ServerContainer::ListByName => {
+                if let Some(list) = cur.as_array_mut() {
+                    let before = list.len();
+                    list.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(key.as_str()));
+                    if list.len() < before {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+    removed
 }
 
 /// Shim-wraps each flagged local server in `root`, navigating `path` to
@@ -1442,7 +1524,13 @@ fn restore_remote_entry_if_needed(store: &DecisionStore, artifact_id: &str) {
         .map(|p| p.iter().map(String::as_str).collect())
         .unwrap_or_else(|| vec!["mcpServers"]);
 
-    match restore_remote_entry(config_path, entry_key, snapshot, &key_path) {
+    match restore_remote_entry(
+        config_path,
+        entry_key,
+        snapshot,
+        &key_path,
+        record.config_entry_is_list_element,
+    ) {
         Ok(true) => println!(
             "Restored '{}' in {}.",
             sanitize_for_display(entry_key),
@@ -1504,24 +1592,94 @@ fn restore_quarantined_skill_if_needed(store: &DecisionStore, artifact_id: &str)
     }
 }
 
-/// Re-inserts `entry_key: snapshot` into `config_path`'s MCP-servers map if
-/// it's missing, dispatching on JSON vs TOML by file extension (the same
-/// two shapes `rewrite_config` handles; a `.toml` config is Codex's, every
-/// other config in this codebase is one of the two JSON shapes). Returns
-/// `Ok(false)` — not an error — when the entry is already present, so the
-/// caller can tell "nothing to do" apart from "something went wrong."
+/// Re-inserts `entry_key: snapshot` into `config_path`'s MCP-servers
+/// container if it's missing, dispatching by file extension: `.toml` =
+/// Codex (name-keyed table), `.yaml`/`.yml` = Goose (map) or Continue.dev
+/// / Aider (list, `is_list_element`), everything else = a JSON config
+/// (`servers_map_mut_or_create` navigates the nested key path). Returns
+/// `Ok(false)` — not an error — when the entry is already present.
 fn restore_remote_entry(
     config_path: &Path,
     entry_key: &str,
     snapshot: &serde_json::Value,
     key_path: &[&str],
+    is_list_element: bool,
 ) -> io::Result<bool> {
-    let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml");
-    if is_toml {
-        restore_remote_entry_toml(config_path, entry_key, snapshot)
-    } else {
-        restore_remote_entry_json(config_path, entry_key, snapshot, key_path)
+    match config_path.extension().and_then(|e| e.to_str()) {
+        Some("toml") => restore_remote_entry_toml(config_path, entry_key, snapshot),
+        Some("yaml") | Some("yml") => {
+            restore_remote_entry_yaml(config_path, entry_key, snapshot, key_path, is_list_element)
+        }
+        _ => restore_remote_entry_json(config_path, entry_key, snapshot, key_path),
     }
+}
+
+/// YAML analog of `restore_remote_entry_json` — Goose's `mcpServers:` map
+/// (`is_list_element == false`) or Continue.dev's / Aider's list keyed by
+/// each element's `name` field (`true`). Re-emits with the same
+/// single-line-scalar options `rewrite_config_value` uses.
+fn restore_remote_entry_yaml(
+    config_path: &Path,
+    entry_key: &str,
+    snapshot: &serde_json::Value,
+    key_path: &[&str],
+    is_list_element: bool,
+) -> io::Result<bool> {
+    let original_text = std::fs::read_to_string(config_path)?;
+    let mut root: serde_json::Value = serde_saphyr::from_str(&original_text)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    if is_list_element {
+        let list = navigate_or_create_array(&mut root, key_path)?;
+        let already = list
+            .iter()
+            .any(|e| e.get("name").and_then(|n| n.as_str()) == Some(entry_key));
+        if already {
+            return Ok(false);
+        }
+        list.push(snapshot.clone());
+    } else {
+        let map = servers_map_mut_or_create(&mut root, key_path)?;
+        if map.contains_key(entry_key) {
+            return Ok(false);
+        }
+        map.insert(entry_key.to_string(), snapshot.clone());
+    }
+
+    let mut opts = serde_saphyr::SerializerOptions::default();
+    opts.prefer_block_scalars = false;
+    opts.min_fold_chars = usize::MAX;
+    let serialized = serde_saphyr::to_string_with_options(&root, opts)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    std::fs::write(config_path, serialized)?;
+    Ok(true)
+}
+
+/// Navigates `path` in `root`, creating any missing object segment and a
+/// missing final array, and returns the array at the end.
+fn navigate_or_create_array<'a>(
+    root: &'a mut serde_json::Value,
+    path: &[&str],
+) -> io::Result<&'a mut Vec<serde_json::Value>> {
+    let (last, parents) = path
+        .split_last()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty config key path"))?;
+    let mut cur = root;
+    for seg in parents {
+        let obj = cur.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("config segment before {seg} is not an object"))
+        })?;
+        cur = obj
+            .entry((*seg).to_string())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    }
+    let obj = cur
+        .as_object_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config parent of the list is not an object"))?;
+    obj.entry((*last).to_string())
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "target of the config key path is not a list"))
 }
 
 fn restore_remote_entry_json(
@@ -2028,6 +2186,133 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    fn remote_yaml_artifact(
+        name: &str,
+        config_path: PathBuf,
+        kind: ConfigSourceKind,
+        url: &str,
+        decision: Decision,
+    ) -> ScannedArtifact {
+        let mut a = synthetic_remote_scanned_artifact(name, config_path, url, decision, RiskBand::High);
+        a.config_source.as_mut().unwrap().kind = kind;
+        a.raw_config_entry = Some(serde_json::json!({ "name": name, "url": url }));
+        a
+    }
+
+    #[test]
+    fn rewrite_config_value_removes_a_blocked_remote_from_a_yaml_list() {
+        let dir = unique_temp_dir("yaml-list-remove");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join(".continue").join("config.yaml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_path,
+            "name: test\nmcpServers:\n  - name: evil\n    url: https://evil.example.com/mcp\n  - name: ok\n    url: https://ok.example.com/mcp\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let evil = remote_yaml_artifact(
+            "evil",
+            config_path.clone(),
+            ConfigSourceKind::ContinueYamlMcpJson,
+            "https://evil.example.com/mcp",
+            Decision::Block,
+        );
+        let ok = remote_yaml_artifact(
+            "ok",
+            config_path.clone(),
+            ConfigSourceKind::ContinueYamlMcpJson,
+            "https://ok.example.com/mcp",
+            Decision::Allow,
+        );
+        let outcome = rewrite_config(&config_path, &[&evil, &ok], None, &store).unwrap();
+        assert_eq!(outcome.removed_remote, 1);
+
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let list = j["mcpServers"].as_array().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["name"], "ok");
+        assert_eq!(j["name"], "test", "unrelated keys preserved");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_value_removes_a_blocked_remote_from_a_goose_yaml_map() {
+        let dir = unique_temp_dir("goose-remove");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.yaml");
+        std::fs::write(
+            &config_path,
+            "mcpServers:\n  evil:\n    type: sse\n    url: https://evil.example.com/mcp\n  ok:\n    type: sse\n    url: https://ok.example.com/mcp\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let evil = remote_yaml_artifact(
+            "evil",
+            config_path.clone(),
+            ConfigSourceKind::GooseMcpJson,
+            "https://evil.example.com/mcp",
+            Decision::Block,
+        );
+        let outcome = rewrite_config(&config_path, &[&evil], None, &store).unwrap();
+        assert_eq!(outcome.removed_remote, 1);
+
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(j["mcpServers"].get("evil").is_none());
+        assert!(j["mcpServers"].get("ok").is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_yaml_appends_to_a_list_and_is_idempotent() {
+        let dir = unique_temp_dir("yaml-restore-list");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.yaml");
+        std::fs::write(&config_path, "name: test\nmcpServers:\n  - name: kept\n    url: https://kept.example.com/mcp\n").unwrap();
+
+        let snapshot = serde_json::json!({ "name": "back", "url": "https://back.example.com/mcp" });
+        let restored =
+            restore_remote_entry(&config_path, "back", &snapshot, &["mcpServers"], true).unwrap();
+        assert!(restored);
+
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let list = j["mcpServers"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|e| e["name"] == "back"));
+
+        // idempotent
+        assert!(!restore_remote_entry(&config_path, "back", &snapshot, &["mcpServers"], true).unwrap());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_yaml_inserts_into_a_map() {
+        let dir = unique_temp_dir("yaml-restore-map");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.yaml");
+        std::fs::write(&config_path, "other: 1\n").unwrap();
+
+        let snapshot = serde_json::json!({ "type": "sse", "url": "https://back.example.com/mcp" });
+        let restored =
+            restore_remote_entry(&config_path, "back", &snapshot, &["mcpServers"], false).unwrap();
+        assert!(restored);
+
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcpServers"]["back"], snapshot);
+        assert_eq!(j["other"], 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn restore_remote_entry_json_reinserts_into_a_nested_map_and_creates_missing_parents() {
         let dir = unique_temp_dir("restore-nested");
@@ -2282,6 +2567,7 @@ mod tests {
                 config_path: Some(config_path.clone()),
                 config_entry_key: Some("askme".to_string()),
                 config_key_path: Some(vec!["mcpServers".to_string()]),
+                config_entry_is_list_element: false,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
@@ -2536,6 +2822,7 @@ mod tests {
                 config_path: None,
                 config_entry_key: None,
                 config_key_path: None,
+                config_entry_is_list_element: false,
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
             })
