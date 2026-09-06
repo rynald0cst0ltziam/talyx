@@ -56,6 +56,14 @@ pub enum Capability {
     HiddenInstructions,
     EncodedPayload,
     DataExfiltrationText,
+    /// This MCP server's NAME collides with, or is a near-miss spelling
+    /// of, a well-known / trusted server — so the agent could route a
+    /// tool call (`read_file`, `search`, ...) to this one instead of the
+    /// real one. "Tool shadowing" / "server impersonation", a core
+    /// detection for every serious MCP-security competitor. Determined by
+    /// a cross-artifact pass (agentguard-scanner's `shadowing` module),
+    /// not per-artifact static analysis.
+    ToolShadowing,
 }
 
 impl Capability {
@@ -138,6 +146,7 @@ impl Capability {
                 | Capability::HiddenInstructions
                 | Capability::EncodedPayload
                 | Capability::DataExfiltrationText
+                | Capability::ToolShadowing
         )
     }
 }

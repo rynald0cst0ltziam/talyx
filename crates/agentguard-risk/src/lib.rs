@@ -163,6 +163,13 @@ impl RiskEngine {
                     .to_string(),
             );
         }
+        if caps.contains(&Capability::ToolShadowing) {
+            extra += 30;
+            reasons.push(
+                "this server's NAME shadows, impersonates, or is a typosquat of a well-known / trusted MCP server — the agent could route tool calls to it (+30)"
+                    .to_string(),
+            );
+        }
         // Hidden text carrying an actual manipulation/exfiltration payload
         // is the canonical prompt-injection-via-skill shape — push it
         // unambiguously into CRITICAL rather than leaving it at the
@@ -524,6 +531,24 @@ mod tests {
         );
         let breakdown = engine.score(&artifact);
         assert_eq!(breakdown.total(), 25);
+        assert_eq!(breakdown.band(), RiskBand::Medium);
+    }
+
+    #[test]
+    fn tool_shadowing_lifts_an_otherwise_low_mcp_server_to_medium() {
+        // An unverified MCP server whose name shadows / impersonates a
+        // trusted one (STATUS.md #44). +30, in the content-influence
+        // group — enough to surface it for review, not enough to
+        // auto-block a possibly-legit dual config.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::McpServer,
+            None,
+            false,
+            &[Capability::SpawnProcess, Capability::ToolShadowing],
+        );
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.total(), 40); // 10 (spawn) + 30 (shadowing)
         assert_eq!(breakdown.band(), RiskBand::Medium);
     }
 

@@ -141,9 +141,62 @@ pub fn collect(
         }
     }
 
+    // Cross-artifact pass: MCP tool shadowing / server-name impersonation.
+    // Has to run after every server is discovered and scored (it needs
+    // each one's reputation verdict), so it's a post-pass that re-scores
+    // just the affected artifacts.
+    apply_tool_shadowing(&mut out, engine, level);
+
     // Worst risk first — that's what a human should see first.
     out.sort_by(|a, b| b.band.cmp(&a.band));
     out
+}
+
+/// Flags an MCP server whose NAME would let it intercept the agent's tool
+/// calls — sharing a name with a trusted server, or impersonating /
+/// typosquatting a well-known one (`filesystem`, `github`, ...). See
+/// `agentguard_scanner::shadowing`. Adds a `ToolShadowing` capability
+/// finding and re-scores the artifact.
+fn apply_tool_shadowing(
+    out: &mut [ScannedArtifact],
+    engine: &RiskEngine,
+    level: ProtectionLevel,
+) {
+    let mcp_indices: Vec<usize> = out
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.artifact.kind == ArtifactKind::McpServer)
+        .map(|(i, _)| i)
+        .collect();
+    if mcp_indices.is_empty() {
+        return;
+    }
+
+    let findings = {
+        let refs: Vec<agentguard_scanner::shadowing::ServerRef> = mcp_indices
+            .iter()
+            .map(|&i| agentguard_scanner::shadowing::ServerRef {
+                name: &out[i].artifact.name,
+                source: &out[i].artifact.source,
+                trusted: out[i].breakdown.reputation_discount > 0,
+            })
+            .collect();
+        agentguard_scanner::shadowing::detect_shadowing(&refs)
+    };
+
+    for (ref_idx, mut finding) in findings {
+        let out_idx = mcp_indices[ref_idx];
+        let s = &mut out[out_idx];
+        // Give the finding a location now that we know the config file.
+        finding.location = Some(s.location.clone());
+        let evidence = finding.evidence.clone();
+        s.artifact.capabilities.push(finding);
+        let mut breakdown = engine.score(&s.artifact);
+        breakdown.static_evidence_reasons.push(evidence);
+        s.breakdown = breakdown;
+        s.band = s.breakdown.band();
+        s.decision = level.decision_for(s.band);
+    }
 }
 
 /// Fetches and extracts a registry-resolved artifact's actual code so it

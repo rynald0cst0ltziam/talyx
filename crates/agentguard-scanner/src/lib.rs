@@ -17,6 +17,7 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 pub mod content;
+pub mod shadowing;
 pub use content::analyze_markdown;
 
 #[derive(Debug, Error)]
