@@ -56,7 +56,7 @@ export const features: Feature[] = [
     icon: 'radar',
     tag: 'Discovery',
     title: 'Finds every artifact your agents load',
-    body: 'MCP servers, skills, plugins, extensions, hooks, LSP servers, background monitors and instruction files — across 28 coding agents, user scope and project scope, JSON, YAML and TOML. One scan, every surface. Nothing to configure per agent.',
+    body: 'MCP servers, skills, plugins, extensions, hooks, LSP servers, background monitors and instruction files — across 27 coding agents, user scope and project scope, JSON, YAML and TOML. One scan, every surface. Nothing to configure per agent.',
   },
   {
     icon: 'flow',
@@ -248,7 +248,7 @@ export interface CompareRow {
 
 export const comparison: CompareRow[] = [
   { capability: 'Runs fully local — no account, no cloud, no telemetry', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
-  { capability: 'Coverage across 28 coding agents', agentguard: 'full', snyk: 'partial', mcpscan: 'partial' },
+  { capability: 'Coverage across 27 coding agents', agentguard: 'full', snyk: 'partial', mcpscan: 'partial' },
   { capability: 'Scans plugin & extension ecosystems, not just the agent config', agentguard: 'full', snyk: 'none', mcpscan: 'none' },
   { capability: 'AST parse + source-to-sink taint (secret → network)', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
   { capability: 'Scans skills / instruction files for injection', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
@@ -304,7 +304,7 @@ export interface Faq {
 export const faqs: Faq[] = [
   {
     q: 'What exactly does AgentGuard protect against?',
-    a: 'The artifact supply chain for AI coding agents: a malicious MCP server launched from a config file, a plugin or extension that ships its own server or hook, a skill or instruction file carrying hidden prompt-injection, an encoded payload in a tool description, a server impersonating a trusted one, a hook that pipes a downloaded script into a shell, a secret read that flows to the network. It inspects what your agent is about to load and either verifies it, flags it for review, or blocks it.',
+    a: 'The artifact supply chain for AI coding agents: a malicious MCP server launched from a config file, a plugin or extension that ships its own server or hook, a skill or instruction file carrying hidden prompt-injection, an encoded payload in a tool description, a server impersonating a trusted one, a hook that pipes a downloaded script into a shell, a secret read that flows to the network. It inspects what your agent is about to load — across 27 agents — and either verifies it, flags it for review, or blocks it.',
   },
   {
     q: 'How is the AST / taint analysis different from a regex scanner?',
@@ -315,12 +315,24 @@ export const faqs: Faq[] = [
     a: 'It is a single binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI registry lookups when you pass --fetch-registry, and a license check against Lemon Squeezy on activation and roughly monthly after. Discovery, analysis, scoring and enforcement all happen on your machine.',
   },
   {
+    q: 'Windows, macOS or Linux?',
+    a: 'All three, one Rust codebase that builds to a single native binary with no runtime dependency. Discovery knows the real per-OS config locations — the Windows %USERPROFILE% paths, ~/Library/Application Support on macOS, ~/.config on Linux — and the enforcement shim is a native executable on each platform, not a shell script. Pre-built binaries ship with each release; you can also build from source with cargo build --release.',
+  },
+  {
+    q: 'Will it slow my agent down or break it?',
+    a: 'Scanning is a command you run when you choose to; it is never in your agent\'s hot path. Enforcement adds the shim to an approved server\'s launch line — one exec of a small native binary that re-checks a cached decision in well under a millisecond, then hands off to the real server. A blocked server is simply absent from the config. Every rewrite is checksummed, backed up, and reversible with one command, and your real secrets and hook commands are never written into the rewritten file.',
+  },
+  {
+    q: 'How is this different from mcp-scan or Snyk agent-scan?',
+    a: 'Three things. Scope: they centre on the MCP server config; AgentGuard also covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, so protection does not depend on a proxy process staying up. There is a dated, point-in-time comparison table on this page and we keep it honest — corrections welcome.',
+  },
+  {
     q: 'How is enforcement reversible?',
     a: 'Every config AgentGuard rewrites is checksummed first and the original entry is stored. `agentguard allow <id>` restores a blocked server exactly as it was, including a stripped remote entry. It never embeds your secrets or your real hook commands into a rewritten file — the shim reads them from a local store keyed by hash.',
   },
   {
     q: 'Which agents are supported?',
-    a: 'Claude Code (and its plugin ecosystem), Claude Desktop, Cursor, Codex, Windsurf, Devin CLI, Antigravity (and its plugins), Gemini CLI (and its extensions), GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q, Continue.dev, Cline, Roo Code, Zed, JetBrains AI, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush and Warp — plus a generic fallback for anything with an mcpServers-shaped config.',
+    a: '27 in total: Claude Code (and its plugin ecosystem), Claude Desktop, Cursor, Codex, Windsurf, Devin CLI, Antigravity (and its plugins), Gemini CLI (and its extensions), GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q, Continue.dev, Cline, Roo Code, Zed, JetBrains AI, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush and Warp — plus a generic fallback for anything else with an mcpServers-shaped config.',
   },
   {
     q: 'Does the enforcement shim stop protecting if it crashes?',

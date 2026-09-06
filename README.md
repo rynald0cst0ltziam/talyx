@@ -10,7 +10,7 @@ Read first:
 
 ## Status
 
-v0: discovery across 28 agents (Claude Code, Claude Desktop, Cursor,
+v0: discovery across 27 agents (Claude Code, Claude Desktop, Cursor,
 Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI,
 GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q
 Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI

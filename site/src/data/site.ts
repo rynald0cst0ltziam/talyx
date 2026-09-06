@@ -21,7 +21,7 @@ export const site = {
   domain: 'agentguard.dev',
   url: 'https://agentguard.dev',
   description:
-    'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. AgentGuard scans every one across 28 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
+    'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. AgentGuard scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
   email: 'hello@agentguard.dev',
   github: 'https://github.com/agentguard/agentguard',
 
@@ -39,7 +39,7 @@ export const site = {
   },
 
   // ── product facts (keep in sync with repo STATUS.md) ──────
-  agentsCovered: 28,
+  agentsCovered: 27,
   attackClasses: 13,
   testsGreen: 291,
 } as const;

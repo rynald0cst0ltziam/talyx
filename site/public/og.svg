@@ -27,6 +27,6 @@
   </g>
   <text x="210" y="300" font-family="Inter, system-ui, sans-serif" font-size="58" font-weight="700" fill="#edf0f7">AgentGuard</text>
   <text x="92" y="408" font-family="Inter, system-ui, sans-serif" font-size="44" font-weight="700" fill="url(#txt)">Your agent runs code you never saw.</text>
-  <text x="92" y="468" font-family="Inter, system-ui, sans-serif" font-size="25" fill="#8b93a7">Tree-sitter AST + source-to-sink taint · 28 agents · local · no telemetry</text>
+  <text x="92" y="468" font-family="Inter, system-ui, sans-serif" font-size="25" fill="#8b93a7">Tree-sitter AST + source-to-sink taint · 27 agents · local · no telemetry</text>
   <text x="92" y="560" font-family="JetBrains Mono, monospace" font-size="22" fill="#4de3ff">$ agentguard scan --project .</text>
 </svg>
