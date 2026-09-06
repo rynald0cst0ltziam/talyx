@@ -9,8 +9,15 @@
 //!                        anything — see init.rs.
 //! `agentguard allow <id>` — manually approve a flagged artifact.
 //! `agentguard why <id>`   — show the full reasoning behind a cached decision.
+//! `agentguard activate <key>` — bind a paid license to this machine.
+//! `agentguard license status|deactivate` — inspect / release the license.
+//!
+//! `scan` and `status` are free (evaluation). `init` requires a valid
+//! license — see license.rs for the full rationale, including why the
+//! enforcement shim itself is deliberately never gated.
 
 mod init;
+mod license;
 mod pipeline;
 mod sarif;
 
@@ -107,6 +114,24 @@ enum Command {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Activate a paid license on this machine (required for `init`).
+    Activate {
+        /// The key from your purchase email (looks like AG-XXXX-XXXX-XXXX).
+        key: String,
+    },
+    /// Inspect or release this machine's license.
+    License {
+        #[command(subcommand)]
+        action: LicenseAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum LicenseAction {
+    /// Show license status, machines used, and renewal date.
+    Status,
+    /// Release this machine's activation slot so it can be used elsewhere.
+    Deactivate,
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -150,9 +175,20 @@ fn main() {
             store,
             include_user_config,
             fetch_registry,
-        } => init::run_init(&project, level.into(), store, include_user_config, fetch_registry),
+        } => {
+            let code = license::gate("init");
+            if code != 0 {
+                std::process::exit(code);
+            }
+            init::run_init(&project, level.into(), store, include_user_config, fetch_registry)
+        }
         Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
+        Command::Activate { key } => std::process::exit(license::run_activate(&key)),
+        Command::License { action } => std::process::exit(match action {
+            LicenseAction::Status => license::run_status(),
+            LicenseAction::Deactivate => license::run_deactivate(),
+        }),
     }
 }
 

@@ -34,9 +34,12 @@ dependencies = [
  "agentguard-scanner",
  "agentguard-store",
  "clap",
+ "dirs",
+ "serde",
  "serde-saphyr",
  "serde_json",
  "toml",
+ "ureq",
 ]
 
 [[package]]

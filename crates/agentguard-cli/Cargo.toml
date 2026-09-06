@@ -17,8 +17,14 @@ agentguard-risk = { path = "../agentguard-risk" }
 agentguard-store = { path = "../agentguard-store" }
 agentguard-registry = { path = "../agentguard-registry" }
 clap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+dirs.workspace = true
+# License activation / verification against Lemon Squeezy's public License
+# API (agentguard activate / license). Same HTTP client the registry crate
+# already uses — see crates/agentguard-cli/src/license.rs.
+ureq.workspace = true
 # YAML read + write for `agentguard init`'s rewrite of Goose / Continue.dev
 # / Aider configs (STATUS.md 5c). Same crate agentguard-adapters uses for
 # discovery — see the workspace dependency's own comment on why not
