@@ -1,0 +1,96 @@
+---
+/**
+ * Ambient background for the hero: packets travelling along paths toward a
+ * central node. Most pass; a couple flare red and dissipate — the shape of
+ * what the product does. Pure SVG SMIL so it runs with zero JS and stops
+ * dead under prefers-reduced-motion.
+ */
+const paths = [
+  'M-40 90 C 220 40, 360 220, 700 120',
+  'M-40 210 C 240 180, 420 60, 720 190',
+  'M-40 320 C 200 300, 460 400, 740 260',
+  'M-40 30 C 180 120, 520 40, 760 150',
+  'M-40 380 C 260 340, 380 240, 700 330',
+];
+// [pathIndex, dur(s), begin(s), threat?]
+const packets: [number, number, number, boolean][] = [
+  [0, 7.5, 0, false],
+  [0, 7.5, 3.8, false],
+  [1, 9, 1.2, false],
+  [2, 8, 2.4, true],
+  [3, 10, 0.6, false],
+  [3, 10, 5.2, false],
+  [4, 8.5, 3.1, true],
+  [1, 9, 5.5, false],
+];
+---
+
+<div
+  class="pointer-events-none absolute inset-0 -z-10 overflow-hidden opacity-50 [mask-image:linear-gradient(to_right,transparent,#000_45%)]"
+  aria-hidden="true"
+>
+  <svg
+    class="ag-flow h-full w-full"
+    viewBox="0 0 700 420"
+    preserveAspectRatio="xMidYMid slice"
+    fill="none"
+  >
+    <defs>
+      {paths.map((d, i) => <path id={`fp${i}`} d={d} />)}
+      <radialGradient id="fp-node" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#4de3ff" stop-opacity="0.55"></stop>
+        <stop offset="1" stop-color="#4de3ff" stop-opacity="0"></stop>
+      </radialGradient>
+    </defs>
+
+    {
+      paths.map((d) => (
+        <path d={d} stroke="#4de3ff" stroke-opacity="0.08" stroke-width="1" />
+      ))
+    }
+
+    <!-- the node everything converges on -->
+    <circle cx="640" cy="200" r="60" fill="url(#fp-node)" />
+    <circle cx="640" cy="200" r="9" fill="none" stroke="#4de3ff" stroke-opacity="0.35" stroke-width="1.5">
+      <animate attributeName="r" values="6;20;6" dur="4s" repeatCount="indefinite" />
+      <animate attributeName="stroke-opacity" values="0.4;0;0.4" dur="4s" repeatCount="indefinite" />
+    </circle>
+
+    {
+      packets.map(([p, dur, begin, threat]) => (
+        <circle r={threat ? 2.6 : 2} fill={threat ? '#ff5470' : '#4de3ff'}>
+          <animateMotion
+            dur={`${dur}s`}
+            begin={`${begin}s`}
+            repeatCount="indefinite"
+            keyPoints={threat ? '0;0.62' : '0;1'}
+            keyTimes="0;1"
+            calcMode="linear"
+          >
+            <mpath href={`#fp${p}`} />
+          </animateMotion>
+          <animate
+            attributeName="opacity"
+            dur={`${dur}s`}
+            begin={`${begin}s`}
+            repeatCount="indefinite"
+            values={threat ? '0;1;1;0' : '0;0.9;0.9;0'}
+            keyTimes={threat ? '0;0.15;0.55;0.62' : '0;0.1;0.9;1'}
+          />
+        </circle>
+      ))
+    }
+  </svg>
+</div>
+
+<style>
+  @media (prefers-reduced-motion: reduce) {
+    .ag-flow :global(*) {
+      animation-play-state: paused !important;
+    }
+    .ag-flow :global(animate),
+    .ag-flow :global(animateMotion) {
+      display: none;
+    }
+  }
+</style>
