@@ -18,3 +18,4 @@ base64.workspace = true
 tree-sitter.workspace = true
 tree-sitter-javascript.workspace = true
 tree-sitter-python.workspace = true
+tree-sitter-ruby.workspace = true

