@@ -140,6 +140,10 @@ fn json_key_path(kind: ConfigSourceKind) -> Option<&'static [&'static str]> {
         ConfigSourceKind::ZedMcpJson => Some(&["context_servers"]),
         ConfigSourceKind::OpenClawJson => Some(&["mcp", "servers"]),
         ConfigSourceKind::OpenCodeMcpJson | ConfigSourceKind::CrushMcpJson => Some(&["mcp"]),
+        // Warp's `~/.warp/.mcp.json` puts the servers at the JSON ROOT
+        // (no wrapper key) — an empty path resolves to the root object in
+        // `servers_map_mut` / `servers_map_mut_or_create`.
+        ConfigSourceKind::WarpMcpJson => Some(&[]),
         // Real-YAML native formats — the JSON rewrite path can't parse or
         // re-emit these (STATUS.md 5c, still open pending a YAML-emit
         // decision). Discovery/scoring only.
@@ -843,7 +847,11 @@ fn rewrite_config_json(
             // rewrites `command` as `[<shim>, <id>, "--", <real>, ...]`.
             | ConfigSourceKind::OpenClawJson
             | ConfigSourceKind::OpenCodeMcpJson
-            | ConfigSourceKind::CrushMcpJson => {
+            | ConfigSourceKind::CrushMcpJson
+            // Warp: servers at the JSON root — `json_key_path` returns the
+            // empty path, which `servers_map_mut` resolves to the root
+            // object.
+            | ConfigSourceKind::WarpMcpJson => {
                 if let Some(cs) = &s.config_source {
                     if let Some(p) = json_key_path(cs.kind) {
                         key_path = p;
@@ -1916,6 +1924,53 @@ mod tests {
         // idempotent
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
         assert_eq!(again.newly_protected, 0);
+        assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_routes_a_warp_root_level_entry() {
+        // Warp's `~/.warp/.mcp.json` has the servers at the JSON root
+        // (no `mcpServers` wrapper) — `json_key_path` returns `&[]`, and
+        // `servers_map_mut` resolves that to the root object.
+        let dir = unique_temp_dir("warp-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join(".mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "helper": { "command": "node", "args": ["h.js"] },
+                "github": { "url": "https://api.githubcopilot.com/mcp/" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "helper",
+            config_path.clone(),
+            ConfigSourceKind::WarpMcpJson,
+            "node",
+            &["h.js"],
+        );
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["helper"]["command"], shim.display().to_string());
+        assert_eq!(
+            j["helper"]["args"],
+            serde_json::json!([art.artifact.id, "--", "node", "h.js"])
+        );
+        // the unrelated remote entry at the root is untouched
+        assert_eq!(j["github"]["url"], "https://api.githubcopilot.com/mcp/");
+
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
         assert_eq!(again.already_protected, 1);
 
         std::fs::remove_dir_all(&dir).ok();

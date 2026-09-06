@@ -88,6 +88,40 @@ pub(crate) fn parse_mcp_servers_yaml(
     parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
 }
 
+/// Warp's `~/.warp/.mcp.json`: the servers are a flat map at the JSON
+/// root (`{ "github": {...}, "sentry": {...} }`), per Warp's own CLI
+/// docs' example — NOT wrapped in `mcpServers`. Checks for an `mcpServers`
+/// wrapper first (some Warp versions / hand-edits use it), then falls
+/// back to the root object when its values look like server configs
+/// (have a `command` or `url`).
+pub(crate) fn parse_mcp_servers_json_root_or_wrapped(
+    path: &Path,
+    base_dir: &Path,
+    kind: ConfigSourceKind,
+    agent_id: &str,
+    agent_display_name: &str,
+) -> Vec<DiscoveredArtifact> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let servers = json
+        .get("mcpServers")
+        .and_then(|v| v.as_object())
+        .or_else(|| {
+            json.as_object().filter(|m| {
+                m.values()
+                    .any(|v| v.get("command").is_some() || v.get("url").is_some())
+            })
+        });
+    let Some(servers) = servers else {
+        return Vec::new();
+    };
+    parse_server_map(servers, path, base_dir, kind, agent_id, agent_display_name)
+}
+
 /// Converts a LIST-shaped `mcpServers` (`[{name, command, args}, ...]` --
 /// Continue.dev's and Aider's own YAML convention, genuinely different
 /// from every other agent's name-keyed MAP) into the map `parse_server_map`

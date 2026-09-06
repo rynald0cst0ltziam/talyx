@@ -34,6 +34,7 @@ pub mod roo_code;
 pub mod tabnine;
 pub mod unknown;
 pub mod vscode_copilot;
+pub mod warp;
 pub mod windsurf;
 pub mod zed;
 
@@ -639,6 +640,26 @@ pub enum ConfigSourceKind {
     /// codebase solves, not a quick extension, and is left as an
     /// honestly-named gap rather than guessed at.
     CrushMcpJson,
+    /// Warp — the last agent from the competitive-landscape sweep left
+    /// open. Verified 2026-09-06 against Warp's own docs
+    /// (docs.warp.dev/terminal/settings/file-locations/ and
+    /// /reference/cli/mcp-servers/): MCP config lives at `~/.warp/.mcp.json`
+    /// on **every** platform (`%USERPROFILE%\.warp\.mcp.json` on Windows) —
+    /// "always in your home directory", user scope only, no project-scope
+    /// equivalent, and shared between Warp Stable and Preview. The shape is
+    /// a **flat map of servers at the JSON root** (the CLI docs' own
+    /// example is `{ "github": { "url": ... }, "sentry": { "command":
+    /// "npx", "args": [...] } }`), NOT wrapped in `mcpServers` — a
+    /// genuinely different top-level shape from every other JSON agent.
+    /// `warp.rs` accepts either (checks for an `mcpServers` wrapper first,
+    /// falls back to the root object) and hands the inner map to the same
+    /// shared `parse_server_map`. Rewrite (`init.rs`) targets the root,
+    /// matching what Warp itself writes; a hand-wrapped `{mcpServers:{}}`
+    /// file is still discovered but its entries wouldn't be re-wrapped —
+    /// an honest, documented edge case, not a silent failure. Warp also
+    /// keeps skills at `~/.warp/skills/` and agent config at `~/.agents/`;
+    /// the skills directory is content-scanned as instruction files.
+    WarpMcpJson,
 }
 
 pub trait AgentAdapter {
@@ -684,6 +705,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(aider::AiderAdapter),
         Box::new(openhands::OpenHandsAdapter),
         Box::new(crush::CrushAdapter),
+        Box::new(warp::WarpAdapter),
         Box::new(unknown::UnknownAgentAdapter),
     ]
 }

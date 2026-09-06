@@ -10,12 +10,12 @@ Read first:
 
 ## Status
 
-v0: discovery across 27 agents (Claude Code, Claude Desktop, Cursor,
+v0: discovery across 28 agents (Claude Code, Claude Desktop, Cursor,
 Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI,
 GitHub Copilot CLI, VS Code Copilot, OpenClaw, Amp, Kiro, Amazon Q
 Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI
 Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush,
-plus a generic Unknown Agent Mode fallback), static
+Warp, plus a generic Unknown Agent Mode fallback), static
 capability extraction (JS/TS/Python/Ruby/Perl/shell heuristics,
 registry-resolved npm/PyPI packages), content analysis of skill markdown
 and agent-instruction files (prompt-injection phrasing, hidden/invisible
@@ -84,7 +84,7 @@ otherwise they print the line to add yourself.
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
   agentguard-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest); ast.rs: the authoritative capability + taint pass for JS/TS + Python + Ruby — tree-sitter AST, function-scoped interprocedural source-to-sink taint (secret read -> network sink, across helper returns and parameters); the regex rules are the parse-failure fallback; content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files; shadowing.rs: cross-artifact MCP tool-shadowing / server-impersonation / typosquat detection
-  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Unknown Agent Mode
+  agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Warp, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
