@@ -1,12 +1,18 @@
 ---
 /**
  * The one picture that explains why AgentGuard isn't a linter: a secret
- * value tracked from the read, through a helper, to the network — and
- * stopped. SMIL animation, no JS, pauses under reduced motion.
+ * value tracked from a file read, through a helper, toward the network —
+ * scanned mid-flight and stopped at a barrier before it reaches the wire.
+ *
+ * All-SMIL on a single 6s document-timeline loop, so every beat stays in
+ * sync with zero JS. Reduced motion freezes it on the "blocked" state.
+ * The status label is the one thing SMIL can't animate (text content), so
+ * a tiny rAF ticker drives it — and pauses itself under reduced motion.
  */
+const D = '6s';
 ---
 
-<section class="scroll-mt-20 border-t border-line bg-void">
+<section id="taint" class="scroll-mt-20 border-t border-line bg-void">
   <div class="mx-auto max-w-5xl px-4 py-24 sm:px-6">
     <div class="mx-auto max-w-2xl text-center" data-reveal>
       <p class="font-mono text-xs uppercase tracking-[0.2em] text-signal">Source → sink</p>
@@ -16,151 +22,217 @@
       <p class="mt-4 text-lg text-fog">
         <code class="rounded bg-panel-2 px-1.5 py-0.5 text-[0.9em] text-fog">readFileSync</code>
         and <code class="rounded bg-panel-2 px-1.5 py-0.5 text-[0.9em] text-fog">fetch</code>
-        both appear in a thousand honest files. AgentGuard's taint pass follows
+        both show up in a thousand honest files. AgentGuard's taint pass follows
         the value from one to the other — across variables, helper functions and
-        parameters — and gates it before it launches.
+        parameters — and stops it at the barrier before it launches.
       </p>
     </div>
 
-    <div
-      class="panel mx-auto mt-12 max-w-3xl overflow-hidden p-4 shadow-[var(--shadow-panel)] sm:p-6"
-      data-reveal
-    >
-      <svg
-        class="ag-taint w-full"
-        viewBox="0 0 720 220"
-        fill="none"
-        role="img"
-        aria-label="A secret read from an SSH key file flows through a helper function to a fetch call and is blocked before it reaches the network."
-      >
-        <defs>
-          <linearGradient id="tf-wire" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stop-color="#3ee9a4"></stop>
-            <stop offset="0.5" stop-color="#4de3ff"></stop>
-            <stop offset="1" stop-color="#ff5470"></stop>
-          </linearGradient>
-          <filter id="tf-glow" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="3.2" result="b"></feGaussianBlur>
-            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-          <!-- route the tainted token travels: source → helper → sink -->
-          <path id="tf-route" d="M120 110 H300 M300 110 H500 M500 110 H600" />
-        </defs>
+    <div class="ag-taint panel mx-auto mt-12 max-w-3xl overflow-hidden shadow-[var(--shadow-panel)]" data-reveal>
+      <div class="flex items-center gap-2 border-b border-line bg-[#0c0f17] px-4 py-2.5 font-mono text-[11px] text-mist">
+        <span class="inline-flex items-center gap-1.5">
+          <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+            <circle cx="4" cy="4" r="4" fill="#3ee9a4">
+              <animate attributeName="fill" dur={D} repeatCount="indefinite"
+                values="#3ee9a4;#3ee9a4;#ffb84d;#ff5470;#ff5470;#3ee9a4"
+                keyTimes="0;0.44;0.5;0.66;0.96;1" calcMode="discrete" />
+          </circle>
+        </svg>
+        <span class="tf-status">watching</span>
+      </span>
+        <span class="ml-auto">agentguard · taint engine</span>
+      </div>
 
-        <!-- connective wire -->
-        <path d="M120 110 H600" stroke="url(#tf-wire)" stroke-width="2" stroke-opacity="0.35" />
-        <path d="M120 110 H600" stroke="url(#tf-wire)" stroke-width="2" stroke-dasharray="4 6" stroke-opacity="0.7">
-          <animate attributeName="stroke-dashoffset" from="0" to="-100" dur="2.4s" repeatCount="indefinite" />
-        </path>
+      <div class="px-4 py-6 sm:px-8">
+        <svg class="ag-taint-svg w-full" viewBox="0 0 720 210" fill="none" role="img"
+          aria-label="A secret read from an SSH key file flows through a helper toward a fetch call and is blocked at a barrier before it reaches the network.">
+          <defs>
+            <pattern id="tf-grid" width="22" height="22" patternUnits="userSpaceOnUse">
+              <path d="M22 0H0V22" fill="none" stroke="#4de3ff" stroke-opacity="0.05" stroke-width="1" />
+            </pattern>
+            <filter id="tf-glow" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="3" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <path id="tf-route" d="M124 100 H360 H596" />
+          </defs>
 
-        <!-- nodes -->
-        <g class="ag-node">
-          <rect x="24" y="82" width="96" height="56" rx="10" fill="#0a0c12" stroke="#3ee9a4" stroke-opacity="0.5" />
-          <text x="72" y="106" text-anchor="middle" class="tf-kind" fill="#3ee9a4">SOURCE</text>
-          <text x="72" y="124" text-anchor="middle" class="tf-code" fill="#b7bdce">readFileSync</text>
-        </g>
-        <g class="ag-node">
-          <rect x="252" y="82" width="96" height="56" rx="10" fill="#0a0c12" stroke="#313a52" />
-          <text x="300" y="106" text-anchor="middle" class="tf-kind" fill="#8b93a7">helper()</text>
-          <text x="300" y="124" text-anchor="middle" class="tf-code" fill="#b7bdce">buildPayload</text>
-        </g>
-        <g class="ag-node">
-          <rect x="452" y="82" width="96" height="56" rx="10" fill="#0a0c12" stroke="#4de3ff" stroke-opacity="0.5" />
-          <text x="500" y="106" text-anchor="middle" class="tf-kind" fill="#4de3ff">SINK</text>
-          <text x="500" y="124" text-anchor="middle" class="tf-code" fill="#b7bdce">fetch(body)</text>
-        </g>
-
-        <!-- the shield that intercepts, before the network -->
-        <g transform="translate(600 110)">
-          <g class="tf-shield">
-            <path
-              d="M0 -22 -16 -16 v14 c0 11 7 18 16 22 9-4 16-11 16-22 v-14Z"
-              fill="#10131c"
-              stroke="#ff5470"
-              stroke-width="2"
-            ></path>
-            <path d="m-7 0 5 5 9-10" stroke="#ff5470" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+          <rect x="0" y="0" width="720" height="210" fill="url(#tf-grid)" />
+          <g stroke="#313a52" stroke-width="1.5" fill="none">
+            <path d="M14 22v-8h8M706 22v-8h-8M14 188v8h8M706 188v8h-8" />
           </g>
-        </g>
-        <text x="600" y="164" text-anchor="middle" class="tf-blocked" fill="#ff5470">BLOCKED</text>
 
-        <text x="660" y="114" class="tf-net" fill="#8b93a7">→ network</text>
+          <!-- wire: dim base, then red taint drawing in behind the token -->
+          <path d="M124 100 H596" stroke="#232838" stroke-width="2.5" />
+          <path d="M124 100 H596" stroke="#ff5470" stroke-width="2.5" stroke-linecap="round"
+            pathLength="100" stroke-dasharray="100">
+            <animate attributeName="stroke-dashoffset" dur={D} repeatCount="indefinite"
+              values="100;100;3;3;100" keyTimes="0;0.08;0.6;0.94;1" calcMode="linear" />
+          </path>
 
-        <!-- the tainted secret, travelling then absorbed at the shield -->
-        <circle r="5" fill="#ff5470" filter="url(#tf-glow)">
-          <animateMotion dur="4.4s" repeatCount="indefinite" keyPoints="0;0.34;0.4;0.72;0.78;0.97;1" keyTimes="0;0.28;0.36;0.6;0.68;0.9;1" calcMode="linear">
-            <mpath href="#tf-route" />
-          </animateMotion>
-          <animate attributeName="opacity" dur="4.4s" repeatCount="indefinite" values="0;1;1;1;1;1;0" keyTimes="0;0.05;0.5;0.85;0.9;0.93;1" />
-          <animate attributeName="r" dur="4.4s" repeatCount="indefinite" values="4;4;4;4;9;0;0" keyTimes="0;0.5;0.85;0.9;0.93;0.95;1" />
-        </circle>
-      </svg>
+          <!-- nodes -->
+          <g>
+            <rect x="28" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#3ee9a4" stroke-opacity="0.55" />
+            <text x="76" y="97" text-anchor="middle" class="tf-kind" fill="#3ee9a4">SOURCE</text>
+            <text x="76" y="114" text-anchor="middle" class="tf-code">readFileSync</text>
+          </g>
+          <g>
+            <rect x="264" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#313a52" stroke-width="1.5">
+              <animate attributeName="stroke" dur={D} repeatCount="indefinite"
+                values="#313a52;#313a52;#ff5470;#313a52;#313a52" keyTimes="0;0.26;0.34;0.46;1" calcMode="discrete" />
+            </rect>
+            <text x="312" y="97" text-anchor="middle" class="tf-kind" fill="#8b93a7">TRANSFORM</text>
+            <text x="312" y="114" text-anchor="middle" class="tf-code">buildPayload()</text>
+          </g>
+          <g>
+            <rect x="500" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#4de3ff" stroke-width="1.5" stroke-opacity="0.55">
+              <animate attributeName="stroke" dur={D} repeatCount="indefinite"
+                values="#4de3ff;#4de3ff;#ff5470;#4de3ff;#4de3ff" keyTimes="0;0.64;0.68;0.97;1" calcMode="discrete" />
+              <animate attributeName="stroke-opacity" dur={D} repeatCount="indefinite"
+                values="0.55;0.55;1;0.55;0.55" keyTimes="0;0.64;0.68;0.97;1" calcMode="discrete" />
+            </rect>
+            <text x="548" y="97" text-anchor="middle" class="tf-kind" fill="#4de3ff">SINK</text>
+            <text x="548" y="114" text-anchor="middle" class="tf-code">fetch(url, body)</text>
+            <path d="m538 88 20 24M558 88l-20 24" stroke="#ff5470" stroke-width="2.5" stroke-linecap="round" opacity="0">
+              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+                values="0;0;1;1;0;0" keyTimes="0;0.66;0.7;0.95;0.99;1" calcMode="linear" />
+            </path>
+          </g>
+
+          <text x="628" y="104" class="tf-net" fill="#8b93a7">→ network
+            <animate attributeName="fill" dur={D} repeatCount="indefinite"
+              values="#8b93a7;#8b93a7;#3b4252;#8b93a7;#8b93a7" keyTimes="0;0.66;0.7;0.97;1" calcMode="discrete" />
+          </text>
+
+          <!-- scan sweep -->
+          <rect y="58" width="30" height="94" fill="#4de3ff" fill-opacity="0.14">
+            <animate attributeName="x" dur={D} repeatCount="indefinite"
+              values="-40;-40;720;720" keyTimes="0;0.48;0.62;1" calcMode="linear" />
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+              values="0;0;1;1;0;0" keyTimes="0;0.48;0.49;0.61;0.62;1" calcMode="linear" />
+          </rect>
+
+          <!-- barrier -->
+          <g transform="translate(608 100)">
+            <path d="M0-30 26-15 26 15 0 30-26 15-26-15Z" fill="none" stroke="#ff5470" stroke-width="1.5" opacity="0">
+              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+                values="0;0;0.9;0;0" keyTimes="0;0.6;0.62;0.74;1" calcMode="linear" />
+              <animateTransform attributeName="transform" type="scale" dur={D} repeatCount="indefinite"
+                values="0.5;0.5;1;2.6;2.6" keyTimes="0;0.6;0.62;0.74;1" calcMode="spline"
+                keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1" />
+            </path>
+            <g opacity="0">
+              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+                values="0;0;1;1;0;0" keyTimes="0;0.58;0.63;0.95;0.98;1" calcMode="linear" />
+              <animateTransform attributeName="transform" type="scale" additive="sum" dur={D} repeatCount="indefinite"
+                values="0.4;0.4;1.2;1;1;1" keyTimes="0;0.58;0.63;0.67;0.95;1" calcMode="spline"
+                keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1;0 0 1 1" />
+              <path d="M0-21 18-10.5 18 10.5 0 21-18 10.5-18-10.5Z" fill="#160b10" stroke="#ff5470" stroke-width="2" />
+              <path d="m-8 0 5 6 11-13" stroke="#ff5470" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </g>
+          </g>
+
+          <!-- shards -->
+          {
+            [
+              [22, -20],
+              [-14, -24],
+              [20, 22],
+              [-18, 18],
+            ].map(([dx, dy], i) => (
+              <circle cx="596" cy="100" r={1.6 + (i % 2) * 0.7} fill="#ff5470" opacity="0">
+                <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+                  values="0;0;1;0;0" keyTimes="0;0.62;0.64;0.75;1" calcMode="linear" />
+                <animateTransform attributeName="transform" type="translate" dur={D} repeatCount="indefinite"
+                  values={`0 0;0 0;${dx} ${dy};${dx} ${dy}`} keyTimes="0;0.62;0.75;1" calcMode="spline"
+                  keySplines="0 0 1 1;0.16 1 0.3 1;0 0 1 1" />
+              </circle>
+            ))
+          }
+
+          <!-- the tainted secret -->
+          <circle r="5.5" fill="#ff5470" filter="url(#tf-glow)">
+            <animateMotion dur={D} repeatCount="indefinite" calcMode="linear"
+              keyPoints="0;0;0.5;0.5;1;1" keyTimes="0;0.09;0.32;0.4;0.61;1">
+              <mpath href="#tf-route" />
+            </animateMotion>
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+              values="0;0;1;1;0;0" keyTimes="0;0.08;0.12;0.61;0.63;1" calcMode="linear" />
+            <animate attributeName="r" dur={D} repeatCount="indefinite"
+              values="5.5;5.5;5.5;9;0;0" keyTimes="0;0.55;0.6;0.62;0.63;1" calcMode="linear" />
+          </circle>
+
+          <!-- verdict -->
+          <g transform="translate(360 158)" opacity="0">
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
+              values="0;0;1;1;0;0" keyTimes="0;0.65;0.7;0.95;0.99;1" calcMode="linear" />
+            <animateTransform attributeName="transform" type="scale" additive="sum" dur={D} repeatCount="indefinite"
+              values="0.8;0.8;1.08;1;1;1" keyTimes="0;0.65;0.7;0.74;0.95;1" calcMode="spline"
+              keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1;0 0 1 1" />
+            <rect x="-118" y="-13" width="236" height="26" rx="7" fill="#160b10" stroke="#ff5470" stroke-opacity="0.6" />
+            <text x="-104" y="4" class="tf-verdict-a" fill="#ff5470">⛔ BLOCKED</text>
+            <text x="-24" y="4" class="tf-verdict-b" fill="#8b93a7">CRITICAL · secret → network</text>
+          </g>
+        </svg>
+      </div>
     </div>
+
+    <p class="mt-4 text-center text-xs text-mist" data-reveal>
+      Real detection, real fixture. <code class="text-fog">agentguard init</code> removes it from the config and the shim refuses to launch it.
+    </p>
   </div>
 </section>
 
 <style>
-  .ag-taint .tf-kind {
+  .ag-taint-svg .tf-kind {
     font: 700 8px var(--font-mono);
     letter-spacing: 0.12em;
   }
-  .ag-taint .tf-code {
+  .ag-taint-svg .tf-code {
     font: 500 10px var(--font-mono);
+    fill: #b7bdce;
   }
-  .ag-taint .tf-net {
+  .ag-taint-svg .tf-net {
     font: 500 11px var(--font-mono);
   }
-  .ag-taint .tf-blocked {
+  .ag-taint-svg .tf-verdict-a {
     font: 700 10px var(--font-mono);
-    letter-spacing: 0.14em;
-    opacity: 0;
-    animation: tf-stamp 4.4s linear infinite;
+    letter-spacing: 0.08em;
   }
-  .ag-taint .tf-shield {
-    opacity: 0;
-    transform-origin: center;
-    animation: tf-catch 4.4s linear infinite;
+  .ag-taint-svg .tf-verdict-b {
+    font: 500 9px var(--font-mono);
   }
-  @keyframes tf-stamp {
-    0%,
-    88% {
-      opacity: 0;
-    }
-    90% {
-      opacity: 1;
-      transform: scale(1.15);
-    }
-    95%,
-    100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-  @keyframes tf-catch {
-    0%,
-    82% {
-      opacity: 0;
-      transform: scale(0.6);
-    }
-    88% {
-      opacity: 1;
-      transform: scale(1.12);
-    }
-    92%,
-    100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
+
   @media (prefers-reduced-motion: reduce) {
-    .ag-taint :global(animate),
-    .ag-taint :global(animateMotion) {
+    .ag-taint-svg :global(animate),
+    .ag-taint-svg :global(animateMotion),
+    .ag-taint-svg :global(animateTransform) {
       display: none;
     }
-    .ag-taint .tf-blocked,
-    .ag-taint .tf-shield {
-      opacity: 1;
-      animation: none;
-    }
+    /* freeze on the caught state */
+    .ag-taint-svg > g:nth-of-type(4) rect { stroke: #ff5470 !important; }
   }
 </style>
+
+<script>
+  const root = document.querySelector<HTMLElement>('.ag-taint');
+  const label = root?.querySelector<HTMLElement>('.tf-status');
+  if (root && label && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const CLOCK = 6000;
+    const beats: [number, string][] = [
+      [0, 'watching'],
+      [0.42, 'tracing flow'],
+      [0.62, 'blocked'],
+      [0.96, 'watching'],
+    ];
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = ((now - start) % CLOCK) / CLOCK;
+      let text = beats[0][1];
+      for (const [at, s] of beats) if (t >= at) text = s;
+      if (label.textContent !== text) label.textContent = text;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+</script>
