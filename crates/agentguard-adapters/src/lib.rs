@@ -530,22 +530,20 @@ pub enum ConfigSourceKind {
     /// directly into the same `Value` shared parsers already operate on
     /// -- `parse_server_map` is reused completely unmodified, the first
     /// YAML-native agent that needed zero shape-specific transform code.
-    /// Discovery/scoring only, like `OpenClawJson`/`OpenCodeMcpJson` --
-    /// NOT for a nesting reason this time, but because `init.rs`'s JSON
-    /// rewrite path parses a config file with `serde_json::from_str`,
-    /// which fails outright on a real YAML file. Writing a rewritten
-    /// config back out would need YAML re-serialization too, a real
-    /// separate mechanism this codebase doesn't have yet -- caught before
-    /// it could ship as a silent rewrite failure by tracing through what
-    /// `rewrite_config_json` actually does to the file, not assuming a
-    /// `ConfigSourceKind` with a `top_level_key` is automatically
-    /// rewritable.
+    /// Was discovery/scoring only through STATUS.md milestone #41 --
+    /// NOT for a nesting reason (unlike OpenClaw/opencode), but because
+    /// `init.rs`'s JSON rewrite path parses with `serde_json::from_str`,
+    /// which fails on a real YAML file. **Now enforced -- see STATUS.md
+    /// #42:** `rewrite_config_value` parses via `serde_saphyr`, rewrites,
+    /// and re-emits YAML. Local-server shim-wrapping only; remote-entry
+    /// removal for this format is STATUS.md 5d.
     GooseMcpJson,
     /// Continue.dev's YAML surfaces specifically -- `config.yaml` and the
     /// `.continue/mcpServers/*.yaml`/`*.yml` bundle files (see
     /// `ContinueMcpJson`'s doc comment for the JSON-glob variant this is
-    /// deliberately kept separate from). Same rewrite limitation as
-    /// `GooseMcpJson` -- discovery/scoring only. Kept as its OWN variant
+    /// deliberately kept separate from). LIST-shaped `mcpServers`. Now
+    /// enforced via `rewrite_config_value` -- STATUS.md #42 (local
+    /// servers; remote removal is 5d). Kept as its OWN variant
     /// rather than folded into `ContinueMcpJson` for the same reason
     /// Devin CLI's two hook shapes needed separate kinds: `ContinueMcpJson`
     /// artifacts from the JSON glob path ARE safely rewritable (real JSON
@@ -566,9 +564,9 @@ pub enum ConfigSourceKind {
     /// different from every other agent's `mcpServers`/`context_servers`/
     /// `cody.mcpServers`/etc.), and LIST-shaped like Continue.dev's own
     /// native format, not a name-keyed map -- reuses the same
-    /// `list_to_server_map` conversion. Discovery/scoring only, same
-    /// reason as `GooseMcpJson`/`ContinueYamlMcpJson`: `init.rs`'s JSON
-    /// rewrite path can't parse or write real YAML.
+    /// `list_to_server_map` conversion. Now enforced via
+    /// `rewrite_config_value` -- STATUS.md #42 (local servers; remote
+    /// removal is 5d).
     AiderMcpJson,
     /// OpenHands -- verified 2026-09-05 against docs.openhands.dev's own
     /// MCP settings page and independent config-location sources. Config:
@@ -591,7 +589,11 @@ pub enum ConfigSourceKind {
     /// extension of the existing name-keyed machinery, left as a named,
     /// honest gap rather than guessed at (e.g. hashing the URL as a
     /// synthetic name would work but wasn't done without deciding that
-    /// deliberately, not as an afterthought).
+    /// deliberately, not as an afterthought). `stdio_servers` is now
+    /// enforced via `rewrite_config_value` -- STATUS.md #42 (the TOML is
+    /// parsed to a `serde_json::Value`, rewritten, and re-emitted with the
+    /// `toml` crate; the inline-table array comes back as `[[mcp.
+    /// stdio_servers]]` array-of-tables, semantically identical).
     OpenHandsMcpToml,
     /// Crush (Charmbracelet) -- verified 2026-09-05 by reading the REAL
     /// source (github.com/charmbracelet/crush's `internal/config/

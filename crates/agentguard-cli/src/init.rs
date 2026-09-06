@@ -330,42 +330,226 @@ fn rewrite_config(
             .map(|cs| cs.kind == ConfigSourceKind::CodexMcpServersToml)
             .unwrap_or(false)
     });
-    // A group whose file is real YAML (Goose/Continue.dev's native
-    // format) or a TOML shape the existing TOML rewriter doesn't know
-    // (OpenHands' array-of-tables, genuinely different from Codex's
-    // table-of-tables) would otherwise reach rewrite_config_json, which
-    // parses the raw file text with serde_json::from_str -- guaranteed to
-    // fail and surface as a confusing "failed to rewrite" error, even
-    // though this is an intentional, documented scope limit (see e.g.
-    // ConfigSourceKind::GooseMcpJson's doc comment), not a real failure.
-    // Short-circuit to a clean, silent no-op instead, the same outcome
-    // OpenClaw/opencode's nested-shape limitation already produces.
-    let is_discovery_only_shape = artifacts.iter().all(|s| {
-        s.config_source
-            .as_ref()
-            .map(|cs| {
-                matches!(
-                    cs.kind,
-                    ConfigSourceKind::GooseMcpJson
-                        | ConfigSourceKind::ContinueYamlMcpJson
-                        | ConfigSourceKind::AiderMcpJson
-                        | ConfigSourceKind::OpenHandsMcpToml
-                )
-            })
-            .unwrap_or(false)
-    });
+    // Real-YAML native formats (Goose's `mcpServers:` map, Continue.dev's
+    // and Aider's list-shaped `mcpServers`/`mcp-server`) and OpenHands'
+    // array-of-tables TOML — a different rewrite path (`rewrite_config_value`)
+    // that parses to a `serde_json::Value` via `serde_saphyr` / `toml`,
+    // rewrites, and re-emits in the same format. A config-file group is
+    // always homogeneous, so checking the first artifact's kind is enough.
+    let value_format = artifacts
+        .iter()
+        .filter_map(|s| s.config_source.as_ref())
+        .find_map(|cs| value_config_format(cs.kind));
     if is_toml {
         rewrite_config_toml(config_path, artifacts, shim_path, store)
-    } else if is_discovery_only_shape {
-        Ok(RewriteOutcome {
+    } else if let Some(format) = value_format {
+        rewrite_config_value(config_path, artifacts, shim_path, format)
+    } else {
+        rewrite_config_json(config_path, artifacts, shim_path, store)
+    }
+}
+
+/// The server container for a real-YAML / non-Codex-TOML config: a key
+/// PATH from the root, and whether the servers sit in a name-keyed MAP
+/// (Goose) or a LIST where each element carries its own `name` field
+/// (Continue.dev, Aider, OpenHands). `None` for every JSON/Codex-TOML
+/// kind — those go through `rewrite_config_json` / `rewrite_config_toml`.
+fn value_config_format(kind: ConfigSourceKind) -> Option<ValueConfigFormat> {
+    use ServerContainer::*;
+    let (fmt, path, shape): (_, &'static [&'static str], _) = match kind {
+        ConfigSourceKind::GooseMcpJson => (ValueFileFormat::Yaml, &["mcpServers"], Map),
+        ConfigSourceKind::ContinueYamlMcpJson => (ValueFileFormat::Yaml, &["mcpServers"], ListByName),
+        ConfigSourceKind::AiderMcpJson => (ValueFileFormat::Yaml, &["mcp-server"], ListByName),
+        ConfigSourceKind::OpenHandsMcpToml => {
+            (ValueFileFormat::Toml, &["mcp", "stdio_servers"], ListByName)
+        }
+        _ => return None,
+    };
+    Some(ValueConfigFormat { file: fmt, path, shape })
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ValueFileFormat {
+    Yaml,
+    Toml,
+}
+
+#[derive(Clone, Copy)]
+enum ServerContainer {
+    Map,
+    ListByName,
+}
+
+#[derive(Clone, Copy)]
+struct ValueConfigFormat {
+    file: ValueFileFormat,
+    path: &'static [&'static str],
+    shape: ServerContainer,
+}
+
+/// Rewrite path for a real-YAML config (Goose / Continue.dev / Aider) or
+/// OpenHands' array-of-tables TOML: parse the file into a
+/// `serde_json::Value` (via `serde_saphyr` for YAML, `toml` for TOML),
+/// shim-wrap the flagged local servers, and re-emit in the same format.
+///
+/// Same limits the JSON path has: comments and exact formatting in the
+/// user's file are not preserved (the `.agentguard-backup` written before
+/// the first rewrite is the safety net), and remote-entry removal is not
+/// done here yet — STATUS.md 5c's remaining half. Only local
+/// `command`/`args` servers are wrapped.
+fn rewrite_config_value(
+    config_path: &Path,
+    artifacts: &[&ScannedArtifact],
+    shim_path: Option<&Path>,
+    format: ValueConfigFormat,
+) -> io::Result<RewriteOutcome> {
+    let original_text = std::fs::read_to_string(config_path)?;
+    let mut root: serde_json::Value = match format.file {
+        ValueFileFormat::Yaml => serde_saphyr::from_str(&original_text)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
+        ValueFileFormat::Toml => {
+            let t: toml::Value = toml::from_str(&original_text)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            serde_json::to_value(t).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+        }
+    };
+
+    let Some(shim_str) = shim_path.map(|p| p.display().to_string()) else {
+        return Ok(RewriteOutcome {
             newly_protected: 0,
             already_protected: 0,
             removed_remote: 0,
             backup_path: None,
-        })
-    } else {
-        rewrite_config_json(config_path, artifacts, shim_path, store)
+        });
+    };
+
+    let (newly_protected, already_protected) =
+        rewrite_servers_in_value(&mut root, artifacts, &shim_str, format.path, format.shape);
+
+    if newly_protected == 0 {
+        return Ok(RewriteOutcome {
+            newly_protected: 0,
+            already_protected,
+            removed_remote: 0,
+            backup_path: None,
+        });
     }
+
+    let backup_path = PathBuf::from(format!("{}.agentguard-backup", config_path.display()));
+    if !backup_path.exists() {
+        std::fs::write(&backup_path, &original_text)?;
+    }
+
+    let serialized = match format.file {
+        ValueFileFormat::Yaml => {
+            // Default options fold long strings into multi-line `>-`
+            // block scalars — valid YAML, but ugly in a user's config
+            // file and confusing to eyeball. A shim-wrapped entry's args
+            // (an artifact id, a `--`, a real command path) are always
+            // one-liners; keep them that way.
+            let mut opts = serde_saphyr::SerializerOptions::default();
+            opts.prefer_block_scalars = false;
+            opts.min_fold_chars = usize::MAX;
+            serde_saphyr::to_string_with_options(&root, opts)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+        }
+        ValueFileFormat::Toml => toml::to_string_pretty(&root)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+    };
+    std::fs::write(config_path, serialized)?;
+
+    Ok(RewriteOutcome {
+        newly_protected,
+        already_protected,
+        removed_remote: 0,
+        backup_path: Some(backup_path),
+    })
+}
+
+/// Shim-wraps each flagged local server in `root`, navigating `path` to
+/// the container and matching by map key or by list element `name`. Only
+/// the string-`command` + `args` shape (every YAML/OpenHands agent uses
+/// it — opencode's array `command` is JSON-only).
+fn rewrite_servers_in_value(
+    root: &mut serde_json::Value,
+    artifacts: &[&ScannedArtifact],
+    shim_str: &str,
+    path: &[&str],
+    shape: ServerContainer,
+) -> (usize, usize) {
+    let mut cur = root;
+    for seg in path {
+        cur = match cur.get_mut(*seg) {
+            Some(v) => v,
+            None => return (0, 0),
+        };
+    }
+
+    let mut newly = 0;
+    let mut already = 0;
+
+    match shape {
+        ServerContainer::Map => {
+            let Some(servers) = cur.as_object_mut() else { return (0, 0) };
+            for s in artifacts {
+                let key = &s.config_source.as_ref().unwrap().entry_key;
+                if let Some(entry) = servers.get_mut(key).and_then(|v| v.as_object_mut()) {
+                    match wrap_string_command_entry(entry, s, shim_str) {
+                        Some(true) => newly += 1,
+                        Some(false) => already += 1,
+                        None => {}
+                    }
+                }
+            }
+        }
+        ServerContainer::ListByName => {
+            let Some(list) = cur.as_array_mut() else { return (0, 0) };
+            for s in artifacts {
+                let key = s.config_source.as_ref().unwrap().entry_key.clone();
+                for elem in list.iter_mut() {
+                    let Some(obj) = elem.as_object_mut() else { continue };
+                    if obj.get("name").and_then(|n| n.as_str()) != Some(key.as_str()) {
+                        continue;
+                    }
+                    match wrap_string_command_entry(obj, s, shim_str) {
+                        Some(true) => newly += 1,
+                        Some(false) => already += 1,
+                        None => {}
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    (newly, already)
+}
+
+/// Rewrites one server object's string `command`/`args` to launch through
+/// the shim. `Some(true)` = newly wrapped, `Some(false)` = already
+/// wrapped, `None` = nothing to do (no launch on the artifact — should
+/// not happen for a local server).
+fn wrap_string_command_entry(
+    entry: &mut serde_json::Map<String, serde_json::Value>,
+    s: &ScannedArtifact,
+    shim_str: &str,
+) -> Option<bool> {
+    let launch = s.launch.as_ref()?;
+    if entry.get("command").and_then(|c| c.as_str()) == Some(shim_str) {
+        return Some(false);
+    }
+    let mut args = vec![
+        serde_json::Value::String(s.artifact.id.clone()),
+        serde_json::Value::String("--".to_string()),
+        serde_json::Value::String(launch.command.clone()),
+    ];
+    args.extend(launch.args.iter().cloned().map(serde_json::Value::String));
+    entry.insert(
+        "command".to_string(),
+        serde_json::Value::String(shim_str.to_string()),
+    );
+    entry.insert("args".to_string(), serde_json::Value::Array(args));
+    Some(true)
 }
 
 /// Effective decision for an artifact per `store`, folding in manual
@@ -1716,6 +1900,130 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(j["mcp"].get("evil").is_none());
         assert!(j["mcp"].get("ok").is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_value_wraps_a_goose_yaml_map() {
+        let dir = unique_temp_dir("goose-yaml");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.yaml");
+        std::fs::write(
+            &config_path,
+            "mcpServers:\n  sqlite:\n    command: npx\n    args:\n      - \"-y\"\n      - pkg\nother: 1\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "sqlite",
+            config_path.clone(),
+            ConfigSourceKind::GooseMcpJson,
+            "npx",
+            &["-y", "pkg"],
+        );
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+        assert!(outcome.backup_path.is_some());
+
+        // re-parse the emitted YAML
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcpServers"]["sqlite"]["command"], shim.display().to_string());
+        assert_eq!(
+            j["mcpServers"]["sqlite"]["args"],
+            serde_json::json!([art.artifact.id, "--", "npx", "-y", "pkg"])
+        );
+        assert_eq!(j["other"], 1, "unrelated keys preserved");
+
+        // idempotent
+        let again = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(again.newly_protected, 0);
+        assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_value_wraps_an_aider_yaml_list() {
+        let dir = unique_temp_dir("aider-yaml");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join(".aider.conf.yml");
+        std::fs::write(
+            &config_path,
+            "mcp-server:\n  - name: fetch\n    command: node\n    args:\n      - fetch.js\n  - name: keep\n    command: node\n    args: []\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "fetch",
+            config_path.clone(),
+            ConfigSourceKind::AiderMcpJson,
+            "node",
+            &["fetch.js"],
+        );
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_saphyr::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let list = j["mcp-server"].as_array().unwrap();
+        let fetched = list.iter().find(|e| e["name"] == "fetch").unwrap();
+        assert_eq!(fetched["command"], shim.display().to_string());
+        assert_eq!(
+            fetched["args"],
+            serde_json::json!([art.artifact.id, "--", "node", "fetch.js"])
+        );
+        // the other list element is untouched
+        let kept = list.iter().find(|e| e["name"] == "keep").unwrap();
+        assert_eq!(kept["command"], "node");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_value_wraps_an_openhands_toml_stdio_server() {
+        let dir = unique_temp_dir("openhands-toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[mcp]\nstdio_servers = [\n  { name = \"tool\", command = \"node\", args = [\"t.js\"] },\n]\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "tool",
+            config_path.clone(),
+            ConfigSourceKind::OpenHandsMcpToml,
+            "node",
+            &["t.js"],
+        );
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let reparsed: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let entry = reparsed["mcp"]["stdio_servers"].as_array().unwrap()[0]
+            .as_table()
+            .unwrap();
+        assert_eq!(entry["command"].as_str().unwrap(), shim.display().to_string());
+        let args: Vec<&str> = entry["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(args, vec![art.artifact.id.as_str(), "--", "node", "t.js"]);
 
         std::fs::remove_dir_all(&dir).ok();
     }

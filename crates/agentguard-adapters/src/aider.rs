@@ -11,9 +11,9 @@
 //! Real YAML, top-level key `"mcp-server"` (hyphenated, genuinely
 //! different from every other agent's key name), LIST-shaped like
 //! Continue.dev's own native format -- reuses the same
-//! `list_to_server_map` conversion. Discovery/scoring only: `init.rs`'s
-//! JSON rewrite path can't parse or write real YAML (see
-//! `ConfigSourceKind::AiderMcpJson`'s doc comment).
+//! `list_to_server_map` conversion. Enforced via `init.rs`'s
+//! `rewrite_config_value` (STATUS.md #42) — local servers only; remote-
+//! entry removal for YAML configs is STATUS.md 5d.
 
 use crate::mcp_config::{list_to_server_map, parse_server_map};
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
