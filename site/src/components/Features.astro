@@ -11,9 +11,9 @@ import Icon from './Icon.astro';
         One tool for the whole artifact surface.
       </h2>
       <p class="mt-4 text-lg text-fog">
-        Not a linter, not a proxy you have to keep running. A scanner that
-        understands what each agent loads and an enforcement layer that makes
-        "blocked" mean blocked.
+        Not a linter, not a proxy you have to keep running. A real parser that
+        understands what each agent loads — and an enforcement layer that makes
+        "blocked" mean the process never starts.
       </p>
     </div>
 
@@ -31,7 +31,10 @@ import Icon from './Icon.astro';
             </div>
             <p class="mt-4 font-mono text-[11px] uppercase tracking-wider text-mist">{f.tag}</p>
             <h3 class="mt-1 text-lg font-semibold text-chalk">{f.title}</h3>
-            <p class="mt-2 text-sm leading-relaxed text-mist">{f.body}</p>
+            <p
+              class="mt-2 text-sm leading-relaxed text-mist [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1 [&_code]:text-[0.9em] [&_code]:text-fog"
+              set:html={f.body.replace(/`([^`]+)`/g, '<code>$1</code>')}
+            />
           </article>
         ))
       }

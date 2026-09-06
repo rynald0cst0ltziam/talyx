@@ -134,9 +134,12 @@ agentguard license status         # show seats used, renewal date, offline grace
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
-      <li>MCP tool-description poisoning detection (scans declared tool descriptions through the injection / hidden-Unicode / exfil detectors).</li>
-      <li>Tool-shadowing &amp; typosquat detection across all discovered servers.</li>
-      <li>SARIF 2.1.0 output + GitHub Action.</li>
+      <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
+      <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
+      <li><strong>Warp</strong> added (28 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>
+      <li>Remote-code-execution detection for hooks and skill code blocks (<code>curl … | sh</code>, <code>irm … | iex</code>).</li>
+      <li>MCP tool-description poisoning detection; tool-shadowing &amp; typosquat detection across all discovered servers.</li>
+      <li>SARIF 2.1.0 output + GitHub Action; capability-drift re-review.</li>
       <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives.</li>
       <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers.</li>
       <li><code>agentguard activate</code> / <code>license</code> commands.</li>

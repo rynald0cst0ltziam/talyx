@@ -33,13 +33,17 @@ const sections = [
 
     <h2 id="detections">Detections</h2>
     <ul>
-      <li><strong>Malicious launch commands</strong> — static capability extraction over JS/TS/Python/Ruby/Perl/shell, plus optional registry (npm/PyPI) resolution of the real package code.</li>
-      <li><strong>Prompt injection</strong> in skill markdown and instruction files — high-precision phrasing rules that require the verb's object to be the model's own instructions, role or safety.</li>
+      <li><strong>Source-to-sink taint</strong> — a tree-sitter AST parse of JS/TS, Python and Ruby with a function-scoped, interprocedural taint pass: a read of an SSH key / cloud-credential file / browser store that reaches the network, traced across variable assignments, helper-function returns and parameters. Uncapped in the risk score.</li>
+      <li><strong>Malicious launch commands</strong> — structural capability extraction (the AST layer, with the regex rules as a parse-failure fallback) over JS/TS/Python/Ruby/Perl/shell, plus optional registry (npm/PyPI) resolution of the real package code.</li>
+      <li><strong>Prompt injection</strong> in skill markdown, instruction files and declared MCP tool descriptions — high-precision phrasing rules that require the verb's object to be the model's own instructions, role or safety.</li>
       <li><strong>Hidden / invisible Unicode</strong> — zero-width characters, bidi overrides, and Unicode-tag ASCII smuggling.</li>
       <li><strong>Encoded payloads</strong> — base64 / hex / <code>\x</code> blobs decoded and re-scanned.</li>
       <li><strong>Data-exfiltration directives</strong> — one-sentence verb + secret + destination patterns.</li>
-      <li><strong>Tool shadowing &amp; typosquatting</strong> — a server sharing a trusted name, or a near-miss of a well-known one, from a non-canonical source.</li>
+      <li><strong>Tool shadowing &amp; typosquatting</strong> — a server sharing a trusted name, or a near-miss of a well-known one, from a non-canonical source, scored across every discovered server at once.</li>
       <li><strong>Poisoned tool descriptions</strong> — declared descriptions run through the same injection / Unicode / exfil detectors.</li>
+      <li><strong>Remote-code-execution hooks</strong> — a downloaded script piped straight into a shell.</li>
+      <li><strong>Plugin &amp; extension ecosystems</strong> — the MCP servers, hooks and skills a Claude Code plugin, Gemini CLI extension or Antigravity plugin contributes, none of which appear in the agent's own config.</li>
+      <li><strong>Capability drift</strong> — a previously-approved artifact that has since gained a dangerous capability, forced back to review.</li>
     </ul>
 
     <h2 id="not">What it does not do (v1)</h2>

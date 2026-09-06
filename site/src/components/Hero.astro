@@ -9,36 +9,57 @@ import Icon from './Icon.astro';
   <div class="bg-aurora absolute inset-0 -z-10"></div>
   <div class="bg-grid absolute inset-0 -z-10"></div>
 
-  <div class="mx-auto max-w-6xl px-4 pb-20 pt-16 sm:px-6 sm:pt-24 lg:pb-28">
-    <div class="grid items-center gap-14 lg:grid-cols-[1.05fr_1fr]">
+  <div class="mx-auto max-w-6xl px-4 pb-20 pt-14 sm:px-6 sm:pt-20 lg:pb-28">
+    <div class="grid items-center gap-14 lg:grid-cols-[1.08fr_1fr]">
       <div>
         <div
-          class="inline-flex items-start gap-2 rounded-2xl hairline bg-panel/60 px-3 py-1.5 text-xs leading-snug text-fog sm:items-center sm:rounded-full"
+          class="inline-flex items-center gap-2 rounded-full border border-line-bright/60 bg-panel/50 py-1 pl-1.5 pr-3 text-xs text-fog"
           data-reveal
         >
-          <span class="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-safe sm:mt-0"></span>
-          Your agent runs whatever its config says. So do you.
+          <span
+            class="inline-flex items-center gap-1 rounded-full bg-signal/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-signal"
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-signal"></span> {site.agentsCovered} agents
+          </span>
+          The supply chain for AI coding agents
         </div>
 
         <h1
-          class="mt-6 text-balance text-4xl font-bold leading-[1.05] tracking-tight text-chalk sm:text-5xl lg:text-[3.5rem]"
+          class="mt-6 text-balance text-[2.6rem] font-bold leading-[1.03] tracking-[-0.02em] text-chalk sm:text-[3.25rem] lg:text-[3.9rem]"
           data-reveal
           style="--reveal-delay: 60ms"
         >
-          Your AI coding agent loads
-          <span class="text-gradient">code you never reviewed.</span>
+          Your agent runs code
+          <span class="relative whitespace-nowrap">
+            <span class="text-gradient">you never saw.</span>
+            <svg
+              class="absolute -bottom-1.5 left-0 h-2.5 w-full text-signal/50"
+              viewBox="0 0 300 12"
+              preserveAspectRatio="none"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 9c40-6 100-8 148-6 46 2 100 1 148-3"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+              ></path>
+            </svg>
+          </span>
         </h1>
 
         <p
-          class="mt-5 max-w-xl text-lg text-fog"
+          class="mt-7 max-w-xl text-lg leading-relaxed text-fog"
           data-reveal
           style="--reveal-delay: 120ms"
         >
-          MCP servers, skills, plugins, hooks — pulled from config files, npm and
-          random gists, then handed straight to a model that does what it's told.
-          <strong class="text-chalk">AgentGuard</strong> scans every one of them
-          across {site.agentsCovered} agents, and physically blocks the malicious ones.
-          Local. Auditable. No telemetry.
+          MCP servers, skills, plugins, extensions, hooks — pulled from config
+          files, npm and random gists, then handed to a model that does what
+          it's told. <strong class="text-chalk">AgentGuard</strong> scans every
+          one with a real tree-sitter AST and source-to-sink taint — not a grep —
+          and physically blocks the malicious ones.
+          <span class="text-mist">Local. Auditable. No telemetry.</span>
         </p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3" data-reveal style="--reveal-delay: 180ms">
@@ -57,7 +78,7 @@ import Icon from './Icon.astro';
             <dd class="text-xs text-mist">agents covered</dd>
           </div>
           <div>
-            <dt class="text-2xl font-bold text-chalk tabular">7</dt>
+            <dt class="text-2xl font-bold text-chalk tabular">{site.attackClasses}</dt>
             <dd class="text-xs text-mist">attack classes detected</dd>
           </div>
           <div>

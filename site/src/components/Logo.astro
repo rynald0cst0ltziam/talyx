@@ -1,0 +1,62 @@
+---
+interface Props {
+  class?: string;
+  /** show the wordmark next to the mark */
+  wordmark?: boolean;
+}
+const { class: cls = '', wordmark = true } = Astro.props;
+// stable id — the gradient is identical for every instance, so a
+// duplicate <defs> id across Nav + Footer resolves to the same paint.
+const uid = 'ag-logo';
+---
+
+<span class:list={['inline-flex items-center gap-2.5', cls]}>
+  <span class="relative inline-flex h-9 w-9 items-center justify-center">
+    <span
+      class="absolute inset-0 rounded-[10px] bg-signal/15 blur-md"
+      aria-hidden="true"
+    ></span>
+    <svg
+      class="relative h-9 w-9"
+      viewBox="0 0 40 40"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="AgentGuard"
+    >
+      <defs>
+        <linearGradient id={`${uid}-s`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4de3ff"></stop>
+          <stop offset="1" stop-color="#8b7bff"></stop>
+        </linearGradient>
+      </defs>
+      <rect x="1.5" y="1.5" width="37" height="37" rx="10" fill="#10131c" stroke="#232838"></rect>
+      <path
+        d="M20 7 9 11v9c0 6.6 4.4 11 11 13 6.6-2 11-6.4 11-13v-9Z"
+        fill="none"
+        stroke={`url(#${uid}-s)`}
+        stroke-width="2.2"
+        stroke-linejoin="round"
+      ></path>
+      <path
+        d="m14.5 20 3.6 3.6L26 15.5"
+        fill="none"
+        stroke="#3ee9a4"
+        stroke-width="2.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      ></path>
+      <path d="M9 16h22" stroke="#4de3ff" stroke-width="1" stroke-opacity="0.35">
+        <animate attributeName="stroke-opacity" values="0.05;0.5;0.05" dur="3s" repeatCount="indefinite"
+        ></animate>
+      </path>
+    </svg>
+  </span>
+  {
+    wordmark && (
+      <span class="text-[15px] font-semibold tracking-tight text-chalk">
+        Agent<span class="text-signal">Guard</span>
+      </span>
+    )
+  }
+</span>

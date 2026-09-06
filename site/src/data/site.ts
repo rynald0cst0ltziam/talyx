@@ -21,7 +21,7 @@ export const site = {
   domain: 'agentguard.dev',
   url: 'https://agentguard.dev',
   description:
-    'AgentGuard scans and enforces every MCP server, skill, plugin, hook and config your AI coding agents load — across 27 agents, fully local, no telemetry. Catch prompt injection, tool poisoning, typosquats and malicious launch commands before your agent runs them.',
+    'AgentGuard scans and enforces every MCP server, skill, plugin, extension, hook and config your AI coding agents load — across 28 agents, fully local, no telemetry. Tree-sitter AST + source-to-sink taint, prompt-injection and hidden-Unicode detection, tool-shadowing and typosquat detection, real launch-time blocking.',
   email: 'hello@agentguard.dev',
   github: 'https://github.com/agentguard/agentguard',
 
@@ -39,8 +39,9 @@ export const site = {
   },
 
   // ── product facts (keep in sync with repo STATUS.md) ──────
-  agentsCovered: 27,
-  testsGreen: 278,
+  agentsCovered: 28,
+  attackClasses: 13,
+  testsGreen: 291,
 } as const;
 
 export type Site = typeof site;
