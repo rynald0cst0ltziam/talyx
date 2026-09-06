@@ -63,9 +63,16 @@ npm install -g agentguard
 All three do the same thing: install `agentguard` + `agentguard-shim`, then
 run `agentguard init --project "$HOME"` automatically so every MCP server
 config reachable from your home directory (which is where Claude Code's own
-user-scope config lives) is immediately routed through enforcement — no
-separate activation step. Pass `--no-init` (shell installers) or set
-`AGENTGUARD_SKIP_INIT=1` (npm) to install without activating.
+user-scope config lives) is immediately routed through enforcement. Pass
+`--no-init` (shell installers) or set `AGENTGUARD_SKIP_INIT=1` (npm) to
+install without activating.
+
+AgentGuard is a paid tool (per developer, per year, via Lemon Squeezy).
+`scan` and `status` run unlicensed for evaluation; `init` requires
+`agentguard activate <key>` first (or `AGENTGUARD_LICENSE_KEY` in CI). The
+enforcement shim itself is never license-gated, so a lapsed license can't
+break a running agent. See [`crates/agentguard-cli/src/license.rs`](crates/agentguard-cli/src/license.rs).
+The marketing site lives in [`site/`](site/) (Astro, static).
 
 None of the installers modify your shell profile or PATH automatically —
 pass `--modify-path` (shell) or `-ModifyPath` (PowerShell) to opt into that;
@@ -82,7 +89,7 @@ crates/
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
   agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch
-  agentguard-cli         `agentguard` binary: scan, status, init, allow, why
+  agentguard-cli         `agentguard` binary: scan, status, init, allow, why, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
 data/
   trust_seed.json        v0 hand-seeded trust graph (stand-in for BUILD_PLAN.md §7's pre-launch scan)
 scripts/
@@ -90,6 +97,8 @@ scripts/
   install.ps1              irm-pipeable installer (Windows)
 npm/
   package.json             npm-publishable wrapper (postinstall downloads the native binaries)
+site/
+  Astro static marketing site for agentguard.dev — see site/README.md for deploy + pre-launch edits
 .github/workflows/
   release.yml              builds + drafts a GitHub Release for a pushed v* tag
 ```
