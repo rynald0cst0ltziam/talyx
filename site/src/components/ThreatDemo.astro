@@ -1,0 +1,136 @@
+---
+import { threatDemo } from '../data/content';
+---
+
+<div class="panel relative overflow-hidden shadow-[var(--shadow-panel)]" data-threat-demo>
+  <!-- title bar -->
+  <div class="flex items-center gap-2 border-b border-line bg-[#0c0f17] px-4 py-3">
+    <span class="h-2.5 w-2.5 rounded-full bg-[#ff5f57]"></span>
+    <span class="h-2.5 w-2.5 rounded-full bg-[#febc2e]"></span>
+    <span class="h-2.5 w-2.5 rounded-full bg-[#28c840]"></span>
+    <span class="ml-2 font-mono text-xs text-mist">agentguard — zsh — 92×24</span>
+    <span class="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-safe">
+      <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-safe"></span> protecting
+    </span>
+  </div>
+
+  <!-- scanline sweep -->
+  <div
+    class="pointer-events-none absolute inset-x-0 top-14 h-16 animate-scanline bg-gradient-to-b from-transparent via-signal/10 to-transparent"
+  >
+  </div>
+
+  <!-- output -->
+  <pre
+    class="relative m-0 min-h-[340px] overflow-x-auto bg-transparent px-5 py-4 font-mono text-[13px] leading-relaxed"
+  ><code id="threat-out" class="block text-fog"></code></pre>
+
+  <!-- static fallback for no-JS / reduced-motion (script clears + replays) -->
+  <noscript>
+    <pre class="m-0 px-5 py-4 font-mono text-[13px] leading-relaxed text-fog">{
+      threatDemo.map((l) => (l.prompt ? `$ ${l.text}\n` : `${l.text}\n`)).join('')
+    }</pre>
+  </noscript>
+</div>
+
+<script>
+  import { threatDemo } from '../data/content';
+
+  const root = document.querySelector('[data-threat-demo]');
+  const out = document.getElementById('threat-out');
+  if (root && out) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const render = (upTo: number, partial = '') => {
+      const frag = document.createDocumentFragment();
+      threatDemo.slice(0, upTo).forEach((line, i) => {
+        const span = document.createElement('span');
+        span.className = 'block ' + (line.cls ?? '');
+        span.textContent = (line.prompt ? '$ ' : '') + line.text;
+        frag.appendChild(span);
+        if (i === upTo - 1 && partial === '__typing__') span.classList.add('cursor-blink');
+      });
+      if (partial && partial !== '__typing__') {
+        const span = document.createElement('span');
+        const line = threatDemo[upTo];
+        span.className = 'block cursor-blink ' + (line?.cls ?? '');
+        span.textContent = (line?.prompt ? '$ ' : '') + partial;
+        frag.appendChild(span);
+      }
+      out.replaceChildren(frag);
+    };
+
+    const playOnce = () => {
+      if (reduced) {
+        render(threatDemo.length);
+        return;
+      }
+      let idx = 0;
+      const step = () => {
+        if (idx >= threatDemo.length) {
+          render(threatDemo.length);
+          // loop after a beat
+          window.setTimeout(() => {
+            idx = 0;
+            out.textContent = '';
+            window.setTimeout(step, 400);
+          }, 6000);
+          return;
+        }
+        const line = threatDemo[idx];
+        const full = (line.prompt ? '$ ' : '') + line.text;
+        // prompt lines type char-by-char; output lines appear whole
+        if (line.prompt) {
+          let c = 0;
+          const type = () => {
+            render(idx, full.slice(2, c));
+            c++;
+            if (c <= line.text.length) window.setTimeout(type, 34);
+            else {
+              idx++;
+              window.setTimeout(step, 260);
+            }
+          };
+          type();
+        } else {
+          idx++;
+          render(idx, '__typing__');
+          window.setTimeout(step, line.text === '' ? 90 : 190);
+        }
+      };
+      step();
+    };
+
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true;
+      playOnce();
+    };
+
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) {
+            io.disconnect();
+            start();
+          }
+        },
+        { threshold: 0.3 },
+      );
+      io.observe(root);
+    }
+    // Fallbacks so the demo never sits blank: if it's already near the
+    // viewport, or the tab was backgrounded during load (IO won't fire),
+    // or 4s pass without a trigger — just start it.
+    const nearViewport = () => {
+      const r = root.getBoundingClientRect();
+      return r.top < (window.innerHeight || 800) && r.bottom > 0;
+    };
+    if (nearViewport()) start();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && nearViewport()) start();
+    });
+    setTimeout(start, 4000);
+  }
+</script>

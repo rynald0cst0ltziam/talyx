@@ -1,0 +1,35 @@
+---
+import { site } from '../data/site';
+import Button from './Button.astro';
+import Icon from './Icon.astro';
+---
+
+<section class="relative isolate overflow-hidden border-t border-line">
+  <div class="bg-aurora absolute inset-0 -z-10 opacity-60"></div>
+  <div class="bg-grid absolute inset-0 -z-10"></div>
+
+  <div class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6" data-reveal>
+    <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-panel-2 hairline">
+      <span class="relative">
+        <Icon name="shield" class="h-7 w-7 text-signal" />
+        <span class="absolute -inset-3 rounded-full bg-signal/20 blur-lg"></span>
+      </span>
+    </div>
+    <h2 class="mt-6 text-balance text-3xl font-bold tracking-tight text-chalk sm:text-4xl">
+      The next artifact your agent loads could be the one.
+    </h2>
+    <p class="mx-auto mt-4 max-w-xl text-lg text-fog">
+      Five minutes to install. One command to scan. ${site.price.amount}/yr to
+      stop guessing what your agents are running.
+    </p>
+    <div class="mt-8 flex flex-wrap justify-center gap-3">
+      <Button href={site.checkoutUrl} variant="buy" overlay>
+        Get AgentGuard <Icon name="arrow" class="h-4 w-4" />
+      </Button>
+      <Button href="/docs" variant="ghost">Read the docs</Button>
+    </div>
+    <p class="mt-5 text-xs text-mist">
+      Secure Lemon Squeezy checkout · 14-day refund · activate on 3 machines
+    </p>
+  </div>
+</section>

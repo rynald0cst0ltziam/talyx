@@ -1,0 +1,77 @@
+---
+import { site } from '../data/site';
+import Icon from './Icon.astro';
+
+const cols = [
+  {
+    head: 'Product',
+    links: [
+      { label: 'Features', href: '/#features' },
+      { label: 'How it works', href: '/#how' },
+      { label: 'Compare', href: '/#compare' },
+      { label: 'Pricing', href: '/pricing' },
+      { label: 'Changelog', href: '/docs#changelog' },
+    ],
+  },
+  {
+    head: 'Resources',
+    links: [
+      { label: 'Documentation', href: '/docs' },
+      { label: 'Threat model', href: '/security' },
+      { label: 'Quickstart', href: '/docs#quickstart' },
+      { label: 'GitHub', href: site.github },
+    ],
+  },
+  {
+    head: 'Company',
+    links: [
+      { label: 'Contact', href: `mailto:${site.email}` },
+      { label: 'Security disclosure', href: '/security#disclosure' },
+      { label: 'Refund policy', href: '/pricing#refund' },
+      { label: 'Terms', href: '/legal' },
+    ],
+  },
+];
+---
+
+<footer class="border-t border-line bg-void">
+  <div class="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+    <div>
+      <div class="flex items-center gap-2.5 font-semibold text-chalk">
+        <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-panel-2 hairline">
+          <Icon name="shield" class="h-4.5 w-4.5 text-signal" />
+        </span>
+        {site.name}
+      </div>
+      <p class="mt-3 max-w-xs text-sm text-mist">
+        The security layer for AI coding agents. Local, auditable, no telemetry.
+      </p>
+    </div>
+
+    {
+      cols.map((c) => (
+        <div>
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-mist">{c.head}</h3>
+          <ul class="mt-3 space-y-2">
+            {c.links.map((l) => (
+              <li>
+                <a href={l.href} class="text-sm text-fog transition-colors hover:text-signal">
+                  {l.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="border-t border-line">
+    <div
+      class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-xs text-mist sm:flex-row sm:px-6"
+    >
+      <p>© {new Date().getFullYear()} {site.name}. All rights reserved.</p>
+      <p>Built for people who read their dependencies.</p>
+    </div>
+  </div>
+</footer>

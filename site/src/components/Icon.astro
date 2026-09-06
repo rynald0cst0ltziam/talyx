@@ -1,0 +1,52 @@
+---
+/** Minimal inline icon set — stroke-based, inherits currentColor. */
+interface Props {
+  name:
+    | 'radar'
+    | 'inject'
+    | 'mask'
+    | 'shield'
+    | 'ci'
+    | 'lock'
+    | 'check'
+    | 'dash'
+    | 'x'
+    | 'arrow'
+    | 'terminal'
+    | 'bolt'
+    | 'github';
+  class?: string;
+}
+const { name, class: cls = 'w-5 h-5' } = Astro.props;
+const paths: Record<Props['name'], string> = {
+  radar:
+    '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 20 6"/><path d="M12 3v3M21 12h-3"/>',
+  inject:
+    '<path d="M4 7h10M4 12h7M4 17h12"/><path d="m16 14 3 3-3 3M19 17H9"/>',
+  mask:
+    '<path d="M3 5c3 1 6 1 9 0 3 1 6 1 9 0v6c0 5-4 8-9 10-5-2-9-5-9-10Z"/><path d="M9 10h.01M15 10h.01M9.5 14c1.5 1.2 3.5 1.2 5 0"/>',
+  shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6Z"/><path d="m9 12 2 2 4-4"/>',
+  ci: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6H13a3 3 0 0 1 3 3v.5M8 18h5a3 3 0 0 0 3-3v-.5"/>',
+  lock: '<rect x="4.5" y="10" width="15" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/>',
+  check: '<path d="m4 12 5 5L20 6"/>',
+  dash: '<path d="M6 12h12"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
+  bolt: '<path d="M13 3 4 14h7l-1 7 9-11h-7Z"/>',
+  github:
+    '<path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48l-.01-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85l-.01 2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>',
+};
+---
+
+<svg
+  class={cls}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.6"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  set:html={paths[name]}
+/>

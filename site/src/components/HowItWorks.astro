@@ -1,0 +1,47 @@
+---
+import { steps } from '../data/content';
+---
+
+<section id="how" class="scroll-mt-20">
+  <div class="mx-auto max-w-6xl px-4 py-24 sm:px-6">
+    <div class="max-w-2xl" data-reveal>
+      <p class="font-mono text-xs uppercase tracking-[0.2em] text-signal">Four commands</p>
+      <h2 class="mt-3 text-3xl font-bold tracking-tight text-chalk sm:text-4xl">
+        Install once. Forget it's there.
+      </h2>
+      <p class="mt-4 text-lg text-fog">
+        No config file to write, no rules to tune. It reads your machine, tells
+        you what it found, and stands guard.
+      </p>
+    </div>
+
+    <ol class="mt-14 grid gap-5 md:grid-cols-2">
+      {
+        steps.map((s, i) => (
+          <li
+            class="panel flex flex-col p-6"
+            data-reveal
+            style={`--reveal-delay:${(i % 2) * 80}ms`}
+          >
+            <div class="flex items-center gap-3">
+              <span class="font-mono text-sm text-signal">{s.n}</span>
+              <h3 class="text-lg font-semibold text-chalk">{s.title}</h3>
+            </div>
+            <p class="mt-2 text-sm text-mist">{s.body}</p>
+            {s.code && (
+              <div class="mt-4 flex items-center gap-2 overflow-x-auto rounded-lg border border-line bg-ink px-3.5 py-2.5">
+                <span class="select-none text-mist">$</span>
+                <code class="whitespace-nowrap font-mono text-[13px] text-fog">{s.code}</code>
+              </div>
+            )}
+          </li>
+        ))
+      }
+    </ol>
+
+    <p class="mt-8 text-center text-sm text-mist" data-reveal>
+      Prefer to read the code first? The scanner core is source-available —
+      <a href="/security" class="text-signal underline-offset-4 hover:underline">every detection is auditable</a>.
+    </p>
+  </div>
+</section>

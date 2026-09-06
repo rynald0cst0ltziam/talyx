@@ -1,0 +1,81 @@
+---
+import Base from '../layouts/Base.astro';
+import Prose from '../components/Prose.astro';
+import CTA from '../components/CTA.astro';
+import { site } from '../data/site';
+
+const sections = [
+  { id: 'model', label: 'What it defends' },
+  { id: 'detections', label: 'Detections' },
+  { id: 'not', label: 'What it does not do' },
+  { id: 'privacy', label: 'Data & privacy' },
+  { id: 'audit', label: 'Auditability' },
+  { id: 'disclosure', label: 'Disclosure' },
+];
+---
+
+<Base title="Security & threat model" description="What AgentGuard defends against, what it deliberately doesn't, and how to verify every claim.">
+  <Prose
+    title="Security & threat model"
+    lead="The honest version. What's covered, what isn't, and how to check for yourself."
+    sections={sections}
+  >
+    <h2 id="model">What it defends</h2>
+    <p>
+      AgentGuard secures the <strong>artifact supply chain</strong> for AI coding
+      agents — the MCP servers, skills, plugins, hooks and instruction files an
+      agent loads from config before or during a session. The threat actor is a
+      malicious or compromised artifact: a repo config that launches an
+      attacker's package, a skill carrying hidden instructions, a tool
+      description written to manipulate the model, a server impersonating a
+      trusted one.
+    </p>
+
+    <h2 id="detections">Detections</h2>
+    <ul>
+      <li><strong>Malicious launch commands</strong> — static capability extraction over JS/TS/Python/Ruby/Perl/shell, plus optional registry (npm/PyPI) resolution of the real package code.</li>
+      <li><strong>Prompt injection</strong> in skill markdown and instruction files — high-precision phrasing rules that require the verb's object to be the model's own instructions, role or safety.</li>
+      <li><strong>Hidden / invisible Unicode</strong> — zero-width characters, bidi overrides, and Unicode-tag ASCII smuggling.</li>
+      <li><strong>Encoded payloads</strong> — base64 / hex / <code>\x</code> blobs decoded and re-scanned.</li>
+      <li><strong>Data-exfiltration directives</strong> — one-sentence verb + secret + destination patterns.</li>
+      <li><strong>Tool shadowing &amp; typosquatting</strong> — a server sharing a trusted name, or a near-miss of a well-known one, from a non-canonical source.</li>
+      <li><strong>Poisoned tool descriptions</strong> — declared descriptions run through the same injection / Unicode / exfil detectors.</li>
+    </ul>
+
+    <h2 id="not">What it does not do (v1)</h2>
+    <ul>
+      <li>No live man-in-the-middle of MCP stdio traffic after launch. Enforcement is a launch-time gate plus the shim; a server that behaves at launch and turns malicious mid-session is out of scope for v1. (This is a deliberate architecture choice — a proxy that silently stops protecting when it isn't running is worse than a gate that always holds.)</li>
+      <li>No sandboxed detonation of untrusted code.</li>
+      <li>No continuous filesystem watching or daemon.</li>
+      <li>Detection is heuristic. High-signal findings drive automatic blocking; lower-signal ones surface as review prompts. It is a strong filter, not an oracle.</li>
+    </ul>
+
+    <h2 id="privacy">Data &amp; privacy</h2>
+    <p>
+      No account, no daemon, no cloud backend, no telemetry, no analytics. The
+      only outbound calls are: optional npm/PyPI registry lookups when you pass
+      <code>--fetch-registry</code>, and a license check against Lemon Squeezy on
+      activation and roughly monthly thereafter. AgentGuard never transmits your
+      config contents, findings, file paths, or code anywhere.
+    </p>
+
+    <h2 id="audit">Auditability</h2>
+    <p>
+      The scanner core is source-available. Every detection rule — every regex,
+      every score contribution, every threshold — is in the repository and
+      covered by tests, many proven against live adversarial fixtures (real
+      SSH-exfiltration payloads genuinely blocked, benign hooks genuinely
+      running). Heuristic detectors are tuned against a real benign corpus to
+      keep false blocks near zero. Read <a href={site.github}>the code</a>.
+    </p>
+
+    <h2 id="disclosure">Security disclosure</h2>
+    <p>
+      Found a bypass or a false block that matters? Email
+      <a href={`mailto:security@${site.domain}`}>security@{site.domain}</a>.
+      We respond within 72 hours and credit reporters who want it.
+    </p>
+  </Prose>
+
+  <CTA />
+</Base>

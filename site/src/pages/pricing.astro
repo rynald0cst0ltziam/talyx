@@ -1,0 +1,26 @@
+---
+import Base from '../layouts/Base.astro';
+import Pricing from '../components/Pricing.astro';
+import FAQ from '../components/FAQ.astro';
+import CTA from '../components/CTA.astro';
+---
+
+<Base title="Pricing" hideBanner>
+  <section class="relative isolate overflow-hidden border-b border-line">
+    <div class="bg-aurora absolute inset-0 -z-10"></div>
+    <div class="bg-grid absolute inset-0 -z-10"></div>
+    <div class="mx-auto max-w-3xl px-4 py-16 text-center sm:px-6">
+      <h1 class="text-4xl font-bold tracking-tight text-chalk sm:text-5xl" data-reveal>
+        Priced like a tool, not a platform.
+      </h1>
+      <p class="mx-auto mt-4 max-w-xl text-lg text-fog" data-reveal style="--reveal-delay: 80ms">
+        One license per developer. Every detection, every agent, one year of
+        updates. Buy it, install it, move on.
+      </p>
+    </div>
+  </section>
+
+  <Pricing standalone />
+  <FAQ />
+  <CTA />
+</Base>

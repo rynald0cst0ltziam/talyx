@@ -1,0 +1,21 @@
+---
+import { agents } from '../data/content';
+const row = [...agents, ...agents];
+---
+
+<section class="border-y border-line bg-void py-8" aria-label="Supported agents">
+  <p class="px-4 text-center text-xs uppercase tracking-[0.2em] text-mist">
+    Discovers &amp; enforces artifacts across
+  </p>
+  <div class="relative mt-5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,#000_8%,#000_92%,transparent)]">
+    <div class="flex w-max animate-marquee gap-3">
+      {
+        row.map((a) => (
+          <span class="whitespace-nowrap rounded-lg hairline bg-panel/50 px-4 py-2 font-mono text-sm text-fog">
+            {a}
+          </span>
+        ))
+      }
+    </div>
+  </div>
+</section>

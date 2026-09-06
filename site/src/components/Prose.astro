@@ -1,0 +1,47 @@
+---
+/** Shared long-form page shell: sticky section nav + readable column. */
+interface Section {
+  id: string;
+  label: string;
+}
+interface Props {
+  title: string;
+  lead?: string;
+  sections: Section[];
+}
+const { title, lead, sections } = Astro.props;
+---
+
+<section class="relative isolate border-b border-line">
+  <div class="bg-aurora absolute inset-0 -z-10 opacity-70"></div>
+  <div class="bg-grid absolute inset-0 -z-10"></div>
+  <div class="mx-auto max-w-3xl px-4 py-14 sm:px-6">
+    <h1 class="text-4xl font-bold tracking-tight text-chalk">{title}</h1>
+    {lead && <p class="mt-3 text-lg text-fog">{lead}</p>}
+  </div>
+</section>
+
+<div class="mx-auto grid max-w-6xl gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[200px_1fr]">
+  <nav class="hidden lg:block">
+    <ul class="sticky top-24 space-y-1.5 border-l border-line text-sm">
+      {
+        sections.map((s) => (
+          <li>
+            <a
+              href={`#${s.id}`}
+              class="-ml-px block border-l border-transparent py-1 pl-4 text-mist transition-colors hover:border-signal hover:text-chalk"
+            >
+              {s.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+
+  <article
+    class="max-w-2xl text-[15px] leading-relaxed text-fog [&_a]:text-signal [&_a]:underline-offset-4 hover:[&_a]:underline [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-fog [&_h2]:mt-12 [&_h2]:scroll-mt-24 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-chalk [&_h3]:mt-8 [&_h3]:font-semibold [&_h3]:text-chalk [&_li]:my-1 [&_ol]:my-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-4 [&_pre]:my-5 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-line [&_pre]:bg-ink [&_pre]:p-4 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-4 [&_ul]:list-disc [&_ul]:pl-5"
+  >
+    <slot />
+  </article>
+</div>

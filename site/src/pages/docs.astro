@@ -1,0 +1,147 @@
+---
+import Base from '../layouts/Base.astro';
+import Prose from '../components/Prose.astro';
+import CTA from '../components/CTA.astro';
+import { site } from '../data/site';
+
+const sections = [
+  { id: 'quickstart', label: 'Quickstart' },
+  { id: 'install', label: 'Install' },
+  { id: 'activate', label: 'Activate a license' },
+  { id: 'commands', label: 'Commands' },
+  { id: 'enforcement', label: 'How enforcement works' },
+  { id: 'ci', label: 'Use in CI' },
+  { id: 'offline', label: 'Offline & air-gapped' },
+  { id: 'changelog', label: 'Changelog' },
+];
+---
+
+<Base title="Documentation" description="Install, activate and run AgentGuard — quickstart, command reference, CI usage.">
+  <Prose
+    title="Documentation"
+    lead="Install the binary, activate your license, scan. Everything runs on your machine."
+    sections={sections}
+  >
+    <h2 id="quickstart">Quickstart</h2>
+    <p>Three commands from nothing to protected:</p>
+    <pre><code># 1 · install (macOS / Linux)
+curl -fsSL https://get.{site.domain} | sh
+
+# 2 · activate the license from your purchase email
+agentguard activate AG-XXXX-XXXX-XXXX
+
+# 3 · scan this project + your user-level agent config
+agentguard scan --project .</code></pre>
+    <p>
+      When you're ready to enforce, run <code>agentguard init --project ~</code>.
+      That's the only command that writes to an agent config, and it backs each
+      one up first.
+    </p>
+
+    <h2 id="install">Install</h2>
+    <h3>macOS / Linux</h3>
+    <pre><code>curl -fsSL https://get.{site.domain} | sh</code></pre>
+    <p>
+      Installs <code>agentguard</code> and <code>agentguard-shim</code> to
+      <code>~/.agentguard/bin</code>. It does not touch your shell profile unless
+      you pass <code>--modify-path</code>.
+    </p>
+    <h3>Windows (PowerShell)</h3>
+    <pre><code>irm https://get.{site.domain}/install.ps1 | iex</code></pre>
+    <h3>npm</h3>
+    <pre><code>npm install -g agentguard</code></pre>
+    <h3>From source</h3>
+    <pre><code>git clone {site.github}
+cd agentguard
+cargo build --release
+./target/release/agentguard --help</code></pre>
+
+    <h2 id="activate">Activate a license</h2>
+    <p>
+      AgentGuard is a paid tool. After purchase you receive a key that looks like
+      <code>AG-1A2B-3C4D-5E6F</code>. Activate it once per machine:
+    </p>
+    <pre><code>agentguard activate AG-1A2B-3C4D-5E6F</code></pre>
+    <p>
+      This makes one HTTPS call to Lemon Squeezy to bind the key to this machine,
+      then writes <code>~/.agentguard/license.json</code>. You can activate on up
+      to <strong>3 machines</strong>. To free a slot:
+    </p>
+    <pre><code>agentguard license deactivate     # release this machine's slot
+agentguard license status         # show seats used, renewal date, offline grace</code></pre>
+    <p>
+      <code>scan</code> and <code>status</code> run without a license so you can
+      evaluate. <code>init</code> and the shim require an active license.
+    </p>
+
+    <h2 id="commands">Commands</h2>
+    <h3><code>agentguard scan</code></h3>
+    <p>Discover, score and report every artifact. Read-only.</p>
+    <ul>
+      <li><code>--project &lt;path&gt;</code> — project root to scan (default <code>.</code>). User-level config is always included.</li>
+      <li><code>--level quiet|balanced|strict</code> — how aggressively to flag (default <code>balanced</code>).</li>
+      <li><code>--fetch-registry</code> — download &amp; statically scan the real code behind <code>npx</code>/<code>uvx</code> servers. Opt-in; makes outbound registry calls.</li>
+      <li><code>--format text|sarif</code>, <code>--sarif-file &lt;path&gt;</code>, <code>--exit-code</code> — CI output.</li>
+    </ul>
+    <h3><code>agentguard status</code></h3>
+    <p>One-screen summary: agents detected, artifact counts, what needs review.</p>
+    <h3><code>agentguard init</code></h3>
+    <p>
+      Scans, caches your decisions, and rewrites configs so approved MCP servers
+      launch through the shim and blocked ones are removed. The only mutating
+      command.
+    </p>
+    <ul>
+      <li><code>--include-user-config</code> — also rewrite configs outside the project (e.g. <code>~/.claude.json</code>).</li>
+      <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
+    </ul>
+    <h3><code>agentguard allow &lt;id&gt;</code></h3>
+    <p>Approve an artifact flagged ASK/BLOCK. Restores a removed remote entry exactly as it was.</p>
+    <h3><code>agentguard why &lt;id&gt;</code></h3>
+    <p>Full reasoning behind a decision — every capability, every score contribution.</p>
+
+    <h2 id="enforcement">How enforcement works</h2>
+    <ol>
+      <li>Every config file is checksummed and backed up before the first rewrite.</li>
+      <li>Approved servers get their launch command rewritten to call <code>agentguard-shim &lt;id&gt; -- &lt;original command&gt;</code>. The shim re-checks the cached decision, then execs the real server.</li>
+      <li>Blocked local servers get the same treatment but the shim refuses to exec. Blocked remote servers are removed from the config entirely and their original entry is stored.</li>
+      <li>Malicious skills are moved to <code>~/.agentguard/quarantine</code>.</li>
+      <li><code>agentguard allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
+    </ol>
+
+    <h2 id="ci">Use in CI</h2>
+    <p>Fail a build when a poisoned artifact lands in a PR:</p>
+    <pre><code># .github/workflows/agentguard.yml
+- run: agentguard scan --project . --format sarif --sarif-file agentguard.sarif --exit-code
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: agentguard.sarif
+    category: agentguard</code></pre>
+    <p>
+      <code>--exit-code</code> returns 2 on any Block/Quarantine, 1 on any Ask, 0
+      otherwise. In CI, activate with a machine license via
+      <code>AGENTGUARD_LICENSE_KEY</code> in the job environment.
+    </p>
+
+    <h2 id="offline">Offline &amp; air-gapped</h2>
+    <p>
+      After activation, AgentGuard works offline for 30 days before it asks to
+      re-verify. For fully air-gapped machines, enterprise licenses ship an
+      offline activation file — email <a href={`mailto:${site.email}`}>{site.email}</a>.
+    </p>
+
+    <h2 id="changelog">Changelog</h2>
+    <h3>Unreleased</h3>
+    <ul>
+      <li>MCP tool-description poisoning detection (scans declared tool descriptions through the injection / hidden-Unicode / exfil detectors).</li>
+      <li>Tool-shadowing &amp; typosquat detection across all discovered servers.</li>
+      <li>SARIF 2.1.0 output + GitHub Action.</li>
+      <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives.</li>
+      <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers.</li>
+      <li><code>agentguard activate</code> / <code>license</code> commands.</li>
+    </ul>
+  </Prose>
+
+  <CTA />
+</Base>

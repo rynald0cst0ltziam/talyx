@@ -1,0 +1,128 @@
+---
+import { site } from '../data/site';
+import Icon from './Icon.astro';
+import Button from './Button.astro';
+
+interface Props {
+  /** full page treatment vs. embedded section */
+  standalone?: boolean;
+}
+const { standalone = false } = Astro.props;
+
+const included = [
+  'Every detection: injection, hidden Unicode, encoded payloads, exfil directives',
+  'Tool-shadowing, typosquat & poisoned-description detection',
+  `Discovery + enforcement across all ${site.agentsCovered} agents`,
+  'Shim-based blocking, remote-entry removal, skill quarantine',
+  'SARIF output + GitHub Action for CI',
+  'Registry (npm / PyPI) pre-resolution',
+  'Activate on up to 3 machines',
+  '1 year of updates & email support',
+];
+---
+
+<section id="pricing" class:list={['scroll-mt-20', !standalone && 'border-t border-line']}>
+  <div class="mx-auto max-w-6xl px-4 py-24 sm:px-6">
+    <div class="mx-auto max-w-2xl text-center" data-reveal>
+      <p class="font-mono text-xs uppercase tracking-[0.2em] text-signal">Pricing</p>
+      <h2 class="mt-3 text-3xl font-bold tracking-tight text-chalk sm:text-4xl">
+        One price. Everything included.
+      </h2>
+      <p class="mt-4 text-lg text-fog">
+        No tiers to decode, no feature gates. Per developer, per year.
+      </p>
+    </div>
+
+    <div class="mx-auto mt-12 grid max-w-4xl gap-6 lg:grid-cols-[1.15fr_1fr]">
+      <!-- main card -->
+      <div class="panel relative overflow-hidden p-8" data-reveal>
+        <div class="bg-aurora absolute inset-0 -z-10 opacity-40"></div>
+        <div class="flex items-center gap-2">
+          <span class="rounded-full bg-safe/15 px-2.5 py-1 text-xs font-semibold text-safe">
+            Launch pricing
+          </span>
+          <span id="launch-countdown" class="font-mono text-xs text-mist"></span>
+        </div>
+
+        <div class="mt-5 flex items-end gap-2">
+          <span class="text-5xl font-bold text-chalk tabular">${site.price.launchAmount}</span>
+          <span class="pb-1.5 text-mist">{site.price.unit}</span>
+        </div>
+        <p class="mt-1 text-sm text-mist">
+          <s class="text-mist/60">${site.price.regularAmount}</s>
+          after launch — your renewal stays at ${site.price.launchAmount} for life.
+        </p>
+
+        <div class="mt-6 flex flex-wrap gap-3">
+          <Button href={site.checkoutUrl} variant="buy" overlay>
+            Buy a license <Icon name="arrow" class="h-4 w-4" />
+          </Button>
+          <Button href={`mailto:${site.email}?subject=AgentGuard%20evaluation%20key`} variant="ghost">
+            Request an eval key
+          </Button>
+        </div>
+
+        <ul class="mt-8 grid gap-2.5">
+          {
+            included.map((x) => (
+              <li class="flex items-start gap-2.5 text-sm text-fog">
+                <Icon name="check" class="mt-0.5 h-4 w-4 shrink-0 text-safe" />
+                {x}
+              </li>
+            ))
+          }
+        </ul>
+
+        <p id="refund" class="mt-6 border-t border-line pt-4 text-xs text-mist">
+          14-day refund, no questions asked, via Lemon Squeezy. Secure checkout —
+          AgentGuard never sees your card.
+        </p>
+      </div>
+
+      <!-- team / enterprise -->
+      <div class="panel flex flex-col p-8" data-reveal style="--reveal-delay: 80ms">
+        <h3 class="text-lg font-semibold text-chalk">Teams &amp; enterprise</h3>
+        <p class="mt-2 text-sm text-mist">
+          Same binary, same detections. Add consolidated billing, a shared trust
+          policy your whole team pins to, air-gapped activation, and a security
+          questionnaire on file.
+        </p>
+        <ul class="mt-5 grid gap-2.5">
+          {
+            [
+              'Volume discount above 5 seats',
+              'Shared, version-controlled trust policy',
+              'Offline / air-gapped license activation',
+              'Priority disclosure channel & SLA',
+              'Invoice / PO billing',
+            ].map((x) => (
+              <li class="flex items-start gap-2.5 text-sm text-fog">
+                <Icon name="check" class="mt-0.5 h-4 w-4 shrink-0 text-signal" />
+                {x}
+              </li>
+            ))
+          }
+        </ul>
+        <div class="mt-auto pt-6">
+          <Button href={`mailto:${site.email}?subject=AgentGuard%20for%20teams`} variant="ghost" class="w-full">
+            Talk to us
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { site } from '../data/site';
+  const el = document.getElementById('launch-countdown');
+  if (el) {
+    const end = new Date(site.price.launchEndsISO + 'T23:59:59Z').getTime();
+    const tick = () => {
+      const d = Math.ceil((end - Date.now()) / 86_400_000);
+      el.textContent = d > 0 ? `· ends in ${d} day${d === 1 ? '' : 's'}` : '· final days';
+    };
+    tick();
+    setInterval(tick, 60_000);
+  }
+</script>

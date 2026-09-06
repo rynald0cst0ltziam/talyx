@@ -1,0 +1,25 @@
+---
+interface Props {
+  href: string;
+  variant?: 'primary' | 'ghost' | 'buy';
+  class?: string;
+  /** open the Lemon Squeezy overlay instead of navigating */
+  overlay?: boolean;
+}
+const { href, variant = 'primary', class: cls = '', overlay = false } = Astro.props;
+
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 whitespace-nowrap';
+const styles = {
+  primary: 'btn-glow bg-signal text-ink hover:brightness-110 hover:-translate-y-0.5 shadow-[var(--shadow-glow)]',
+  buy: 'btn-glow bg-safe text-ink hover:brightness-110 hover:-translate-y-0.5 shadow-[0_0_40px_-8px_rgba(62,233,164,0.4)]',
+  ghost: 'hairline text-chalk hover:border-line-bright hover:bg-panel-2',
+};
+---
+
+<a
+  href={href}
+  class:list={[base, styles[variant], overlay && 'lemonsqueezy-button', cls]}
+>
+  <slot />
+</a>
