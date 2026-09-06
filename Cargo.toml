@@ -57,6 +57,18 @@ flate2 = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha1 = "0.10"
 base64 = "0.22"
+# AST-based capability extraction + source-to-sink taint for JS/TS and
+# Python (agentguard-scanner/src/ast.rs, taint.rs). tree-sitter is an
+# error-tolerant parser — it produces a usable tree even for a file with
+# syntax errors, which matters for scanning attacker-controlled source.
+# The grammar crates bundle a C parser compiled by the `cc` crate at
+# build time (same C-toolchain requirement `ring` already imposes).
+# `.ts`/`.tsx` are parsed with the JavaScript grammar (TS type syntax
+# produces a few ERROR nodes but the call expressions we analyse still
+# parse) rather than pulling in the version-skewed typescript grammar.
+tree-sitter = "0.25"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
 
 [profile.dev]
 opt-level = 0
