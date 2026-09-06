@@ -127,6 +127,30 @@ cargo run -p agentguard-cli -- allow "<artifact-id>"
 cargo run -p agentguard-cli -- why "<artifact-id>"
 ```
 
+## CI / pull-request gating (SARIF)
+
+`agentguard scan` can emit a [SARIF 2.1.0](https://sarifweb.azurewebsites.net)
+log for GitHub code scanning, Azure DevOps, or any CI security dashboard —
+no AgentGuard-hosted service involved:
+
+```bash
+# SARIF to stdout:
+agentguard scan --project . --format sarif
+
+# keep the human-readable table on stdout AND write a file for CI to upload:
+agentguard scan --project . --sarif-file agentguard.sarif
+
+# make the job itself fail: exit 2 on any BLOCK/QUARANTINE, 1 on any ASK:
+agentguard scan --project . --exit-code
+```
+
+A ready-to-use workflow that builds AgentGuard, scans the repo, and uploads
+the SARIF as PR annotations is at
+[`.github/workflows/agentguard-scan.yml`](.github/workflows/agentguard-scan.yml).
+Each finding carries a repo-relative file location (the exact `SKILL.md`
+line for a poisoned skill, the config entry for a risky MCP server) and a
+stable fingerprint so results dedupe across runs.
+
 ## Design rules this codebase follows
 
 From `BUILD_PLAN.md` / the project's coding principles:

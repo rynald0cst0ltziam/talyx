@@ -12,6 +12,7 @@
 
 mod init;
 mod pipeline;
+mod sarif;
 
 use agentguard_core::{Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
@@ -48,6 +49,21 @@ enum Command {
         /// never needs.
         #[arg(long)]
         fetch_registry: bool,
+        /// Output format for stdout. `sarif` emits a SARIF 2.1.0 log for
+        /// GitHub code scanning / CI security dashboards.
+        #[arg(long, value_enum, default_value = "text")]
+        format: OutputFormatArg,
+        /// Also write a SARIF 2.1.0 log to this path (independent of
+        /// `--format`, so you can keep the human-readable table on stdout
+        /// and still hand CI a file to upload).
+        #[arg(long)]
+        sarif_file: Option<PathBuf>,
+        /// Exit non-zero when the scan finds something: 2 if any artifact
+        /// is BLOCK/QUARANTINE, 1 if any is ASK, 0 otherwise. Off by
+        /// default so `scan` stays a read-only report; turn it on to gate
+        /// a CI job.
+        #[arg(long)]
+        exit_code: bool,
     },
     /// Short protection summary (agents detected, artifact counts). Read-only.
     Status {
@@ -100,6 +116,12 @@ enum ProtectionLevelArg {
     Strict,
 }
 
+#[derive(ValueEnum, Clone, Copy, PartialEq)]
+enum OutputFormatArg {
+    Text,
+    Sarif,
+}
+
 impl From<ProtectionLevelArg> for ProtectionLevel {
     fn from(v: ProtectionLevelArg) -> Self {
         match v {
@@ -113,7 +135,14 @@ impl From<ProtectionLevelArg> for ProtectionLevel {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Scan { project, level, fetch_registry } => run_scan(&project, level.into(), fetch_registry),
+        Command::Scan {
+            project,
+            level,
+            fetch_registry,
+            format,
+            sarif_file,
+            exit_code,
+        } => run_scan(&project, level.into(), fetch_registry, format, sarif_file, exit_code),
         Command::Status { project } => run_status(&project),
         Command::Init {
             project,
@@ -131,16 +160,41 @@ fn resolve_root(project: &Path) -> PathBuf {
     project.canonicalize().unwrap_or_else(|_| project.to_path_buf())
 }
 
-fn run_scan(project: &Path, level: ProtectionLevel, fetch_registry: bool) {
+fn run_scan(
+    project: &Path,
+    level: ProtectionLevel,
+    fetch_registry: bool,
+    format: OutputFormatArg,
+    sarif_file: Option<PathBuf>,
+    exit_code: bool,
+) {
     let project_root = resolve_root(project);
     let engine = RiskEngine::new();
     let scanned = collect(&project_root, &engine, level, fetch_registry);
+
+    // SARIF is emitted even for an empty scan (a valid log with zero
+    // results is what a CI step expects), and before the text report so a
+    // panic in rendering can't lose it.
+    if let Some(path) = &sarif_file {
+        write_sarif_file(&scanned, &project_root, path);
+    }
+    if format == OutputFormatArg::Sarif {
+        let log = sarif::build(&scanned, &project_root);
+        println!("{}", serde_json::to_string_pretty(&log).unwrap());
+        if exit_code {
+            std::process::exit(sarif::exit_code(&scanned));
+        }
+        return;
+    }
 
     if scanned.is_empty() {
         println!(
             "No agent artifacts found under {} (and no recognized agent config in the home directory).",
             project_root.display()
         );
+        if exit_code {
+            std::process::exit(0);
+        }
         return;
     }
 
@@ -201,6 +255,24 @@ fn run_scan(project: &Path, level: ProtectionLevel, fetch_registry: bool) {
                 println!("  {r}");
             }
         }
+    }
+
+    if exit_code {
+        std::process::exit(sarif::exit_code(&scanned));
+    }
+}
+
+fn write_sarif_file(scanned: &[ScannedArtifact], project_root: &Path, path: &Path) {
+    let log = sarif::build(scanned, project_root);
+    match serde_json::to_string_pretty(&log) {
+        Ok(text) => {
+            if let Err(e) = std::fs::write(path, text) {
+                eprintln!("agentguard: failed to write SARIF file {}: {e}", path.display());
+            } else {
+                eprintln!("agentguard: wrote SARIF report to {}", path.display());
+            }
+        }
+        Err(e) => eprintln!("agentguard: failed to serialize SARIF: {e}"),
     }
 }
 
