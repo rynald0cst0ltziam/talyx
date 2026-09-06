@@ -5,9 +5,9 @@
  * scanned mid-flight and stopped at a barrier before it reaches the wire.
  *
  * All-SMIL on a single 6s document-timeline loop, so every beat stays in
- * sync with zero JS. Reduced motion freezes it on the "blocked" state.
- * The status label is the one thing SMIL can't animate (text content), so
- * a tiny rAF ticker drives it — and pauses itself under reduced motion.
+ * sync with zero JS. Reduced motion freezes it on the blocked state. The
+ * status label is the one thing SMIL can't animate (text content), so a
+ * tiny rAF ticker drives it — and pauses itself under reduced motion.
  */
 const D = '6s';
 ---
@@ -24,7 +24,7 @@ const D = '6s';
         and <code class="rounded bg-panel-2 px-1.5 py-0.5 text-[0.9em] text-fog">fetch</code>
         both show up in a thousand honest files. AgentGuard's taint pass follows
         the value from one to the other — across variables, helper functions and
-        parameters — and stops it at the barrier before it launches.
+        parameters — and stops it before it leaves the machine.
       </p>
     </div>
 
@@ -33,174 +33,177 @@ const D = '6s';
         <span class="inline-flex items-center gap-1.5">
           <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
             <circle cx="4" cy="4" r="4" fill="#3ee9a4">
-              <animate attributeName="fill" dur={D} repeatCount="indefinite"
+              <animate attributeName="fill" dur={D} repeatCount="indefinite" calcMode="discrete"
                 values="#3ee9a4;#3ee9a4;#ffb84d;#ff5470;#ff5470;#3ee9a4"
-                keyTimes="0;0.44;0.5;0.66;0.96;1" calcMode="discrete" />
-          </circle>
-        </svg>
-        <span class="tf-status">watching</span>
-      </span>
+                keyTimes="0;0.40;0.46;0.72;0.95;1" />
+            </circle>
+          </svg>
+          <span class="tf-status">watching</span>
+        </span>
         <span class="ml-auto">agentguard · taint engine</span>
       </div>
 
-      <div class="px-4 py-6 sm:px-8">
-        <svg class="ag-taint-svg w-full" viewBox="0 0 720 210" fill="none" role="img"
-          aria-label="A secret read from an SSH key file flows through a helper toward a fetch call and is blocked at a barrier before it reaches the network.">
+      <div class="px-3 py-6 sm:px-6">
+        <svg class="ag-taint-svg w-full" viewBox="0 0 820 260" fill="none" role="img"
+          aria-label="A secret read from a key file flows through a helper toward a fetch call and is blocked at a barrier before it reaches the network.">
           <defs>
-            <pattern id="tf-grid" width="22" height="22" patternUnits="userSpaceOnUse">
-              <path d="M22 0H0V22" fill="none" stroke="#4de3ff" stroke-opacity="0.05" stroke-width="1" />
+            <pattern id="tf-grid" width="26" height="26" patternUnits="userSpaceOnUse">
+              <path d="M26 0H0V26" fill="none" stroke="#4de3ff" stroke-opacity="0.05" stroke-width="1" />
             </pattern>
-            <filter id="tf-glow" x="-100%" y="-100%" width="300%" height="300%">
-              <feGaussianBlur stdDeviation="3" result="b" />
+            <filter id="tf-glow" x="-120%" y="-120%" width="340%" height="340%">
+              <feGaussianBlur stdDeviation="2.6" result="b" />
               <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
-            <path id="tf-route" d="M124 100 H360 H596" />
+            <path id="tf-route" d="M92 116 H364 H636 H760" />
           </defs>
 
-          <rect x="0" y="0" width="720" height="210" fill="url(#tf-grid)" />
+          <rect x="0" y="0" width="820" height="260" fill="url(#tf-grid)" />
           <g stroke="#313a52" stroke-width="1.5" fill="none">
-            <path d="M14 22v-8h8M706 22v-8h-8M14 188v8h8M706 188v8h-8" />
+            <path d="M16 20v-6h6M804 20v-6h-6M16 240v6h6M804 240v6h-6" />
           </g>
 
-          <!-- wire: dim base, then red taint drawing in behind the token -->
-          <path d="M124 100 H596" stroke="#232838" stroke-width="2.5" />
-          <path d="M124 100 H596" stroke="#ff5470" stroke-width="2.5" stroke-linecap="round"
+          <!-- wire: dim base, then the red taint drawing in over it -->
+          <path d="M60 116 H760" stroke="#232838" stroke-width="2.5" />
+          <path d="M60 116 H760" stroke="#ff5470" stroke-width="2.5" stroke-linecap="round"
             pathLength="100" stroke-dasharray="100">
-            <animate attributeName="stroke-dashoffset" dur={D} repeatCount="indefinite"
-              values="100;100;3;3;100" keyTimes="0;0.08;0.6;0.94;1" calcMode="linear" />
+            <animate attributeName="stroke-dashoffset" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="100;100;4;4;100" keyTimes="0;0.10;0.60;0.90;1" />
           </path>
 
           <!-- nodes -->
           <g>
-            <rect x="28" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#3ee9a4" stroke-opacity="0.55" />
-            <text x="76" y="97" text-anchor="middle" class="tf-kind" fill="#3ee9a4">SOURCE</text>
-            <text x="76" y="114" text-anchor="middle" class="tf-code">readFileSync</text>
+            <rect x="28" y="88" width="128" height="56" rx="10" fill="#0a0c12" stroke="#3ee9a4" stroke-opacity="0.5" />
+            <text x="92" y="111" text-anchor="middle" class="tf-kind" fill="#3ee9a4">SOURCE</text>
+            <text x="92" y="129" text-anchor="middle" class="tf-code">readFileSync</text>
           </g>
           <g>
-            <rect x="264" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#313a52" stroke-width="1.5">
-              <animate attributeName="stroke" dur={D} repeatCount="indefinite"
-                values="#313a52;#313a52;#ff5470;#313a52;#313a52" keyTimes="0;0.26;0.34;0.46;1" calcMode="discrete" />
+            <rect class="tf-mid" x="300" y="88" width="128" height="56" rx="10" fill="#0a0c12" stroke="#313a52" stroke-width="1.5">
+              <animate attributeName="stroke" dur={D} repeatCount="indefinite" calcMode="discrete"
+                values="#313a52;#313a52;#ff5470;#313a52;#313a52" keyTimes="0;0.28;0.34;0.46;1" />
             </rect>
-            <text x="312" y="97" text-anchor="middle" class="tf-kind" fill="#8b93a7">TRANSFORM</text>
-            <text x="312" y="114" text-anchor="middle" class="tf-code">buildPayload()</text>
+            <text x="364" y="111" text-anchor="middle" class="tf-kind" fill="#8b93a7">HELPER</text>
+            <text x="364" y="129" text-anchor="middle" class="tf-code">pack(key)</text>
           </g>
           <g>
-            <rect x="500" y="74" width="96" height="52" rx="9" fill="#0a0c12" stroke="#4de3ff" stroke-width="1.5" stroke-opacity="0.55">
-              <animate attributeName="stroke" dur={D} repeatCount="indefinite"
-                values="#4de3ff;#4de3ff;#ff5470;#4de3ff;#4de3ff" keyTimes="0;0.64;0.68;0.97;1" calcMode="discrete" />
-              <animate attributeName="stroke-opacity" dur={D} repeatCount="indefinite"
-                values="0.55;0.55;1;0.55;0.55" keyTimes="0;0.64;0.68;0.97;1" calcMode="discrete" />
+            <rect class="tf-sink" x="572" y="88" width="128" height="56" rx="10" fill="#0a0c12" stroke="#4de3ff" stroke-width="1.5" stroke-opacity="0.5">
+              <animate attributeName="stroke" dur={D} repeatCount="indefinite" calcMode="discrete"
+                values="#4de3ff;#4de3ff;#ff5470;#ff5470;#4de3ff" keyTimes="0;0.60;0.66;0.76;1" />
+              <animate attributeName="stroke-opacity" dur={D} repeatCount="indefinite" calcMode="discrete"
+                values="0.5;0.5;1;1;0.5" keyTimes="0;0.60;0.66;0.76;1" />
             </rect>
-            <text x="548" y="97" text-anchor="middle" class="tf-kind" fill="#4de3ff">SINK</text>
-            <text x="548" y="114" text-anchor="middle" class="tf-code">fetch(url, body)</text>
-            <path d="m538 88 20 24M558 88l-20 24" stroke="#ff5470" stroke-width="2.5" stroke-linecap="round" opacity="0">
-              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-                values="0;0;1;1;0;0" keyTimes="0;0.66;0.7;0.95;0.99;1" calcMode="linear" />
-            </path>
+            <text x="636" y="111" text-anchor="middle" class="tf-kind" fill="#4de3ff">SINK</text>
+            <text x="636" y="129" text-anchor="middle" class="tf-code">fetch(body)</text>
           </g>
 
-          <text x="628" y="104" class="tf-net" fill="#8b93a7">→ network
-            <animate attributeName="fill" dur={D} repeatCount="indefinite"
-              values="#8b93a7;#8b93a7;#3b4252;#8b93a7;#8b93a7" keyTimes="0;0.66;0.7;0.97;1" calcMode="discrete" />
-          </text>
+          <text x="760" y="170" text-anchor="middle" class="tf-net" fill="#8b93a7">network</text>
 
-          <!-- scan sweep -->
-          <rect y="58" width="30" height="94" fill="#4de3ff" fill-opacity="0.14">
-            <animate attributeName="x" dur={D} repeatCount="indefinite"
-              values="-40;-40;720;720" keyTimes="0;0.48;0.62;1" calcMode="linear" />
-            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-              values="0;0;1;1;0;0" keyTimes="0;0.48;0.49;0.61;0.62;1" calcMode="linear" />
+          <!-- scanner sweep -->
+          <rect y="70" width="34" height="92" fill="#4de3ff" fill-opacity="0.12">
+            <animate attributeName="x" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="-50;-50;820;820" keyTimes="0;0.44;0.60;1" />
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="0;0;1;1;0;0" keyTimes="0;0.44;0.46;0.58;0.60;1" />
           </rect>
 
-          <!-- barrier -->
-          <g transform="translate(608 100)">
-            <path d="M0-30 26-15 26 15 0 30-26 15-26-15Z" fill="none" stroke="#ff5470" stroke-width="1.5" opacity="0">
-              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-                values="0;0;0.9;0;0" keyTimes="0;0.6;0.62;0.74;1" calcMode="linear" />
+          <!-- barrier, sitting on the wire between the sink and the network -->
+          <g transform="translate(760 116)">
+            <path d="M0-25 21.7-12.5 21.7 12.5 0 25-21.7 12.5-21.7-12.5Z" fill="none" stroke="#ff5470" stroke-width="1.5" opacity="0">
+              <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+                values="0;0;0.9;0;0" keyTimes="0;0.70;0.73;0.86;1" />
               <animateTransform attributeName="transform" type="scale" dur={D} repeatCount="indefinite"
-                values="0.5;0.5;1;2.6;2.6" keyTimes="0;0.6;0.62;0.74;1" calcMode="spline"
+                calcMode="spline" values="0.5;0.5;1;2.7;2.7" keyTimes="0;0.70;0.73;0.86;1"
                 keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1" />
             </path>
             <g opacity="0">
-              <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-                values="0;0;1;1;0;0" keyTimes="0;0.58;0.63;0.95;0.98;1" calcMode="linear" />
+              <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+                values="0;0;1;1;0;0" keyTimes="0;0.71;0.77;0.96;0.99;1" />
               <animateTransform attributeName="transform" type="scale" additive="sum" dur={D} repeatCount="indefinite"
-                values="0.4;0.4;1.2;1;1;1" keyTimes="0;0.58;0.63;0.67;0.95;1" calcMode="spline"
+                calcMode="spline" values="0.4;0.4;1.2;1;1;1" keyTimes="0;0.71;0.77;0.82;0.96;1"
                 keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1;0 0 1 1" />
-              <path d="M0-21 18-10.5 18 10.5 0 21-18 10.5-18-10.5Z" fill="#160b10" stroke="#ff5470" stroke-width="2" />
-              <path d="m-8 0 5 6 11-13" stroke="#ff5470" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+              <path d="M0-19 16.5-9.5 16.5 9.5 0 19-16.5 9.5-16.5-9.5Z" fill="#170b10" stroke="#ff5470" stroke-width="2" />
+              <path d="m-7 0 4.5 5.5 10-12" stroke="#ff5470" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             </g>
           </g>
 
-          <!-- shards -->
+          <!-- shatter -->
           {
             [
-              [22, -20],
-              [-14, -24],
-              [20, 22],
-              [-18, 18],
+              [24, -18],
+              [-16, -22],
+              [22, 20],
+              [-20, 16],
             ].map(([dx, dy], i) => (
-              <circle cx="596" cy="100" r={1.6 + (i % 2) * 0.7} fill="#ff5470" opacity="0">
-                <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-                  values="0;0;1;0;0" keyTimes="0;0.62;0.64;0.75;1" calcMode="linear" />
+              <circle cx="760" cy="116" r={1.5 + (i % 2) * 0.8} fill="#ff5470" opacity="0">
+                <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+                  values="0;0;1;0;0" keyTimes="0;0.72;0.75;0.86;1" />
                 <animateTransform attributeName="transform" type="translate" dur={D} repeatCount="indefinite"
-                  values={`0 0;0 0;${dx} ${dy};${dx} ${dy}`} keyTimes="0;0.62;0.75;1" calcMode="spline"
+                  calcMode="spline" values={`0 0;0 0;${dx} ${dy};${dx} ${dy}`} keyTimes="0;0.72;0.86;1"
                   keySplines="0 0 1 1;0.16 1 0.3 1;0 0 1 1" />
               </circle>
             ))
           }
 
           <!-- the tainted secret -->
-          <circle r="5.5" fill="#ff5470" filter="url(#tf-glow)">
+          <circle r="5" fill="#ff5470" filter="url(#tf-glow)">
             <animateMotion dur={D} repeatCount="indefinite" calcMode="linear"
-              keyPoints="0;0;0.5;0.5;1;1" keyTimes="0;0.09;0.32;0.4;0.61;1">
+              keyPoints="0;0;0.407;0.407;0.814;0.814;1;1"
+              keyTimes="0;0.09;0.31;0.40;0.60;0.67;0.75;1">
               <mpath href="#tf-route" />
             </animateMotion>
-            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-              values="0;0;1;1;0;0" keyTimes="0;0.08;0.12;0.61;0.63;1" calcMode="linear" />
-            <animate attributeName="r" dur={D} repeatCount="indefinite"
-              values="5.5;5.5;5.5;9;0;0" keyTimes="0;0.55;0.6;0.62;0.63;1" calcMode="linear" />
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="0;0;1;1;0;0" keyTimes="0;0.08;0.12;0.71;0.76;1" />
+            <animate attributeName="r" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="5;5;5;8.5;0;0" keyTimes="0;0.62;0.68;0.72;0.76;1" />
           </circle>
 
           <!-- verdict -->
-          <g transform="translate(360 158)" opacity="0">
-            <animate attributeName="opacity" dur={D} repeatCount="indefinite"
-              values="0;0;1;1;0;0" keyTimes="0;0.65;0.7;0.95;0.99;1" calcMode="linear" />
+          <g transform="translate(410 216)" opacity="0">
+            <animate attributeName="opacity" dur={D} repeatCount="indefinite" calcMode="linear"
+              values="0;0;1;1;0;0" keyTimes="0;0.74;0.79;0.96;0.99;1" />
             <animateTransform attributeName="transform" type="scale" additive="sum" dur={D} repeatCount="indefinite"
-              values="0.8;0.8;1.08;1;1;1" keyTimes="0;0.65;0.7;0.74;0.95;1" calcMode="spline"
+              calcMode="spline" values="0.82;0.82;1.06;1;1;1" keyTimes="0;0.74;0.79;0.83;0.96;1"
               keySplines="0 0 1 1;0.16 1 0.3 1;0.16 1 0.3 1;0 0 1 1;0 0 1 1" />
-            <rect x="-118" y="-13" width="236" height="26" rx="7" fill="#160b10" stroke="#ff5470" stroke-opacity="0.6" />
-            <text x="-104" y="4" class="tf-verdict-a" fill="#ff5470">⛔ BLOCKED</text>
-            <text x="-24" y="4" class="tf-verdict-b" fill="#8b93a7">CRITICAL · secret → network</text>
+            <rect x="-165" y="-15" width="330" height="30" rx="8" fill="#170b10" stroke="#ff5470" stroke-opacity="0.55" />
+            <text x="-150" y="5" class="tf-verdict-a" fill="#ff5470">BLOCKED</text>
+            <text x="-88" y="5" class="tf-verdict-b" fill="#9aa3b6">CRITICAL — secret would reach the network</text>
           </g>
         </svg>
       </div>
     </div>
 
     <p class="mt-4 text-center text-xs text-mist" data-reveal>
-      Real detection, real fixture. <code class="text-fog">agentguard init</code> removes it from the config and the shim refuses to launch it.
+      Real detection, real fixture. <code class="text-fog">agentguard init</code> removes it from the config; the shim refuses to launch it.
     </p>
   </div>
 </section>
 
 <style>
+  .ag-taint-svg text {
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
   .ag-taint-svg .tf-kind {
-    font: 700 8px var(--font-mono);
-    letter-spacing: 0.12em;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
   }
   .ag-taint-svg .tf-code {
-    font: 500 10px var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
     fill: #b7bdce;
   }
   .ag-taint-svg .tf-net {
-    font: 500 11px var(--font-mono);
-  }
-  .ag-taint-svg .tf-verdict-a {
-    font: 700 10px var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
     letter-spacing: 0.08em;
   }
+  .ag-taint-svg .tf-verdict-a {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
   .ag-taint-svg .tf-verdict-b {
-    font: 500 9px var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 500;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -209,8 +212,10 @@ const D = '6s';
     .ag-taint-svg :global(animateTransform) {
       display: none;
     }
-    /* freeze on the caught state */
-    .ag-taint-svg > g:nth-of-type(4) rect { stroke: #ff5470 !important; }
+    .ag-taint-svg .tf-sink {
+      stroke: #ff5470;
+      stroke-opacity: 1;
+    }
   }
 </style>
 
@@ -221,8 +226,8 @@ const D = '6s';
     const CLOCK = 6000;
     const beats: [number, string][] = [
       [0, 'watching'],
-      [0.42, 'tracing flow'],
-      [0.62, 'blocked'],
+      [0.4, 'tracing flow'],
+      [0.72, 'blocked'],
       [0.96, 'watching'],
     ];
     const start = performance.now();
