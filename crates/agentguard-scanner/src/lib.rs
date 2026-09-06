@@ -1,13 +1,23 @@
 //! agentguard-scanner
 //!
-//! Static capability extraction. v0 implementation: pattern-based heuristics
-//! over source text, not a full AST parse — see BUILD_PLAN.md §3 for why
-//! this is the right starting point (manifest-declared + heuristic-inferred)
-//! and the note that AST-based extraction for JS/TS + Python is the planned
-//! upgrade once this heuristic layer is validated against the eval corpus
-//! (BUILD_PLAN.md §13). Every finding here carries its evidence string so
-//! false positives are debuggable, and no finding is silently invented —
-//! `EvidenceBasis::Inferred` findings are exactly what matched, nothing more.
+//! Static capability extraction. Two layers:
+//!
+//!  - `ast.rs` — the **authoritative** pass for JavaScript / TypeScript,
+//!    Python and Ruby: a tree-sitter parse plus function-scoped,
+//!    interprocedural source-to-sink taint (a secret read that reaches a
+//!    network sink, followed across helper-function returns and
+//!    parameters). Proven to be a superset of the pattern rules below for
+//!    those languages (see `ast_layer_is_a_superset_of_the_regex_layer_*`).
+//!  - the `*_RULES` pattern sets in this file — the original heuristic
+//!    layer (BUILD_PLAN.md §3). Still authoritative for shell and Perl,
+//!    and the fallback for a JS/TS/Python/Ruby file tree-sitter cannot
+//!    parse (truncated / heavily obfuscated). `scan_file` drops a pattern
+//!    finding whenever the AST already reported the same capability, so
+//!    the reasoning shown is the structural one.
+//!
+//! Every finding carries its evidence string so false positives are
+//! debuggable, and no finding is silently invented — `EvidenceBasis::
+//! Inferred` findings are exactly what matched, nothing more.
 
 use agentguard_core::{Capability, CapabilityFinding, EvidenceBasis};
 use once_cell::sync::Lazy;
