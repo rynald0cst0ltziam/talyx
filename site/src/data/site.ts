@@ -17,11 +17,11 @@
  */
 export const site = {
   name: 'AgentGuard',
-  tagline: 'The security layer for AI coding agents.',
+  tagline: 'Supply-chain security for AI coding agents.',
   domain: 'agentguard.dev',
   url: 'https://agentguard.dev',
   description:
-    'AgentGuard scans and enforces every MCP server, skill, plugin, extension, hook and config your AI coding agents load — across 28 agents, fully local, no telemetry. Tree-sitter AST + source-to-sink taint, prompt-injection and hidden-Unicode detection, tool-shadowing and typosquat detection, real launch-time blocking.',
+    'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. AgentGuard scans every one across 28 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
   email: 'hello@agentguard.dev',
   github: 'https://github.com/agentguard/agentguard',
 

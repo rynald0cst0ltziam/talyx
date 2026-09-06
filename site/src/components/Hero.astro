@@ -21,17 +21,17 @@ import Icon from './Icon.astro';
           >
             <span class="h-1.5 w-1.5 rounded-full bg-signal"></span> {site.agentsCovered} agents
           </span>
-          The supply chain for AI coding agents
+          Supply-chain security for AI coding agents
         </div>
 
         <h1
-          class="mt-6 text-balance text-[2.6rem] font-bold leading-[1.03] tracking-[-0.02em] text-chalk sm:text-[3.25rem] lg:text-[3.9rem]"
+          class="mt-6 text-balance text-[2.5rem] font-bold leading-[1.04] tracking-[-0.02em] text-chalk sm:text-[3.1rem] lg:text-[3.7rem]"
           data-reveal
           style="--reveal-delay: 60ms"
         >
-          Your agent runs code
+          Your AI agents run
           <span class="relative whitespace-nowrap">
-            <span class="text-gradient">you never saw.</span>
+            <span class="text-gradient">untrusted code.</span>
             <svg
               class="absolute -bottom-1.5 left-0 h-2.5 w-full text-signal/50"
               viewBox="0 0 300 12"
@@ -47,45 +47,61 @@ import Icon from './Icon.astro';
               ></path>
             </svg>
           </span>
+          <br class="hidden sm:block" />
+          AgentGuard catches it first.
         </h1>
 
         <p
-          class="mt-7 max-w-xl text-lg leading-relaxed text-fog"
+          class="mt-7 max-w-xl text-[1.0625rem] leading-relaxed text-fog"
           data-reveal
           style="--reveal-delay: 120ms"
         >
-          MCP servers, skills, plugins, extensions, hooks — pulled from config
-          files, npm and random gists, then handed to a model that does what
-          it's told. <strong class="text-chalk">AgentGuard</strong> scans every
-          one with a real tree-sitter AST and source-to-sink taint — not a grep —
-          and physically blocks the malicious ones.
-          <span class="text-mist">Local. Auditable. No telemetry.</span>
+          Cursor, Claude Code, Copilot and 25 more auto-load MCP servers,
+          plugins, skills and hooks — from repos, npm and random gists — and
+          hand them to a model with access to your shell, your credentials and
+          your source. AgentGuard scans every one, traces a leaked secret from
+          disk to the network, and <strong class="text-chalk">physically blocks
+          what's malicious before the process starts.</strong>
+        </p>
+
+        <p
+          class="mt-4 max-w-xl border-l-2 border-threat/50 pl-3 text-[0.95rem] italic text-mist"
+          data-reveal
+          style="--reveal-delay: 150ms"
+        >
+          You would never pipe a stranger's script into your shell. Your agent
+          does it every session — from a config file you cloned, not a decision
+          you made.
         </p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3" data-reveal style="--reveal-delay: 180ms">
           <Button href="/pricing" variant="primary">
-            Secure your agents — ${site.price.amount}/yr
+            Lock down your agents — ${site.price.amount}/yr
             <Icon name="arrow" class="h-4 w-4" />
           </Button>
           <Button href="/#how" variant="ghost">
-            <Icon name="terminal" class="h-4 w-4" /> See a scan
+            <Icon name="terminal" class="h-4 w-4" /> See a live scan
           </Button>
         </div>
 
-        <dl class="mt-10 grid max-w-md grid-cols-3 gap-4 border-t border-line pt-6" data-reveal style="--reveal-delay: 240ms">
-          <div>
-            <dt class="text-2xl font-bold text-chalk tabular">{site.agentsCovered}</dt>
-            <dd class="text-xs text-mist">agents covered</dd>
-          </div>
-          <div>
-            <dt class="text-2xl font-bold text-chalk tabular">{site.attackClasses}</dt>
-            <dd class="text-xs text-mist">attack classes detected</dd>
-          </div>
-          <div>
-            <dt class="text-2xl font-bold text-chalk tabular">0</dt>
-            <dd class="text-xs text-mist">bytes sent off-machine</dd>
-          </div>
-        </dl>
+        <ul
+          class="mt-8 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-6 text-xs text-mist"
+          data-reveal
+          style="--reveal-delay: 240ms"
+        >
+          <li class="flex items-center gap-1.5">
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.attackClasses} attack classes
+          </li>
+          <li class="flex items-center gap-1.5">
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Tree-sitter AST + taint, not grep
+          </li>
+          <li class="flex items-center gap-1.5">
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.testsGreen} tests, source-available
+          </li>
+          <li class="flex items-center gap-1.5">
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Zero telemetry, zero cloud
+          </li>
+        </ul>
       </div>
 
       <div class="animate-float" data-reveal style="--reveal-delay: 160ms">

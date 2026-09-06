@@ -16,20 +16,22 @@ import Icon from './Icon.astro';
       </span>
     </div>
     <h2 class="mt-6 text-balance text-3xl font-bold tracking-tight text-chalk sm:text-4xl">
-      The next artifact your agent loads could be the one.
+      You audit your dependencies.
+      <span class="text-gradient">Your agent doesn't.</span>
     </h2>
     <p class="mx-auto mt-4 max-w-xl text-lg text-fog">
-      Five minutes to install. One command to scan. ${site.price.amount}/yr to
-      stop guessing what your agents are running.
+      Five minutes to install, one command to scan. Then every MCP server,
+      plugin and skill your agents load is checked and gated — for
+      ${site.price.amount} a year, locked for the life of your license.
     </p>
     <div class="mt-8 flex flex-wrap justify-center gap-3">
       <Button href={site.checkoutUrl} variant="buy" overlay>
-        Get AgentGuard <Icon name="arrow" class="h-4 w-4" />
+        Get AgentGuard — ${site.price.amount}/yr <Icon name="arrow" class="h-4 w-4" />
       </Button>
       <Button href="/docs" variant="ghost">Read the docs</Button>
     </div>
     <p class="mt-5 text-xs text-mist">
-      Secure Lemon Squeezy checkout · 14-day refund · activate on 3 machines
+      Secure Lemon Squeezy checkout · 14-day refund · activate on 3 machines · scan free, forever
     </p>
   </div>
 </section>
