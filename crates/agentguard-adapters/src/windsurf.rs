@@ -108,7 +108,9 @@ fn config_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
     };
     DiscoveredArtifact {
         display_location: path.display().to_string(),
-        scan_root: None,
+        // Content-scanned as an instruction file — see cursor.rs's
+        // config_fingerprint for the rationale.
+        scan_root: Some(path.to_path_buf()),
         artifact,
         launch: None,
         config_source: None,

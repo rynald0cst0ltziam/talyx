@@ -76,6 +76,7 @@ name = "agentguard-scanner"
 version = "0.1.0"
 dependencies = [
  "agentguard-core",
+ "base64 0.22.1",
  "once_cell",
  "regex",
  "serde",

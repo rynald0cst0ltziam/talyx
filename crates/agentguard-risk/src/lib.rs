@@ -124,6 +124,60 @@ impl RiskEngine {
             );
         }
 
+        // Content-influence findings — a prompt-layer attack in the
+        // artifact's own text (a skill's SKILL.md, an agent-instruction
+        // file, later an MCP tool description), detected by
+        // agentguard-scanner's content analysis rather than its code
+        // heuristics. Scored OUTSIDE the capped OS-capability trio above:
+        // that cap exists because "shell + network + writes files" is
+        // normal for a legitimate dev tool and reputation is what
+        // separates them — none of that reasoning applies to hidden text
+        // or an instruction to ignore the system prompt, which has no
+        // benign form. See Capability::is_content_influence and
+        // THREAT_MODEL.md.
+        if caps.contains(&Capability::HiddenInstructions) {
+            extra += 45;
+            reasons.push(
+                "contains text hidden from a human reviewer (zero-width / bidirectional-override / Unicode-tag characters, or invisible HTML) — no legitimate reason for an instruction file to hide content (+45)"
+                    .to_string(),
+            );
+        }
+        if caps.contains(&Capability::DataExfiltrationText) {
+            extra += 45;
+            reasons.push(
+                "instruction text directs the agent to send local secret material or context to an external destination — data-exfiltration directive (+45)"
+                    .to_string(),
+            );
+        }
+        if caps.contains(&Capability::PromptInjection) {
+            extra += 30;
+            reasons.push(
+                "contains instruction-override / role-manipulation phrasing (\"ignore previous instructions\", \"do not tell the user\", spoofed role tags) — prompt-injection pattern (+30)"
+                    .to_string(),
+            );
+        }
+        if caps.contains(&Capability::EncodedPayload) {
+            extra += 25;
+            reasons.push(
+                "embeds an encoded (base64 / hex / backslash-escape) payload that decodes to instructions, a URL, or shell content (+25)"
+                    .to_string(),
+            );
+        }
+        // Hidden text carrying an actual manipulation/exfiltration payload
+        // is the canonical prompt-injection-via-skill shape — push it
+        // unambiguously into CRITICAL rather than leaving it at the
+        // High/Critical boundary.
+        if caps.contains(&Capability::HiddenInstructions)
+            && (caps.contains(&Capability::PromptInjection)
+                || caps.contains(&Capability::DataExfiltrationText))
+        {
+            extra += 25;
+            reasons.push(
+                "hidden text AND an instruction-manipulation / exfiltration payload together — the canonical prompt-injection-via-instruction-file pattern (+25)"
+                    .to_string(),
+            );
+        }
+
         (capped + extra, reasons)
     }
 
@@ -411,6 +465,74 @@ mod tests {
             ProtectionLevel::Balanced.decision_for(breakdown.band()),
             Decision::Block
         );
+    }
+
+    #[test]
+    fn skill_with_hidden_instructions_and_injection_is_critical_block() {
+        // The Phase-1 content-scanner shape: a skill whose SKILL.md hides
+        // an "ignore previous instructions" payload in zero-width / Unicode
+        // -tag characters. HiddenInstructions (+45) + PromptInjection (+30)
+        // + the together-bonus (+25) = 100 -> CRITICAL -> BLOCK on every
+        // preset. No OS capability required — this is a pure prompt-layer
+        // attack.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::Skill,
+            None,
+            false,
+            &[Capability::HiddenInstructions, Capability::PromptInjection],
+        );
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.total(), 100);
+        assert_eq!(breakdown.band(), RiskBand::Critical);
+        assert_eq!(
+            ProtectionLevel::Balanced.decision_for(breakdown.band()),
+            Decision::Block
+        );
+    }
+
+    #[test]
+    fn agent_instruction_file_with_exfiltration_directive_is_high_or_critical() {
+        // A poisoned `.cursorrules` / GEMINI.md committed to a shared repo:
+        // prose telling the agent to send ~/.aws/credentials to an external
+        // URL. DataExfiltrationText alone is +45 -> MEDIUM; with the
+        // PromptInjection phrasing that usually accompanies it, +75 -> HIGH
+        // -> BLOCK under Strict, ASK under Balanced.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::AgentConfig,
+            None,
+            false,
+            &[Capability::DataExfiltrationText, Capability::PromptInjection],
+        );
+        let breakdown = engine.score(&artifact);
+        assert!(breakdown.total() >= 50, "got {}", breakdown.total());
+        assert!(breakdown.band() >= RiskBand::High);
+    }
+
+    #[test]
+    fn encoded_payload_alone_is_medium_not_critical() {
+        // A base64 blob that decodes to something suspicious is a signal,
+        // not a conviction on its own (+25 -> LOW/MEDIUM boundary). It
+        // should not auto-BLOCK without corroboration.
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(
+            ArtifactKind::Skill,
+            None,
+            false,
+            &[Capability::EncodedPayload],
+        );
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.total(), 25);
+        assert_eq!(breakdown.band(), RiskBand::Medium);
+    }
+
+    #[test]
+    fn benign_skill_with_no_content_findings_stays_low() {
+        let engine = RiskEngine::new();
+        let artifact = artifact_with(ArtifactKind::Skill, None, false, &[]);
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.band(), RiskBand::Low);
     }
 
     #[test]

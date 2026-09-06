@@ -5,10 +5,17 @@
 //! file, a skills directory) even without a dedicated adapter, and surface
 //! that something is present rather than staying silent.
 //!
-//! This does not gate or score anything yet — there's no enforcement point
-//! for an agent AgentGuard doesn't understand. It exists so `agentguard
-//! status` can say "found signs of an unrecognized agent" instead of "found
-//! nothing," which is the whole point of this mode per the product spec.
+//! There's no *enforcement* point for an agent AgentGuard doesn't
+//! understand (nothing to rewrite, no shim to route through), so this mode
+//! stays discovery-first — its job is that `agentguard status` can say
+//! "found signs of an unrecognized agent" instead of "found nothing." But
+//! a generic marker that is a single instruction FILE (`AGENTS.md`,
+//! `.clinerules`, `.github/copilot-instructions.md`, ...) IS content-
+//! scanned now: its prose feeds the same prompt-injection / hidden-Unicode
+//! / encoded-payload analysis a skill's SKILL.md does (agentguard-scanner's
+//! content.rs), because a poisoned instruction file is a real risk whether
+//! or not we recognize the agent that reads it. Directory markers stay
+//! visibility-only.
 
 use crate::{AgentAdapter, DiscoveredArtifact};
 use agentguard_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity};
@@ -74,9 +81,10 @@ impl AgentAdapter for UnknownAgentAdapter {
                     capabilities: vec![],
                     discovered_by,
                 };
+                let scan_root = path.is_file().then(|| path.clone());
                 out.push(DiscoveredArtifact {
                     display_location: path.display().to_string(),
-                    scan_root: None,
+                    scan_root,
                     artifact,
                     launch: None,
                     config_source: None,

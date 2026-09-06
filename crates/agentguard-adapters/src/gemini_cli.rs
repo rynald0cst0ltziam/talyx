@@ -91,13 +91,14 @@ impl AgentAdapter for GeminiCliAdapter {
         // GEMINI.md — Gemini CLI's project-instructions/memory file
         // (verified against google-gemini/gemini-cli's own docs:
         // github.com/google-gemini/gemini-cli/blob/main/docs/cli/
-        // gemini-md.md), analogous to Claude Code's CLAUDE.md. Visibility
-        // only, no capability scanning — it's instruction/prompt text,
-        // not executable code, same reasoning as `.cursorrules`/
-        // `.windsurfrules`. Was previously (wrongly) covered by Unknown
-        // Agent Mode's generic marker list before this adapter existed —
-        // removed from there to avoid the double-report bug already found
-        // and fixed once for `.cursorrules`.
+        // gemini-md.md), analogous to Claude Code's CLAUDE.md. Its prose
+        // is fed straight into the model's context, so it's content-scanned
+        // as an instruction file (prompt-injection / hidden-Unicode /
+        // encoded-payload analysis) via its `scan_root`, same as
+        // `.cursorrules`/`.windsurfrules`. Was previously (wrongly) covered
+        // by Unknown Agent Mode's generic marker list before this adapter
+        // existed — removed from there to avoid the double-report bug
+        // already found and fixed once for `.cursorrules`.
         let gemini_md_path = project_root.join("GEMINI.md");
         if gemini_md_path.exists() {
             out.push(config_fingerprint(&gemini_md_path, "GEMINI.md"));
@@ -124,7 +125,9 @@ fn config_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
     };
     DiscoveredArtifact {
         display_location: path.display().to_string(),
-        scan_root: None,
+        // Content-scanned as an instruction file — see cursor.rs's
+        // config_fingerprint for the rationale.
+        scan_root: Some(path.to_path_buf()),
         artifact,
         launch: None,
         config_source: None,
@@ -273,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn discovers_gemini_md_for_visibility_only() {
+    fn discovers_gemini_md_and_marks_it_for_content_scanning() {
         let dir = unique_temp_dir("discover-gemini-md");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("GEMINI.md"), "Be helpful.").unwrap();
@@ -282,7 +285,9 @@ mod tests {
         let fingerprints: Vec<_> = discovered.iter().filter(|d| d.artifact.name == "GEMINI.md").collect();
         assert_eq!(fingerprints.len(), 1);
         assert_eq!(fingerprints[0].artifact.kind, ArtifactKind::AgentConfig);
-        assert!(fingerprints[0].scan_root.is_none());
+        // Now content-scanned as an instruction file (prompt-injection /
+        // hidden-text / encoded-payload analysis), not visibility-only.
+        assert_eq!(fingerprints[0].scan_root.as_deref(), Some(dir.join("GEMINI.md").as_path()));
 
         std::fs::remove_dir_all(&dir).ok();
     }

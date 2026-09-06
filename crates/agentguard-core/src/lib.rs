@@ -44,6 +44,18 @@ pub enum Capability {
     Hook,
     ShellProfile,
     BackgroundProcess,
+    // Content influence — prompt-layer, not OS-layer. Text that is fed
+    // straight into the agent's context (a skill's SKILL.md, an
+    // agent-instruction file like .cursorrules/GEMINI.md, and — later — an
+    // MCP tool's declared description) can carry instructions of its own.
+    // Detected by agentguard-scanner's content analysis (`content.rs`),
+    // not its source-code heuristics. See BUILD_PLAN.md §3 and the
+    // competitive-research note in STATUS.md (#31) on why every serious
+    // competitor treats this as a core detection.
+    PromptInjection,
+    HiddenInstructions,
+    EncodedPayload,
+    DataExfiltrationText,
 }
 
 impl Capability {
@@ -110,6 +122,22 @@ impl Capability {
                 | Capability::SpawnProcess
                 | Capability::ExecuteBinary
                 | Capability::InstallPackage
+        )
+    }
+
+    /// Prompt-layer influence capabilities: the artifact's own text (not
+    /// its code) tries to steer the agent — instruction-override phrasing,
+    /// text hidden from a human reviewer, an encoded payload, or an
+    /// explicit exfiltration directive. Grouped so the risk engine and
+    /// drift detection can treat "gained a prompt-injection signal" the
+    /// same way they treat "gained a dangerous OS capability".
+    pub fn is_content_influence(self) -> bool {
+        matches!(
+            self,
+            Capability::PromptInjection
+                | Capability::HiddenInstructions
+                | Capability::EncodedPayload
+                | Capability::DataExfiltrationText
         )
     }
 }

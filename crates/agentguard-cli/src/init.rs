@@ -77,7 +77,12 @@ fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<
     let gained_dangerous: Vec<Capability> = new_caps
         .difference(&old_caps)
         .copied()
-        .filter(|c| c.is_secret_access() || c.is_process_execution() || c.is_persistence())
+        .filter(|c| {
+            c.is_secret_access()
+                || c.is_process_execution()
+                || c.is_persistence()
+                || c.is_content_influence()
+        })
         .collect();
 
     if gained_dangerous.is_empty() {

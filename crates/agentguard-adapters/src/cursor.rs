@@ -73,12 +73,27 @@ impl AgentAdapter for CursorAdapter {
             ));
         }
 
-        // .cursorrules — visibility only, no capability scanning. It's
-        // instruction/prompt text, not executable code, the same reason a
-        // skill's own SKILL.md isn't scanned (only files alongside it are).
+        // .cursorrules — instruction/prompt text fed straight into the
+        // agent's context. Content-scanned (agentguard-scanner's
+        // content.rs: prompt-injection phrasing, hidden Unicode, encoded
+        // payloads, exfiltration directives) via its `scan_root`, the same
+        // way a skill's SKILL.md now is — a poisoned `.cursorrules`
+        // committed to a shared repo is a real supply-chain vector.
         let rules_path = project_root.join(".cursorrules");
         if rules_path.exists() {
             out.push(config_fingerprint(&rules_path, ".cursorrules"));
+        }
+        let rules_mdc = project_root.join(".cursor").join("rules");
+        if rules_mdc.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&rules_mdc) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().and_then(|x| x.to_str()) == Some("mdc") {
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("rule.mdc");
+                        out.push(config_fingerprint(&p, &format!(".cursor/rules/{name}")));
+                    }
+                }
+            }
         }
 
         out
@@ -102,7 +117,10 @@ fn config_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
     };
     DiscoveredArtifact {
         display_location: path.display().to_string(),
-        scan_root: None,
+        // A single instruction file — the CLI scans it as `scan_root` (see
+        // pipeline.rs's `root.is_file()` branch) and content.rs analyzes
+        // its prose for prompt-injection / hidden-text / encoded payloads.
+        scan_root: Some(path.to_path_buf()),
         artifact,
         launch: None,
         config_source: None,

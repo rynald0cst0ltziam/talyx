@@ -17,7 +17,10 @@ Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI
 Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush,
 plus a generic Unknown Agent Mode fallback), static
 capability extraction (JS/TS/Python/Ruby/Perl/shell heuristics,
-registry-resolved npm/PyPI packages), the risk engine (capped evidence +
+registry-resolved npm/PyPI packages), content analysis of skill markdown
+and agent-instruction files (prompt-injection phrasing, hidden/invisible
+Unicode, base64/hex-encoded payloads, data-exfiltration directives — see
+STATUS.md #39), the risk engine (capped evidence +
 reputation discount + context modifiers), and real enforcement —
 MCP-server config-rewrite through `agentguard-shim` (BUILD_PLAN.md §5a),
 remote-entry removal, skill quarantine, drift detection, and hook
@@ -72,7 +75,7 @@ otherwise they print the line to add yourself.
 ```
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
-  agentguard-scanner     static capability extraction (JS/TS, Python, shell scripts; package.json manifest)
+  agentguard-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest) + content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files
   agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
