@@ -120,6 +120,11 @@ impl AgentAdapter for ClaudeCodeAdapter {
             out.extend(discover_skills(&h.join(".claude").join("skills")));
         }
 
+        // Plugins — a whole second artifact surface (MCP servers, hooks,
+        // skills, agents, LSP servers, monitors), only for plugins listed
+        // in `enabledPlugins`. See `claude_code_plugins.rs`.
+        out.extend(crate::claude_code_plugins::discover_plugins(project_root, home.as_deref()));
+
         out
     }
 }

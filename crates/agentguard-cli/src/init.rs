@@ -130,10 +130,11 @@ fn json_key_path(kind: ConfigSourceKind) -> Option<&'static [&'static str]> {
         | ConfigSourceKind::RooCodeMcpJson
         | ConfigSourceKind::JetBrainsMcpJson
         | ConfigSourceKind::TabnineMcpJson
-        // A Gemini CLI extension's `gemini-extension.json` — same flat
-        // `{ "mcpServers": {...} }` shape as `settings.json`, so the
-        // standard rewrite path applies unchanged.
-        | ConfigSourceKind::GeminiCliExtensionJson => Some(&["mcpServers"]),
+        // A Gemini CLI extension's `gemini-extension.json` and a Claude
+        // Code plugin's `.mcp.json` — both the flat `{ "mcpServers":
+        // {...} }` shape, so the standard rewrite path applies unchanged.
+        | ConfigSourceKind::GeminiCliExtensionJson
+        | ConfigSourceKind::ClaudeCodePluginMcpJson => Some(&["mcpServers"]),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some(&["servers"]),
         ConfigSourceKind::AmpMcpJson => Some(&["amp.mcpServers"]),
         ConfigSourceKind::CodyMcpJson => Some(&["cody.mcpServers"]),
@@ -820,7 +821,8 @@ fn rewrite_config_json(
             | ConfigSourceKind::RooCodeMcpJson
             | ConfigSourceKind::JetBrainsMcpJson
             | ConfigSourceKind::TabnineMcpJson
-            | ConfigSourceKind::GeminiCliExtensionJson => {
+            | ConfigSourceKind::GeminiCliExtensionJson
+            | ConfigSourceKind::ClaudeCodePluginMcpJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {

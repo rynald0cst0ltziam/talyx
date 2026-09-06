@@ -12,6 +12,7 @@ pub mod amazon_q;
 pub mod amp;
 pub mod antigravity;
 pub mod claude_code;
+pub mod claude_code_plugins;
 pub mod claude_desktop;
 pub mod cline;
 pub mod cody;
@@ -660,6 +661,16 @@ pub enum ConfigSourceKind {
     /// keeps skills at `~/.warp/skills/` and agent config at `~/.agents/`;
     /// the skills directory is content-scanned as instruction files.
     WarpMcpJson,
+    /// A Claude Code **plugin**'s `.mcp.json` (plugin root) or its
+    /// manifest's `mcpServers` path/inline override. Verified 2026-09-06
+    /// against code.claude.com/docs/en/plugins-reference — a plugin is a
+    /// second artifact surface entirely, only active when listed in
+    /// `enabledPlugins`. Same `{ "mcpServers": {...} }` shape as project
+    /// `.mcp.json` (a real plugin on this machine,
+    /// `external_plugins/context7/.mcp.json`, confirms it), so it reuses
+    /// the standard `["mcpServers"]` JSON rewrite path. See
+    /// `claude_code_plugins.rs`.
+    ClaudeCodePluginMcpJson,
 }
 
 pub trait AgentAdapter {
