@@ -269,16 +269,21 @@ fn remote_mcp_artifact(
     // Headers that look like they carry a credential (Authorization,
     // X-Api-Key, etc.) are a declared signal this server involves a
     // secret/token, same spirit as the local-command path's env-var check.
-    let has_auth_header = cfg
-        .get("headers")
-        .and_then(|h| h.as_object())
-        .map(|headers| {
-            headers.keys().any(|k| {
-                let kl = k.to_lowercase();
-                kl.contains("auth") || kl.contains("token") || kl.contains("key")
+    // `headers` is Claude Code / Cursor / most agents' field; Continue.dev
+    // nests the same thing under `requestOptions.headers` (verified against
+    // its own docs) — check both.
+    let header_has_auth = |h: Option<&Value>| {
+        h.and_then(|h| h.as_object())
+            .map(|headers| {
+                headers.keys().any(|k| {
+                    let kl = k.to_lowercase();
+                    kl.contains("auth") || kl.contains("token") || kl.contains("key")
+                })
             })
-        })
-        .unwrap_or(false);
+            .unwrap_or(false)
+    };
+    let has_auth_header = header_has_auth(cfg.get("headers"))
+        || header_has_auth(cfg.get("requestOptions").and_then(|r| r.get("headers")));
     if has_auth_header {
         capabilities.push(CapabilityFinding {
             capability: Capability::ApiKeys,
@@ -852,6 +857,47 @@ mod tests {
         assert!(
             caps.contains(&Capability::ApiKeys),
             "an Authorization header should be picked up as a declared credential signal"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn picks_up_an_auth_header_nested_under_request_options() {
+        // Continue.dev's YAML puts a remote server's headers under
+        // `requestOptions.headers`, not the top-level `headers` key every
+        // other agent uses (STATUS.md 5f).
+        let dir = unique_temp_dir("request-options-headers");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let config = serde_json::json!({
+            "mcpServers": {
+                "notion": {
+                    "url": "https://mcp.notion.com/mcp",
+                    "requestOptions": { "headers": { "Authorization": "Bearer x" } }
+                }
+            }
+        });
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let discovered = parse_mcp_servers_json(
+            &config_path,
+            &dir,
+            ConfigSourceKind::ContinueYamlMcpJson,
+            "mcpServers",
+            "continue-dev",
+            "Continue.dev",
+        );
+        assert_eq!(discovered.len(), 1);
+        let caps: Vec<_> = discovered[0]
+            .artifact
+            .capabilities
+            .iter()
+            .map(|c| c.capability)
+            .collect();
+        assert!(
+            caps.contains(&Capability::ApiKeys),
+            "an Authorization header under requestOptions.headers should still count"
         );
 
         std::fs::remove_dir_all(&dir).ok();
