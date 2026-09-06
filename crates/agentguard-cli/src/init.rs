@@ -129,7 +129,11 @@ fn json_key_path(kind: ConfigSourceKind) -> Option<&'static [&'static str]> {
         | ConfigSourceKind::ClineMcpJson
         | ConfigSourceKind::RooCodeMcpJson
         | ConfigSourceKind::JetBrainsMcpJson
-        | ConfigSourceKind::TabnineMcpJson => Some(&["mcpServers"]),
+        | ConfigSourceKind::TabnineMcpJson
+        // A Gemini CLI extension's `gemini-extension.json` — same flat
+        // `{ "mcpServers": {...} }` shape as `settings.json`, so the
+        // standard rewrite path applies unchanged.
+        | ConfigSourceKind::GeminiCliExtensionJson => Some(&["mcpServers"]),
         ConfigSourceKind::VsCodeCopilotMcpJson => Some(&["servers"]),
         ConfigSourceKind::AmpMcpJson => Some(&["amp.mcpServers"]),
         ConfigSourceKind::CodyMcpJson => Some(&["cody.mcpServers"]),
@@ -811,7 +815,8 @@ fn rewrite_config_json(
             | ConfigSourceKind::ClineMcpJson
             | ConfigSourceKind::RooCodeMcpJson
             | ConfigSourceKind::JetBrainsMcpJson
-            | ConfigSourceKind::TabnineMcpJson => {
+            | ConfigSourceKind::TabnineMcpJson
+            | ConfigSourceKind::GeminiCliExtensionJson => {
                 if s.launch.is_some() {
                     mcp_artifacts.push(*s);
                 } else {
@@ -2012,6 +2017,53 @@ mod tests {
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_routes_a_gemini_cli_extension_manifest() {
+        // A Gemini CLI extension's gemini-extension.json is the same flat
+        // `{ "mcpServers": {...} }` shape as settings.json, so the
+        // standard JSON rewrite applies unchanged — this locks that in.
+        let dir = unique_temp_dir("gemini-ext-rewrite");
+        let ext_dir = dir.join(".gemini").join("extensions").join("helper");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        let config_path = ext_dir.join("gemini-extension.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": "helper",
+                "version": "1.0.0",
+                "mcpServers": { "helper": { "command": "node", "args": ["server.js"] } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "helper",
+            config_path.clone(),
+            ConfigSourceKind::GeminiCliExtensionJson,
+            "node",
+            &["server.js"],
+        );
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcpServers"]["helper"]["command"], shim.display().to_string());
+        assert_eq!(
+            j["mcpServers"]["helper"]["args"],
+            serde_json::json!([art.artifact.id, "--", "node", "server.js"])
+        );
+        // unrelated manifest keys preserved
+        assert_eq!(j["name"], "helper");
+        assert_eq!(j["version"], "1.0.0");
 
         std::fs::remove_dir_all(&dir).ok();
     }

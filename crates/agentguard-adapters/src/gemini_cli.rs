@@ -22,6 +22,18 @@
 //! `ConfigSourceKind::GeminiCliHooksJson`'s doc comment for the full
 //! citation and a real, honestly-scoped limitation around a separate
 //! `hooksConfig.disabled` list this doesn't cross-reference).
+//!
+//! Extensions — verified 2026-09-06 against google-gemini/gemini-cli's own
+//! `docs/extensions/writing-extensions.md`: Gemini CLI loads every
+//! extension under `<home>/.gemini/extensions/<name>/` AND
+//! `<workspace>/.gemini/extensions/<name>/` on startup and merges each
+//! `gemini-extension.json`'s `mcpServers` block into the live server set.
+//! This is a second config surface `settings.json` discovery does not
+//! cover at all — see `ConfigSourceKind::GeminiCliExtensionJson`. Each
+//! manifest is the same `{ "mcpServers": {...} }` shape (reuses
+//! `parse_mcp_servers_json` + the standard rewrite path); an extension's
+//! `contextFileName` (default `GEMINI.md`, resolved inside the extension
+//! directory) is content-scanned as an instruction file.
 
 use crate::hooks_config::parse_hooks_json;
 use crate::mcp_config::parse_mcp_servers_json;
@@ -47,7 +59,10 @@ impl AgentAdapter for GeminiCliAdapter {
             || project_root.join("GEMINI.md").exists()
             || home
                 .as_ref()
-                .map(|h| h.join(".gemini").join("settings.json").exists())
+                .map(|h| {
+                    h.join(".gemini").join("settings.json").exists()
+                        || h.join(".gemini").join("extensions").is_dir()
+                })
                 .unwrap_or(false)
     }
 
@@ -88,6 +103,14 @@ impl AgentAdapter for GeminiCliAdapter {
             ));
         }
 
+        // Extensions — `<scope>/.gemini/extensions/<name>/gemini-extension.json`,
+        // each merged into the live MCP server set on startup. A second
+        // config surface entirely; see this module's doc comment.
+        out.extend(parse_gemini_extensions(&project_root.join(".gemini").join("extensions")));
+        if let Some(h) = &home {
+            out.extend(parse_gemini_extensions(&h.join(".gemini").join("extensions")));
+        }
+
         // GEMINI.md — Gemini CLI's project-instructions/memory file
         // (verified against google-gemini/gemini-cli's own docs:
         // github.com/google-gemini/gemini-cli/blob/main/docs/cli/
@@ -106,6 +129,55 @@ impl AgentAdapter for GeminiCliAdapter {
 
         out
     }
+}
+
+/// Discovers every `gemini-extension.json` under an `extensions/`
+/// directory. Each manifest's `mcpServers` block is parsed with the
+/// shared JSON parser (same shape as `settings.json`), with the
+/// extension's OWN directory as the base for relative-path resolution
+/// (`${extensionPath}` is that directory — left literal, so a command
+/// that uses it scores on declared evidence only). The manifest's
+/// `contextFileName` (default `GEMINI.md`), if present inside the
+/// extension directory, is content-scanned as an instruction file.
+fn parse_gemini_extensions(extensions_dir: &Path) -> Vec<DiscoveredArtifact> {
+    let Ok(entries) = std::fs::read_dir(extensions_dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let ext_dir = entry.path();
+        if !ext_dir.is_dir() {
+            continue;
+        }
+        let manifest = ext_dir.join("gemini-extension.json");
+        if !manifest.exists() {
+            continue;
+        }
+
+        out.extend(parse_mcp_servers_json(
+            &manifest,
+            &ext_dir,
+            ConfigSourceKind::GeminiCliExtensionJson,
+            "mcpServers",
+            "gemini-cli",
+            "Gemini CLI",
+        ));
+
+        // contextFileName — an instruction file bundled with the
+        // extension, injected into the model's context. Defaults to
+        // GEMINI.md per the docs.
+        let context_name = std::fs::read_to_string(&manifest)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get("contextFileName").and_then(|c| c.as_str()).map(String::from))
+            .unwrap_or_else(|| "GEMINI.md".to_string());
+        let context_path = ext_dir.join(&context_name);
+        if context_path.is_file() {
+            let ext_name = ext_dir.file_name().and_then(|n| n.to_str()).unwrap_or("extension");
+            out.push(config_fingerprint(&context_path, &format!("{ext_name}/{context_name}")));
+        }
+    }
+    out
 }
 
 fn config_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
@@ -271,6 +343,65 @@ mod tests {
             hooks[0].config_source.as_ref().unwrap().kind,
             ConfigSourceKind::GeminiCliHooksJson
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn discovers_an_mcp_server_bundled_in_a_project_scope_extension() {
+        // A Gemini CLI extension merges its own `mcpServers` block into
+        // the live set on startup -- a config surface `settings.json`
+        // discovery never touches.
+        let dir = unique_temp_dir("ext-mcp");
+        let ext = dir.join(".gemini").join("extensions").join("evil-helper");
+        std::fs::create_dir_all(&ext).unwrap();
+        let manifest = serde_json::json!({
+            "name": "evil-helper",
+            "version": "1.0.0",
+            "mcpServers": {
+                "helper": { "command": "node", "args": ["${extensionPath}/dist/index.js"] }
+            }
+        });
+        std::fs::write(
+            ext.join("gemini-extension.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let discovered = GeminiCliAdapter.discover(&dir);
+        let servers: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::McpServer && d.artifact.name == "helper")
+            .collect();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(
+            servers[0].config_source.as_ref().unwrap().kind,
+            ConfigSourceKind::GeminiCliExtensionJson
+        );
+        assert!(servers[0].artifact.discovered_by.contains("gemini-cli"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn content_scans_an_extensions_bundled_context_file() {
+        let dir = unique_temp_dir("ext-context");
+        let ext = dir.join(".gemini").join("extensions").join("notes");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("gemini-extension.json"),
+            r#"{"name":"notes","version":"1.0.0","contextFileName":"CONTEXT.md"}"#,
+        )
+        .unwrap();
+        std::fs::write(ext.join("CONTEXT.md"), "Follow the project conventions.").unwrap();
+
+        let discovered = GeminiCliAdapter.discover(&dir);
+        let ctx: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::AgentConfig && d.artifact.name == "notes/CONTEXT.md")
+            .collect();
+        assert_eq!(ctx.len(), 1);
+        assert_eq!(ctx[0].scan_root.as_deref(), Some(ext.join("CONTEXT.md").as_path()));
 
         std::fs::remove_dir_all(&dir).ok();
     }

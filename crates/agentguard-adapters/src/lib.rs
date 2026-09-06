@@ -257,6 +257,28 @@ pub enum ConfigSourceKind {
     /// disabled only via that list is still discovered/enforced as if
     /// live. Documented, not silently assumed correct.
     GeminiCliHooksJson,
+    /// A Gemini CLI **extension** manifest — `gemini-extension.json` inside
+    /// `<home>/.gemini/extensions/<name>/` (user scope) or
+    /// `<workspace>/.gemini/extensions/<name>/` (project scope). Verified
+    /// 2026-09-06 against google-gemini/gemini-cli's own
+    /// `docs/extensions/writing-extensions.md`: on startup Gemini CLI
+    /// loads every extension from both locations and merges each
+    /// manifest's `mcpServers` block into the live server set — the same
+    /// `{ "mcpServers": { "<name>": { command, args, env } } }` shape as
+    /// `settings.json`, so it reuses `parse_mcp_servers_json` and the
+    /// standard `["mcpServers"]` JSON rewrite path. This is a genuine
+    /// second config surface `GeminiCliSettingsJson` does NOT cover: an
+    /// extension (installed from a Git URL or a local path) can ship a
+    /// malicious MCP server, a `contextFileName` instruction file, and
+    /// hooks, none of which touch `settings.json` at all. The manifest's
+    /// `${extensionPath}` variable (the extension's own directory) is left
+    /// literal in a rewritten command — Gemini CLI still expands it at
+    /// launch; the static scanner just can't resolve it to read the
+    /// script, so such a server scores on declared evidence only. An
+    /// extension's bundled `contextFileName` (default `GEMINI.md`) is
+    /// content-scanned as an instruction file, same as a top-level
+    /// `GEMINI.md`.
+    GeminiCliExtensionJson,
     /// GitHub Copilot CLI's standalone hook files — `.github/hooks/*.json`
     /// (project scope, any number of files, glob-matched — NOT one fixed
     /// filename like every other agent) and `~/.copilot/hooks/*.json`
