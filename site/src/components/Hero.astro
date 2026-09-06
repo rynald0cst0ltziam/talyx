@@ -9,31 +9,24 @@ import Icon from './Icon.astro';
   <div class="bg-aurora absolute inset-0 -z-10"></div>
   <div class="bg-grid absolute inset-0 -z-10"></div>
 
-  <div class="mx-auto max-w-6xl px-4 pb-20 pt-14 sm:px-6 sm:pt-20 lg:pb-28">
-    <div class="grid items-center gap-14 lg:grid-cols-[1.08fr_1fr]">
-      <div>
-        <div
-          class="inline-flex items-center gap-2 rounded-full border border-line-bright/60 bg-panel/50 py-1 pl-1.5 pr-3 text-xs text-fog"
-          data-reveal
+  <div class="mx-auto max-w-6xl px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:pb-28">
+    <div class="grid items-start gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-14">
+      <!-- one reveal block — no internal stagger, so nothing reflows -->
+      <div data-reveal>
+        <p
+          class="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-signal sm:text-xs sm:tracking-[0.2em]"
         >
-          <span
-            class="inline-flex items-center gap-1 rounded-full bg-signal/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-signal"
-          >
-            <span class="h-1.5 w-1.5 rounded-full bg-signal"></span> {site.agentsCovered} agents
-          </span>
           Supply-chain security for AI coding agents
-        </div>
+        </p>
 
         <h1
-          class="mt-6 text-balance text-[2.5rem] font-bold leading-[1.04] tracking-[-0.02em] text-chalk sm:text-[3.1rem] lg:text-[3.7rem]"
-          data-reveal
-          style="--reveal-delay: 60ms"
+          class="mt-4 text-[2.75rem] font-bold leading-[1.02] tracking-[-0.025em] text-chalk sm:text-[3.4rem] lg:text-[4rem]"
         >
-          Your AI agents run
+          Your agents run
           <span class="relative whitespace-nowrap">
             <span class="text-gradient">untrusted code.</span>
             <svg
-              class="absolute -bottom-1.5 left-0 h-2.5 w-full text-signal/50"
+              class="absolute -bottom-2 left-0 h-2.5 w-full text-signal/50"
               viewBox="0 0 300 12"
               preserveAspectRatio="none"
               fill="none"
@@ -43,38 +36,26 @@ import Icon from './Icon.astro';
                 d="M2 9c40-6 100-8 148-6 46 2 100 1 148-3"
                 stroke="currentColor"
                 stroke-width="3"
-                stroke-linecap="round"
-              ></path>
+                stroke-linecap="round"></path>
             </svg>
           </span>
-          <br class="hidden sm:block" />
-          AgentGuard catches it first.
         </h1>
 
-        <p
-          class="mt-7 max-w-xl text-[1.0625rem] leading-relaxed text-fog"
-          data-reveal
-          style="--reveal-delay: 120ms"
-        >
+        <p class="mt-8 max-w-xl text-[1.0625rem] leading-relaxed text-fog">
           Cursor, Claude Code, Copilot and 25 more auto-load MCP servers,
           plugins, skills and hooks — from repos, npm and random gists — and
           hand them to a model with access to your shell, your credentials and
-          your source. AgentGuard scans every one, traces a leaked secret from
-          disk to the network, and <strong class="text-chalk">physically blocks
-          what's malicious before the process starts.</strong>
+          your source. <strong class="text-chalk">AgentGuard scans every one and
+          blocks what's malicious before the process starts.</strong>
         </p>
 
-        <p
-          class="mt-4 max-w-xl border-l-2 border-threat/50 pl-3 text-[0.95rem] italic text-mist"
-          data-reveal
-          style="--reveal-delay: 150ms"
-        >
+        <p class="mt-4 max-w-xl border-l-2 border-threat/50 pl-3 text-[0.95rem] italic text-mist">
           You would never pipe a stranger's script into your shell. Your agent
           does it every session — from a config file you cloned, not a decision
           you made.
         </p>
 
-        <div class="mt-8 flex flex-wrap items-center gap-3" data-reveal style="--reveal-delay: 180ms">
+        <div class="mt-8 flex flex-wrap items-center gap-3">
           <Button href="/pricing" variant="primary">
             Lock down your agents — ${site.price.amount}/yr
             <Icon name="arrow" class="h-4 w-4" />
@@ -84,16 +65,12 @@ import Icon from './Icon.astro';
           </Button>
         </div>
 
-        <ul
-          class="mt-8 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-6 text-xs text-mist"
-          data-reveal
-          style="--reveal-delay: 240ms"
-        >
+        <ul class="mt-8 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-6 text-xs text-mist">
           <li class="flex items-center gap-1.5">
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.attackClasses} attack classes
           </li>
           <li class="flex items-center gap-1.5">
-            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Tree-sitter AST + taint, not grep
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> AST + taint, not grep
           </li>
           <li class="flex items-center gap-1.5">
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.testsGreen} tests, source-available
@@ -104,7 +81,7 @@ import Icon from './Icon.astro';
         </ul>
       </div>
 
-      <div class="animate-float" data-reveal style="--reveal-delay: 160ms">
+      <div data-reveal style="--reveal-delay: 90ms">
         <ThreatDemo />
       </div>
     </div>
