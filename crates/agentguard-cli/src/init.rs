@@ -102,15 +102,18 @@ fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<
     (decision, Some(reason))
 }
 
-/// The JSON key a `ConfigSourceKind`'s server map sits under — `None` for
-/// a TOML config (Codex, which doesn't use this string-keyed restore path
-/// at all — see `restore_remote_entry`'s dispatch by file extension) or a
-/// shape with no flat server map (hooks). `"mcpServers"` for every
-/// JSON-format agent except VS Code's Copilot Chat extension
-/// (`"servers"` — see `ConfigSourceKind::VsCodeCopilotMcpJson`'s doc
-/// comment). Kept as its own small function, matched exhaustively, so a
-/// future `ConfigSourceKind` variant forces a decision here too.
-fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
+/// The JSON key PATH a `ConfigSourceKind`'s server map sits under, from
+/// the config root. One segment for a flat map (`["mcpServers"]`,
+/// `["servers"]`, `["context_servers"]`, or the literal dotted keys
+/// `["amp.mcpServers"]` / `["cody.mcpServers"]` — a single segment that
+/// happens to contain dots, NOT a two-level path), two for OpenClaw
+/// (`["mcp", "servers"]`), one nesting level for opencode / Crush
+/// (`["mcp"]`). `None` for a TOML config (Codex — see
+/// `restore_remote_entry`'s dispatch by file extension), a real-YAML
+/// config (Goose / Continue.dev / Aider — no JSON rewrite path yet,
+/// STATUS.md 5c), or a shape with no flat server map (hooks). Matched
+/// exhaustively so a future variant forces a decision here.
+fn json_key_path(kind: ConfigSourceKind) -> Option<&'static [&'static str]> {
     match kind {
         ConfigSourceKind::ClaudeCodeMcpServersJson
         | ConfigSourceKind::CursorMcpJson
@@ -126,24 +129,17 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::ClineMcpJson
         | ConfigSourceKind::RooCodeMcpJson
         | ConfigSourceKind::JetBrainsMcpJson
-        | ConfigSourceKind::TabnineMcpJson => Some("mcpServers".to_string()),
-        ConfigSourceKind::VsCodeCopilotMcpJson => Some("servers".to_string()),
-        ConfigSourceKind::AmpMcpJson => Some("amp.mcpServers".to_string()),
-        ConfigSourceKind::CodyMcpJson => Some("cody.mcpServers".to_string()),
-        ConfigSourceKind::ZedMcpJson => Some("context_servers".to_string()),
-        // OpenClaw's shape is nested two levels (`mcp.servers`) and
-        // opencode's one level (`mcp`), neither a single flat top-level
-        // key -- there's no single string this string-keyed restore path
-        // can express, so `agentguard allow` can't currently restore a
-        // removed remote entry for either this way. A real, documented
-        // limitation (their remote-entry enforcement is scoped to
-        // "remove," not "remove and reliably restore" until this restore
-        // path is generalized to a nested key path, not just a single
-        // string).
-        ConfigSourceKind::OpenClawJson
-        | ConfigSourceKind::OpenCodeMcpJson
-        | ConfigSourceKind::CrushMcpJson
-        | ConfigSourceKind::GooseMcpJson
+        | ConfigSourceKind::TabnineMcpJson => Some(&["mcpServers"]),
+        ConfigSourceKind::VsCodeCopilotMcpJson => Some(&["servers"]),
+        ConfigSourceKind::AmpMcpJson => Some(&["amp.mcpServers"]),
+        ConfigSourceKind::CodyMcpJson => Some(&["cody.mcpServers"]),
+        ConfigSourceKind::ZedMcpJson => Some(&["context_servers"]),
+        ConfigSourceKind::OpenClawJson => Some(&["mcp", "servers"]),
+        ConfigSourceKind::OpenCodeMcpJson | ConfigSourceKind::CrushMcpJson => Some(&["mcp"]),
+        // Real-YAML native formats — the JSON rewrite path can't parse or
+        // re-emit these (STATUS.md 5c, still open pending a YAML-emit
+        // decision). Discovery/scoring only.
+        ConfigSourceKind::GooseMcpJson
         | ConfigSourceKind::ContinueYamlMcpJson
         | ConfigSourceKind::AiderMcpJson
         | ConfigSourceKind::OpenHandsMcpToml => None,
@@ -156,6 +152,39 @@ fn json_top_level_key(kind: ConfigSourceKind) -> Option<String> {
         | ConfigSourceKind::DevinCliProjectHooksJson
         | ConfigSourceKind::CodexMcpServersToml => None,
     }
+}
+
+/// Navigates `json` through `path` (each segment a literal object key) and
+/// returns the map at the end, if every segment exists and is an object.
+fn servers_map_mut<'a>(
+    json: &'a mut serde_json::Value,
+    path: &[&str],
+) -> Option<&'a mut serde_json::Map<String, serde_json::Value>> {
+    let mut cur = json;
+    for seg in path {
+        cur = cur.as_object_mut()?.get_mut(*seg)?;
+    }
+    cur.as_object_mut()
+}
+
+/// Like `servers_map_mut` but creates any missing object along `path` —
+/// for `agentguard allow`'s restore, which may run against a config the
+/// entry (and its parent objects) were removed from.
+fn servers_map_mut_or_create<'a>(
+    json: &'a mut serde_json::Value,
+    path: &[&str],
+) -> io::Result<&'a mut serde_json::Map<String, serde_json::Value>> {
+    let mut cur = json;
+    for seg in path {
+        let obj = cur.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("config path segment before {seg} is not a JSON object"))
+        })?;
+        cur = obj
+            .entry((*seg).to_string())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    }
+    cur.as_object_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "target of the config key path is not a JSON object"))
 }
 
 fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel) -> DecisionRecord {
@@ -201,13 +230,15 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
     // this saved now, at scan time, rather than re-reading the config
     // later (by the time it's approved the entry may already be gone).
     let is_remote = s.launch.is_none() && s.config_source.is_some();
-    let (remote_entry_snapshot, config_path, config_entry_key, config_top_level_key) = if is_remote
-    {
+    let (remote_entry_snapshot, config_path, config_entry_key, config_key_path) = if is_remote {
         (
             s.raw_config_entry.clone(),
             s.config_source.as_ref().map(|cs| cs.path.clone()),
             s.config_source.as_ref().map(|cs| cs.entry_key.clone()),
-            s.config_source.as_ref().and_then(|cs| json_top_level_key(cs.kind)),
+            s.config_source
+                .as_ref()
+                .and_then(|cs| json_key_path(cs.kind))
+                .map(|p| p.iter().map(|s| s.to_string()).collect()),
         )
     } else {
         (None, None, None, None)
@@ -241,7 +272,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         remote_entry_snapshot,
         config_path,
         config_entry_key,
-        config_top_level_key,
+        config_key_path,
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
     }
@@ -482,7 +513,13 @@ fn rewrite_config_json(
     let mut mcp_artifacts = Vec::new();
     let mut hook_artifacts = Vec::new();
     let mut remote_artifacts = Vec::new();
-    let mut top_level_key = "mcpServers";
+    // Key PATH from the config root to the server map — one segment for a
+    // flat `{ "mcpServers": {...} }`, two for OpenClaw's `{ "mcp":
+    // { "servers": {...} } }`, one nesting level for opencode / Crush's
+    // `{ "mcp": {...} }`. A config-file group is always homogeneous (one
+    // physical file, one agent, one shape), so overwriting this on every
+    // matching artifact is safe.
+    let mut key_path: &[&str] = &["mcpServers"];
     // `Some("hooks")` for Claude Code/Codex's `{"hooks": {...}}` wrapper;
     // `None` for Antigravity, whose hooks.json root IS the event tree with
     // no wrapper key at all — see `ConfigSourceKind::AntigravityHooksJson`'s
@@ -521,63 +558,41 @@ fn rewrite_config_json(
             // only ever holds one agent's config), so it's safe to just
             // overwrite this on every matching artifact rather than
             // reconcile conflicting values.
-            ConfigSourceKind::VsCodeCopilotMcpJson => {
-                top_level_key = "servers";
-                if s.launch.is_some() {
-                    mcp_artifacts.push(*s);
-                } else {
-                    remote_artifacts.push(*s);
-                }
-            }
-            ConfigSourceKind::AmpMcpJson => {
-                top_level_key = "amp.mcpServers";
-                if s.launch.is_some() {
-                    mcp_artifacts.push(*s);
-                } else {
-                    remote_artifacts.push(*s);
-                }
-            }
-            ConfigSourceKind::CodyMcpJson => {
-                top_level_key = "cody.mcpServers";
-                if s.launch.is_some() {
-                    mcp_artifacts.push(*s);
-                } else {
-                    remote_artifacts.push(*s);
-                }
-            }
-            ConfigSourceKind::ZedMcpJson => {
-                top_level_key = "context_servers";
-                if s.launch.is_some() {
-                    mcp_artifacts.push(*s);
-                } else {
-                    remote_artifacts.push(*s);
-                }
-            }
-            // OpenClaw's shape is nested two levels (`{"mcp": {"servers":
-            // {...}}}`) and opencode's one level (`{"mcp": {...}}`),
-            // neither a single flat top-level key — the shared
-            // `rewrite_mcp_servers`/`remove_blocked_remote_entries_json`
-            // functions below only know how to look up ONE string key at
-            // `json`'s own root, so they can't reach into a nested path.
-            // Discovery/scoring still works fully (openclaw.rs/opencode.rs
-            // each handle their own nested lookup independently) — this is
-            // scoped as discovery-only for now, matching how Cursor/Codex
-            // had discovery-only before their own enforcement was added
-            // later, rather than forcing a real shape mismatch through a
-            // mechanism that doesn't fit it. A future nested-path-aware
-            // rewrite function would close this, not a quick patch here.
-            //
-            // GooseMcpJson/ContinueYamlMcpJson are a different reason for
-            // the same "discovery-only for now" outcome: their source
-            // files are real YAML, and this whole function parses with
-            // serde_json::from_str, which fails outright on YAML text.
-            // Rewriting one back out would need YAML re-serialization
-            // too -- a real, separate mechanism this codebase doesn't
-            // have yet, not a nesting problem like OpenClaw/opencode's.
-            ConfigSourceKind::OpenClawJson
+            ConfigSourceKind::VsCodeCopilotMcpJson
+            | ConfigSourceKind::AmpMcpJson
+            | ConfigSourceKind::CodyMcpJson
+            | ConfigSourceKind::ZedMcpJson
+            // Nested shapes: OpenClaw's `{"mcp": {"servers": {...}}}` and
+            // opencode / Crush's `{"mcp": {...}}`. `rewrite_mcp_servers` /
+            // `remove_blocked_remote_entries_json` now navigate a key
+            // PATH (`servers_map_mut`), so these route through the exact
+            // same rewrite as every flat-key agent. opencode additionally
+            // stores a local server's `command` as an ARRAY — handled
+            // inside `rewrite_mcp_servers`, which detects that shape and
+            // rewrites `command` as `[<shim>, <id>, "--", <real>, ...]`.
+            | ConfigSourceKind::OpenClawJson
             | ConfigSourceKind::OpenCodeMcpJson
-            | ConfigSourceKind::CrushMcpJson
-            | ConfigSourceKind::GooseMcpJson
+            | ConfigSourceKind::CrushMcpJson => {
+                if let Some(cs) = &s.config_source {
+                    if let Some(p) = json_key_path(cs.kind) {
+                        key_path = p;
+                    }
+                }
+                if s.launch.is_some() {
+                    mcp_artifacts.push(*s);
+                } else {
+                    remote_artifacts.push(*s);
+                }
+            }
+            // Real-YAML native formats (Goose / Continue.dev / Aider) and
+            // OpenHands' array-of-tables TOML — this function parses with
+            // serde_json::from_str, which fails outright on YAML, and
+            // re-emitting would need a YAML/TOML writer this codebase
+            // doesn't have yet (STATUS.md 5c). `rewrite_config`'s
+            // `is_discovery_only_shape` short-circuits these before they
+            // ever reach here; matched anyway so the compiler forces a
+            // decision if that ever changes.
+            ConfigSourceKind::GooseMcpJson
             | ConfigSourceKind::ContinueYamlMcpJson
             | ConfigSourceKind::AiderMcpJson
             | ConfigSourceKind::OpenHandsMcpToml => {}
@@ -606,7 +621,7 @@ fn rewrite_config_json(
     }
 
     let (mcp_new, mcp_already) = match &shim_str {
-        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s, top_level_key),
+        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s, key_path),
         None => (0, 0),
     };
     let (hook_new, hook_already) = match &shim_str {
@@ -614,7 +629,7 @@ fn rewrite_config_json(
         None => (0, 0),
     };
     let removed_remote =
-        remove_blocked_remote_entries_json(&mut json, &remote_artifacts, store, top_level_key);
+        remove_blocked_remote_entries_json(&mut json, &remote_artifacts, store, key_path);
     let newly_protected = mcp_new + hook_new;
     let already_protected = mcp_already + hook_already;
 
@@ -657,12 +672,12 @@ fn remove_blocked_remote_entries_json(
     json: &mut serde_json::Value,
     remote_artifacts: &[&ScannedArtifact],
     store: &DecisionStore,
-    top_level_key: &str,
+    key_path: &[&str],
 ) -> usize {
     if remote_artifacts.is_empty() {
         return 0;
     }
-    let Some(servers) = json.get_mut(top_level_key).and_then(|v| v.as_object_mut()) else {
+    let Some(servers) = servers_map_mut(json, key_path) else {
         return 0;
     };
     let mut removed = 0;
@@ -809,20 +824,31 @@ fn remove_blocked_remote_entries_toml(
     removed
 }
 
-/// Rewrites `{ "<top_level_key>": { "<entry_key>": { command, args } } }`
-/// entries — a flat map, one lookup per artifact. `top_level_key` is
-/// `"mcpServers"` for every agent covered so far except VS Code's Copilot
-/// Chat extension (`"servers"` — see `ConfigSourceKind::
-/// VsCodeCopilotMcpJson`'s doc comment).
+/// Rewrites `{ <key_path...>: { "<entry_key>": { command, args } } }`
+/// entries so each launches through the shim. `key_path` is `["mcpServers"]`
+/// for most agents, `["servers"]` for VS Code Copilot, `["mcp", "servers"]`
+/// for OpenClaw, `["mcp"]` for opencode / Crush — see `json_key_path`.
+///
+/// Two per-entry `command` shapes are handled:
+///  - string (`"command": "npx"`, `"args": ["-y", "pkg"]`) — every agent
+///    except opencode. Rewritten to `command: "<shim>"`, `args:
+///    ["<id>", "--", "npx", "-y", "pkg"]`.
+///  - array  (`"command": ["npx", "-y", "pkg"]`) — opencode's local
+///    server shape, which has no separate `args`. Rewritten to
+///    `command: ["<shim>", "<id>", "--", "npx", "-y", "pkg"]`.
+///
+/// Both forms produce the exact `<id> -- <real-command> [args]` sequence
+/// `agentguard-shim` and `mcp_config.rs`'s `unwrap_shim_invocation` expect,
+/// so a re-scan sees through the wrapper back to the real command.
 fn rewrite_mcp_servers(
     json: &mut serde_json::Value,
     artifacts: &[&ScannedArtifact],
     shim_str: &str,
-    top_level_key: &str,
+    key_path: &[&str],
 ) -> (usize, usize) {
     let mut newly_protected = 0;
     let mut already_protected = 0;
-    let Some(servers) = json.get_mut(top_level_key).and_then(|v| v.as_object_mut()) else {
+    let Some(servers) = servers_map_mut(json, key_path) else {
         return (0, 0);
     };
 
@@ -837,24 +863,44 @@ fn rewrite_mcp_servers(
             continue;
         };
 
-        let current_command = entry.get("command").and_then(|c| c.as_str()).unwrap_or("");
-        if current_command == shim_str {
+        let uses_array_command = entry.get("command").map(|c| c.is_array()).unwrap_or(false);
+        let already_wrapped = match entry.get("command") {
+            Some(serde_json::Value::String(c)) => c == shim_str,
+            Some(serde_json::Value::Array(a)) => {
+                a.first().and_then(|v| v.as_str()) == Some(shim_str)
+            }
+            _ => false,
+        };
+        if already_wrapped {
             already_protected += 1;
             continue;
         }
 
-        let mut new_args = vec![
-            serde_json::Value::String(s.artifact.id.clone()),
-            serde_json::Value::String("--".to_string()),
-            serde_json::Value::String(launch.command.clone()),
-        ];
-        new_args.extend(launch.args.iter().cloned().map(serde_json::Value::String));
+        let real: Vec<serde_json::Value> = std::iter::once(launch.command.clone())
+            .chain(launch.args.iter().cloned())
+            .map(serde_json::Value::String)
+            .collect();
 
-        entry.insert(
-            "command".to_string(),
-            serde_json::Value::String(shim_str.to_string()),
-        );
-        entry.insert("args".to_string(), serde_json::Value::Array(new_args));
+        if uses_array_command {
+            let mut cmd = vec![
+                serde_json::Value::String(shim_str.to_string()),
+                serde_json::Value::String(s.artifact.id.clone()),
+                serde_json::Value::String("--".to_string()),
+            ];
+            cmd.extend(real);
+            entry.insert("command".to_string(), serde_json::Value::Array(cmd));
+        } else {
+            let mut new_args = vec![
+                serde_json::Value::String(s.artifact.id.clone()),
+                serde_json::Value::String("--".to_string()),
+            ];
+            new_args.extend(real);
+            entry.insert(
+                "command".to_string(),
+                serde_json::Value::String(shim_str.to_string()),
+            );
+            entry.insert("args".to_string(), serde_json::Value::Array(new_args));
+        }
         newly_protected += 1;
     }
 
@@ -1202,12 +1248,17 @@ fn restore_remote_entry_if_needed(store: &DecisionStore, artifact_id: &str) {
     ) else {
         return;
     };
-    // Older store records written before `config_top_level_key` existed
-    // won't have it — every JSON agent except VS Code used "mcpServers"
-    // at the time, so that's the correct fallback, not a guess.
-    let top_level_key = record.config_top_level_key.as_deref().unwrap_or("mcpServers");
+    // Older store records (written before `config_key_path`, or the even
+    // older `config_top_level_key`) won't have it — every JSON agent
+    // except VS Code used "mcpServers" at the top level then, so that's
+    // the correct fallback, not a guess.
+    let key_path: Vec<&str> = record
+        .config_key_path
+        .as_deref()
+        .map(|p| p.iter().map(String::as_str).collect())
+        .unwrap_or_else(|| vec!["mcpServers"]);
 
-    match restore_remote_entry(config_path, entry_key, snapshot, top_level_key) {
+    match restore_remote_entry(config_path, entry_key, snapshot, &key_path) {
         Ok(true) => println!(
             "Restored '{}' in {}.",
             sanitize_for_display(entry_key),
@@ -1279,13 +1330,13 @@ fn restore_remote_entry(
     config_path: &Path,
     entry_key: &str,
     snapshot: &serde_json::Value,
-    top_level_key: &str,
+    key_path: &[&str],
 ) -> io::Result<bool> {
     let is_toml = config_path.extension().and_then(|e| e.to_str()) == Some("toml");
     if is_toml {
         restore_remote_entry_toml(config_path, entry_key, snapshot)
     } else {
-        restore_remote_entry_json(config_path, entry_key, snapshot, top_level_key)
+        restore_remote_entry_json(config_path, entry_key, snapshot, key_path)
     }
 }
 
@@ -1293,21 +1344,13 @@ fn restore_remote_entry_json(
     config_path: &Path,
     entry_key: &str,
     snapshot: &serde_json::Value,
-    top_level_key: &str,
+    key_path: &[&str],
 ) -> io::Result<bool> {
     let original_text = std::fs::read_to_string(config_path)?;
     let mut json: serde_json::Value = serde_json::from_str(&original_text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let root = json
-        .as_object_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config root is not a JSON object"))?;
-    let servers = root
-        .entry(top_level_key.to_string())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()))
-        .as_object_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("{top_level_key} is not an object")))?;
-
+    let servers = servers_map_mut_or_create(&mut json, key_path)?;
     if servers.contains_key(entry_key) {
         return Ok(false);
     }
@@ -1443,6 +1486,262 @@ mod tests {
 
     fn temp_store(dir: &Path) -> DecisionStore {
         DecisionStore::open_at(dir.join("decisions.json"))
+    }
+
+    /// A local MCP-server `ScannedArtifact` for a JSON-config agent, with
+    /// its `ConfigSourceKind` parameterized — used for the nested-shape
+    /// (OpenClaw / opencode / Crush) rewrite tests.
+    fn local_json_artifact(
+        name: &str,
+        config_path: PathBuf,
+        kind: ConfigSourceKind,
+        command: &str,
+        args: &[&str],
+    ) -> ScannedArtifact {
+        let source = ArtifactSource::LocalPath(command.to_string());
+        ScannedArtifact {
+            agent_name: "test-agent",
+            artifact: Artifact {
+                id: format!("MCP server:{name}:local:{command}"),
+                kind: ArtifactKind::McpServer,
+                name: name.to_string(),
+                version: None,
+                publisher: PublisherIdentity::default(),
+                source,
+                content_hash: None,
+                capabilities: vec![],
+                discovered_by: BTreeSet::new(),
+            },
+            breakdown: ScoreBreakdown::default(),
+            band: RiskBand::Low,
+            decision: Decision::Allow,
+            location: command.to_string(),
+            launch: Some(LaunchCommand {
+                command: command.to_string(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+            }),
+            config_source: Some(ConfigSource {
+                path: config_path,
+                kind,
+                entry_key: name.to_string(),
+            }),
+            raw_config_entry: None,
+            scan_root: None,
+            registry_fetch: None,
+        }
+    }
+
+    #[test]
+    fn rewrite_config_json_routes_a_crush_one_level_nested_entry() {
+        let dir = unique_temp_dir("crush-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("crush.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcp": { "filesystem": { "command": "npx", "args": ["-y", "@mcp/fs"] } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "filesystem",
+            config_path.clone(),
+            ConfigSourceKind::CrushMcpJson,
+            "npx",
+            &["-y", "@mcp/fs"],
+        );
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcp"]["filesystem"]["command"], shim.display().to_string());
+        assert_eq!(
+            j["mcp"]["filesystem"]["args"],
+            serde_json::json!([art.artifact.id, "--", "npx", "-y", "@mcp/fs"])
+        );
+
+        // idempotent
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(again.newly_protected, 0);
+        assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_routes_an_openclaw_two_level_nested_entry() {
+        let dir = unique_temp_dir("openclaw-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("openclaw.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcp": { "servers": { "gh": { "command": "gh-mcp", "args": [] } } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        let art = local_json_artifact(
+            "gh",
+            config_path.clone(),
+            ConfigSourceKind::OpenClawJson,
+            "gh-mcp",
+            &[],
+        );
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcp"]["servers"]["gh"]["command"], shim.display().to_string());
+        assert_eq!(
+            j["mcp"]["servers"]["gh"]["args"],
+            serde_json::json!([art.artifact.id, "--", "gh-mcp"])
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_wraps_an_opencode_array_shaped_command() {
+        let dir = unique_temp_dir("opencode-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("opencode.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcp": {
+                    "everything": {
+                        "type": "local",
+                        "command": ["npx", "-y", "@mcp/everything"],
+                        "env": { "TOKEN": "x" }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+
+        // opencode.rs normalizes the array into command+args before this
+        // point, so `launch` already holds the split form.
+        let art = local_json_artifact(
+            "everything",
+            config_path.clone(),
+            ConfigSourceKind::OpenCodeMcpJson,
+            "npx",
+            &["-y", "@mcp/everything"],
+        );
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(outcome.newly_protected, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        // command stays an ARRAY (opencode's shape); shim is argv[0].
+        assert_eq!(
+            j["mcp"]["everything"]["command"],
+            serde_json::json!([
+                shim.display().to_string(),
+                art.artifact.id,
+                "--",
+                "npx",
+                "-y",
+                "@mcp/everything"
+            ])
+        );
+        // no separate "args" key introduced, and other keys untouched
+        assert!(j["mcp"]["everything"].get("args").is_none());
+        assert_eq!(j["mcp"]["everything"]["type"], "local");
+        assert_eq!(j["mcp"]["everything"]["env"]["TOKEN"], "x");
+
+        // idempotent (already_wrapped detects the shim at array[0])
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        assert_eq!(again.newly_protected, 0);
+        assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rewrite_config_json_removes_a_blocked_remote_entry_from_a_nested_map() {
+        let dir = unique_temp_dir("opencode-remote");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("opencode.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcp": {
+                    "evil": { "type": "remote", "url": "https://evil.example.com/mcp" },
+                    "ok":   { "type": "remote", "url": "https://ok.example.com/mcp" }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let mut evil = synthetic_remote_scanned_artifact(
+            "evil",
+            config_path.clone(),
+            "https://evil.example.com/mcp",
+            Decision::Block,
+            RiskBand::Critical,
+        );
+        evil.config_source.as_mut().unwrap().kind = ConfigSourceKind::OpenCodeMcpJson;
+        let mut ok = synthetic_remote_scanned_artifact(
+            "ok",
+            config_path.clone(),
+            "https://ok.example.com/mcp",
+            Decision::Allow,
+            RiskBand::Low,
+        );
+        ok.config_source.as_mut().unwrap().kind = ConfigSourceKind::OpenCodeMcpJson;
+
+        let outcome = rewrite_config_json(&config_path, &[&evil, &ok], None, &store).unwrap();
+        assert_eq!(outcome.removed_remote, 1);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(j["mcp"].get("evil").is_none());
+        assert!(j["mcp"].get("ok").is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_remote_entry_json_reinserts_into_a_nested_map_and_creates_missing_parents() {
+        let dir = unique_temp_dir("restore-nested");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("opencode.json");
+        // `mcp` key was removed entirely along with the last entry.
+        std::fs::write(&config_path, serde_json::json!({ "other": 1 }).to_string()).unwrap();
+
+        let snapshot = serde_json::json!({ "type": "remote", "url": "https://back.example.com/mcp" });
+        let restored =
+            restore_remote_entry_json(&config_path, "back", &snapshot, &["mcp"]).unwrap();
+        assert!(restored);
+
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(j["mcp"]["back"], snapshot);
+        assert_eq!(j["other"], 1);
+
+        // idempotent
+        assert!(!restore_remote_entry_json(&config_path, "back", &snapshot, &["mcp"]).unwrap());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1674,7 +1973,7 @@ mod tests {
                 remote_entry_snapshot: askme.raw_config_entry.clone(),
                 config_path: Some(config_path.clone()),
                 config_entry_key: Some("askme".to_string()),
-                config_top_level_key: Some("mcpServers".to_string()),
+                config_key_path: Some(vec!["mcpServers".to_string()]),
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
@@ -1702,7 +2001,7 @@ mod tests {
         .unwrap();
 
         let snapshot = serde_json::json!({ "type": "http", "url": "https://mcp.linear.app/mcp" });
-        let restored = restore_remote_entry_json(&config_path, "linear", &snapshot, "mcpServers").unwrap();
+        let restored = restore_remote_entry_json(&config_path, "linear", &snapshot, &["mcpServers"]).unwrap();
         assert!(restored);
 
         let rewritten: serde_json::Value =
@@ -1712,7 +2011,7 @@ mod tests {
         // Idempotent: an already-present entry is left alone, not
         // duplicated or clobbered, and reports "nothing to do."
         let restored_again =
-            restore_remote_entry_json(&config_path, "linear", &snapshot, "mcpServers").unwrap();
+            restore_remote_entry_json(&config_path, "linear", &snapshot, &["mcpServers"]).unwrap();
         assert!(!restored_again);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -1735,7 +2034,7 @@ mod tests {
         .unwrap();
 
         let snapshot = serde_json::json!({ "type": "http", "url": "https://mcp.example.com/mcp" });
-        let restored = restore_remote_entry_json(&config_path, "example", &snapshot, "servers").unwrap();
+        let restored = restore_remote_entry_json(&config_path, "example", &snapshot, &["servers"]).unwrap();
         assert!(restored);
 
         let rewritten: serde_json::Value =
@@ -1928,7 +2227,7 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
-                config_top_level_key: None,
+                config_key_path: None,
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
             })

@@ -327,7 +327,7 @@ mod tests {
                 remote_entry_snapshot: None,
                 config_path: None,
                 config_entry_key: None,
-                config_top_level_key: None,
+                config_key_path: None,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
             })
