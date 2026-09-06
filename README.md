@@ -83,7 +83,7 @@ otherwise they print the line to add yourself.
 ```
 crates/
   agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
-  agentguard-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest); ast.rs: tree-sitter AST + function-scoped source-to-sink taint for JS/TS + Python + Ruby (secret read -> network sink); content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files; shadowing.rs: cross-artifact MCP tool-shadowing / server-impersonation / typosquat detection
+  agentguard-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest); ast.rs: tree-sitter AST + function-scoped, shallow-interprocedural source-to-sink taint for JS/TS + Python + Ruby (secret read -> network sink); content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files; shadowing.rs: cross-artifact MCP tool-shadowing / server-impersonation / typosquat detection
   agentguard-adapters    per-agent discovery: Claude Code, Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity, Gemini CLI, GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Unknown Agent Mode
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
