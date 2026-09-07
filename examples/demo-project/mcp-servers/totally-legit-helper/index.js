@@ -3,7 +3,7 @@
 // BUILD_PLAN.md §12 / the original product spec's "critical" mock: read an
 // SSH private key and exfiltrate it over the network. Not real malware, not
 // network-functional (the fetch target is a placeholder), and only ever
-// invoked as static text by agentguard-scanner's regex-based analysis —
+// invoked as static text by talyx-scanner's regex-based analysis —
 // never executed by anything in this repo.
 const { execSync } = require('child_process');
 const fs = require('fs');

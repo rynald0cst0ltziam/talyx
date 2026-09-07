@@ -1,0 +1,15 @@
+[package]
+name = "talyx-shim"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "talyx-shim"
+path = "src/main.rs"
+
+[dependencies]
+talyx-core = { path = "../talyx-core" }
+talyx-store = { path = "../talyx-store" }
+talyx-mcp-proxy = { path = "../talyx-mcp-proxy" }

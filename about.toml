@@ -4,7 +4,7 @@
 # `accepted` lists every SPDX license that actually appears in the
 # dependency tree (verified with `cargo license`). All are permissive or
 # file-level weak-copyleft (MPL-2.0) — none impose a copyleft obligation on
-# AgentGuard's own source. If a new dependency introduces a license not in
+# Talyx's own source. If a new dependency introduces a license not in
 # this list, `cargo about generate` fails loudly so it gets reviewed.
 accepted = [
     "Apache-2.0",

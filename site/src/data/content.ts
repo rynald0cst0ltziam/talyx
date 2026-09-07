@@ -81,13 +81,13 @@ export const features: Feature[] = [
     icon: 'plug',
     tag: 'Plugin ecosystems',
     title: 'Scans the plugins your plugins bring',
-    body: 'A Claude Code plugin, a Gemini CLI extension or an Antigravity plugin is a second supply chain — it can ship its own MCP server, hook, skill or LSP command. AgentGuard resolves every enabled one on disk and scans what it contributes, not just the manifest.',
+    body: 'A Claude Code plugin, a Gemini CLI extension or an Antigravity plugin is a second supply chain — it can ship its own MCP server, hook, skill or LSP command. Talyx resolves every enabled one on disk and scans what it contributes, not just the manifest.',
   },
   {
     icon: 'package',
     tag: 'Registry',
     title: 'Downloads the code behind `npx`',
-    body: 'A config that runs `npx some-package` never shows you the code. With one flag, AgentGuard fetches the real package from npm or PyPI, verifies its integrity, and statically scans the actual source — including the declared tool descriptions inside it.',
+    body: 'A config that runs `npx some-package` never shows you the code. With one flag, Talyx fetches the real package from npm or PyPI, verifies its integrity, and statically scans the actual source — including the declared tool descriptions inside it.',
   },
   {
     icon: 'list',
@@ -99,7 +99,7 @@ export const features: Feature[] = [
     icon: 'shield',
     tag: 'Enforcement',
     title: 'Blocks the bad ones — for real',
-    body: 'Approved servers launch through the AgentGuard shim. Blocked ones are removed from the config so the agent physically cannot start them. Remote entries are stripped and restored on approval. Malicious skills are quarantined. Every change is checksum-verified and reversible, and your real secrets and hook commands are never written into a rewritten file.',
+    body: 'Approved servers launch through the Talyx shim. Blocked ones are removed from the config so the agent physically cannot start them. Remote entries are stripped and restored on approval. Malicious skills are quarantined. Every change is checksum-verified and reversible, and your real secrets and hook commands are never written into a rewritten file.',
   },
   {
     icon: 'drift',
@@ -237,7 +237,7 @@ export interface ThreatLine {
 
 /** The animated terminal transcript on the hero. */
 export const threatDemo: ThreatLine[] = [
-  { t: 0, prompt: true, text: 'agentguard scan --project .' },
+  { t: 0, prompt: true, text: 'talyx scan --project .' },
   { t: 550, text: 'discovered 6 agents · 31 artifacts · 3 registry packages', cls: 'text-mist' },
   { t: 1400, text: '' },
   {
@@ -261,11 +261,11 @@ export const threatDemo: ThreatLine[] = [
   { t: 3900, text: '' },
   { t: 4000, text: '  BLOCKED   3 removed from config — agents cannot load them', cls: 'text-safe font-semibold' },
   { t: 4300, text: '  28 artifacts verified clean · 3 blocked · 0 need review', cls: 'text-fog' },
-  { t: 4700, text: 'protection active. run  agentguard why context7  for detail.', cls: 'text-signal' },
+  { t: 4700, text: 'protection active. run  talyx why context7  for detail.', cls: 'text-signal' },
 ];
 
 /**
- * First-person capability checklist. Every row describes AgentGuard's own
+ * First-person capability checklist. Every row describes Talyx's own
  * implementation and is substantiated by the repository — no claims about
  * any other product.
  */
@@ -305,7 +305,7 @@ export const capabilities: Capability[] = [
   },
   {
     capability: 'Blocks a server from launching — for real',
-    how: 'Approved servers run through the AgentGuard shim; blocked ones are removed from the config so the agent physically cannot start them; malicious skills are quarantined. Every change is checksum-verified and reversible.',
+    how: 'Approved servers run through the Talyx shim; blocked ones are removed from the config so the agent physically cannot start them; malicious skills are quarantined. Every change is checksum-verified and reversible.',
   },
   {
     capability: 'Live JSON-RPC inspection',
@@ -317,7 +317,7 @@ export const capabilities: Capability[] = [
   },
   {
     capability: 'Protection survives the proxy not running',
-    how: 'The live proxy fails open to the launch-time gate. A blocked server is absent from the config whether or not any AgentGuard process is alive.',
+    how: 'The live proxy fails open to the launch-time gate. A blocked server is absent from the config whether or not any Talyx process is alive.',
   },
   {
     capability: 'Registry pre-resolution',
@@ -345,25 +345,25 @@ export const steps: Step[] = [
     n: '01',
     title: 'Install',
     body: 'One binary and its enforcement shim. No runtime, no dependencies, no shell-profile edits.',
-    code: 'curl -fsSL https://get.agentguard.dev | sh',
+    code: 'curl -fsSL https://get.talyx.dev | sh',
   },
   {
     n: '02',
     title: 'Activate your license',
     body: 'Paste the key from your purchase email. Works offline for 30 days at a time; activate on up to 3 machines.',
-    code: 'agentguard activate AG-XXXX-XXXX-XXXX',
+    code: 'talyx activate AG-XXXX-XXXX-XXXX',
   },
   {
     n: '03',
     title: 'Scan',
     body: 'Point it at a project or your home directory. It finds every agent, every plugin, every artifact.',
-    code: 'agentguard scan --project .',
+    code: 'talyx scan --project .',
   },
   {
     n: '04',
     title: 'Enforce',
     body: 'Route every approved MCP server through the shim; blocked ones are pulled from the config; malicious skills are quarantined. Reversible any time.',
-    code: 'agentguard init --project ~',
+    code: 'talyx init --project ~',
   },
 ];
 
@@ -374,12 +374,12 @@ export interface Faq {
 
 export const faqs: Faq[] = [
   {
-    q: 'What exactly does AgentGuard protect against?',
+    q: 'What exactly does Talyx protect against?',
     a: 'The artifact supply chain for AI coding agents: a malicious MCP server launched from a config file, a plugin or extension that ships its own server or hook, a skill or instruction file carrying hidden prompt-injection, an encoded payload in a tool description, a server impersonating a trusted one, a hook that pipes a downloaded script into a shell, a secret read that flows to the network. It inspects what your agent is about to load — across 27 agents — and either verifies it, flags it for review, or blocks it.',
   },
   {
     q: 'How is the AST / taint analysis different from a regex scanner?',
-    a: 'A regex sees that `.ssh/id_rsa` and `fetch(` both appear in a file. It cannot tell whether the key actually reaches the network, and it misses the path entirely when it is built from `path.join(home, ".ssh", "id_rsa")`. AgentGuard parses the file with tree-sitter and runs a function-scoped, interprocedural taint pass: it follows the value from the read, through variable assignments and helper functions, to the sink. It is a proven superset of the pattern rules for JS/TS, Python and Ruby.',
+    a: 'A regex sees that `.ssh/id_rsa` and `fetch(` both appear in a file. It cannot tell whether the key actually reaches the network, and it misses the path entirely when it is built from `path.join(home, ".ssh", "id_rsa")`. Talyx parses the file with tree-sitter and runs a function-scoped, interprocedural taint pass: it follows the value from the read, through variable assignments and helper functions, to the sink. It is a proven superset of the pattern rules for JS/TS, Python and Ruby.',
   },
   {
     q: 'Is it actually local? What leaves my machine?',
@@ -395,31 +395,31 @@ export const faqs: Faq[] = [
   },
   {
     q: 'How is this different from other MCP scanners?',
-    a: 'Three things define AgentGuard. Scope: it covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents — not just the MCP server config. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, and the optional live proxy (init --live) fails open to that static gate, so your protection never silently vanishes when a process is not running. Compare it against anything you like — the full capability list is on this page and every line is in the open repository.',
+    a: 'Three things define Talyx. Scope: it covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents — not just the MCP server config. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, and the optional live proxy (init --live) fails open to that static gate, so your protection never silently vanishes when a process is not running. Compare it against anything you like — the full capability list is on this page and every line is in the open repository.',
   },
   {
-    q: 'What does `agentguard init --live` do?',
-    a: 'It keeps the AgentGuard shim between your agent and each approved MCP server for the whole session, inspecting the JSON-RPC traffic on top of the launch-time scan. It scans the initialize / tools/list / resources/list / prompts/list handshake responses for injection and exfil directives, records a trust-on-first-use snapshot of each server\'s tool list and flags a mid-session rug pull (a tool swapped or added after you approved it), and scans tool-call results for a payload smuggled back as "file contents". Per level (AGENTGUARD_PROXY_LEVEL: quiet / balanced / strict) it logs, replaces a poisoned response with a JSON-RPC error, or ends the session. It is opt-in while it builds real-session mileage.',
+    q: 'What does `talyx init --live` do?',
+    a: 'It keeps the Talyx shim between your agent and each approved MCP server for the whole session, inspecting the JSON-RPC traffic on top of the launch-time scan. It scans the initialize / tools/list / resources/list / prompts/list handshake responses for injection and exfil directives, records a trust-on-first-use snapshot of each server\'s tool list and flags a mid-session rug pull (a tool swapped or added after you approved it), and scans tool-call results for a payload smuggled back as "file contents". Per level (TALYX_PROXY_LEVEL: quiet / balanced / strict) it logs, replaces a poisoned response with a JSON-RPC error, or ends the session. It is opt-in while it builds real-session mileage.',
   },
   {
     q: 'Won\'t the live proxy break my agent session?',
-    a: 'It is designed not to. It is opt-in (plain init never enables it), it is the same process your agent already spawns for the server (no daemon), and it fails open: if the proxy ever hits an internal error it falls back to exactly the launch-time protection you would have without --live. AGENTGUARD_NO_PROXY=1 is a hard per-launch kill switch, and running plain agentguard init again downgrades the config. Large tool results are forwarded before inspection, so bulk traffic gets no added latency. We will not flip it on by default until it has real multi-hour session mileage.',
+    a: 'It is designed not to. It is opt-in (plain init never enables it), it is the same process your agent already spawns for the server (no daemon), and it fails open: if the proxy ever hits an internal error it falls back to exactly the launch-time protection you would have without --live. TALYX_NO_PROXY=1 is a hard per-launch kill switch, and running plain talyx init again downgrades the config. Large tool results are forwarded before inspection, so bulk traffic gets no added latency. We will not flip it on by default until it has real multi-hour session mileage.',
   },
   {
     q: 'Does the live proxy send my traffic anywhere?',
-    a: 'No. Every message is inspected locally by the shim. Findings are appended to ~/.agentguard/sessions/<date>-<pid>.jsonl and summarised by `agentguard status`; nothing about your traffic, your code or what was found leaves the machine. AGENTGUARD_PROXY_LOG can capture a full local transcript for debugging.',
+    a: 'No. Every message is inspected locally by the shim. Findings are appended to ~/.talyx/sessions/<date>-<pid>.jsonl and summarised by `talyx status`; nothing about your traffic, your code or what was found leaves the machine. TALYX_PROXY_LOG can capture a full local transcript for debugging.',
   },
   {
     q: 'Can I write my own rules for the proxy?',
-    a: 'Yes — guardrails. A local YAML file (~/.agentguard/guardrails.yaml, or per-project, or $AGENTGUARD_GUARDRAILS) whose rules the proxy runs on every JSON-RPC message on top of the built-in detectors. A rule matches by direction, method and path conditions (contains / regex / glob / equals / exists / gt-lt, with wildcards in the JSON path) and does one of: allow (forward, skip the built-in scan), warn (log), redact (strip matched strings), or block (the message never reaches its peer — a blocked tools/call gets a JSON-RPC error back and the server never sees it). Validate with `agentguard guardrails check`; start from `agentguard guardrails example`.',
+    a: 'Yes — guardrails. A local YAML file (~/.talyx/guardrails.yaml, or per-project, or $TALYX_GUARDRAILS) whose rules the proxy runs on every JSON-RPC message on top of the built-in detectors. A rule matches by direction, method and path conditions (contains / regex / glob / equals / exists / gt-lt, with wildcards in the JSON path) and does one of: allow (forward, skip the built-in scan), warn (log), redact (strip matched strings), or block (the message never reaches its peer — a blocked tools/call gets a JSON-RPC error back and the server never sees it). Validate with `talyx guardrails check`; start from `talyx guardrails example`.',
   },
   {
     q: 'How does the advisory feed differ from the behaviour analysis?',
-    a: 'The AST, taint and content analysis catch code and text you have never seen before, on behaviour alone. The advisory feed catches artifacts the security community has already disclosed — matched by identity, not behaviour: a package name and affected version range, an npm publisher, a remote host, a source-repo owner, or a typosquat name pattern. It ships as a small hand-curated file inside the binary (every entry carries a public reference URL), works fully offline, and can be overridden by ~/.agentguard/advisories.json or $AGENTGUARD_ADVISORIES. A confirmed-malicious match adds a decisive penalty, suppresses any reputation discount (a trusted publisher in the known-bad list means the account is compromised) and forces a block; a bounded advisory — a CVE fixed in a later version, say — forces a review. Inspect it with `agentguard advisories list` or check one package with `agentguard advisories check <name> --version <v>`.',
+    a: 'The AST, taint and content analysis catch code and text you have never seen before, on behaviour alone. The advisory feed catches artifacts the security community has already disclosed — matched by identity, not behaviour: a package name and affected version range, an npm publisher, a remote host, a source-repo owner, or a typosquat name pattern. It ships as a small hand-curated file inside the binary (every entry carries a public reference URL), works fully offline, and can be overridden by ~/.talyx/advisories.json or $TALYX_ADVISORIES. A confirmed-malicious match adds a decisive penalty, suppresses any reputation discount (a trusted publisher in the known-bad list means the account is compromised) and forces a block; a bounded advisory — a CVE fixed in a later version, say — forces a review. Inspect it with `talyx advisories list` or check one package with `talyx advisories check <name> --version <v>`.',
   },
   {
     q: 'How is enforcement reversible?',
-    a: 'Every config AgentGuard rewrites is checksummed first and the original entry is stored. `agentguard allow <id>` restores a blocked server exactly as it was, including a stripped remote entry. It never embeds your secrets or your real hook commands into a rewritten file — the shim reads them from a local store keyed by hash.',
+    a: 'Every config Talyx rewrites is checksummed first and the original entry is stored. `talyx allow <id>` restores a blocked server exactly as it was, including a stripped remote entry. It never embeds your secrets or your real hook commands into a rewritten file — the shim reads them from a local store keyed by hash.',
   },
   {
     q: 'Which agents are supported?',
@@ -427,7 +427,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Does the enforcement shim stop protecting if it crashes?',
-    a: 'No. AgentGuard is a launch-time gate plus a per-launch shim, not an always-on proxy. A blocked server is physically removed from the config, so it stays blocked whether or not any AgentGuard process is running. There is no window where killing a background process drops your protection.',
+    a: 'No. Talyx is a launch-time gate plus a per-launch shim, not an always-on proxy. A blocked server is physically removed from the config, so it stays blocked whether or not any Talyx process is running. There is no window where killing a background process drops your protection.',
   },
   {
     q: 'How does the license work?',
@@ -435,11 +435,11 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Do you offer team or volume pricing?',
-    a: 'Yes. The product is identical; teams get consolidated billing, a shared trust policy your whole team pins to, offline / air-gapped activation, and volume discounts above 5 seats. Email hello@agentguard.dev.',
+    a: 'Yes. The product is identical; teams get consolidated billing, a shared trust policy your whole team pins to, offline / air-gapped activation, and volume discounts above 5 seats. Email hello@talyx.dev.',
   },
   {
     q: 'Is there a refund policy?',
-    a: '14-day no-questions refund through Lemon Squeezy, our merchant of record. If AgentGuard does not fit how your team works, you get your money back.',
+    a: '14-day no-questions refund through Lemon Squeezy, our merchant of record. If Talyx does not fit how your team works, you get your money back.',
   },
   {
     q: 'Is it open source? Can I evaluate it first?',

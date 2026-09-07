@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://agentguard.dev/sitemap.xml
+Sitemap: https://talyx.dev/sitemap.xml

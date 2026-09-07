@@ -1,10 +1,10 @@
 {
-  "name": "agentguard",
+  "name": "talyx",
   "version": "0.1.0",
   "description": "Cross-agent security scanner and enforcement for AI coding agent artifacts (MCP servers, skills, plugins, hooks).",
   "license": "SEE LICENSE IN LICENSE",
   "bin": {
-    "agentguard": "bin/agentguard.js"
+    "talyx": "bin/talyx.js"
   },
   "scripts": {
     "prepack": "node -e \"for (const f of ['LICENSE','THIRD-PARTY-LICENSES.txt']) require('fs').copyFileSync('../'+f, f)\"",

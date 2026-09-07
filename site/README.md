@@ -1,4 +1,4 @@
-# agentguard.dev — marketing site
+# talyx.dev — marketing site
 
 Astro 5 + Tailwind 4, fully static. No SSR, no server, no database.
 
@@ -41,7 +41,7 @@ All in **`src/data/site.ts`**:
 
 Also:
 
-- **`get.agentguard.dev`** — the install one-liner (`curl … | sh`,
+- **`get.talyx.dev`** — the install one-liner (`curl … | sh`,
   `irm … | iex`) points here. Stand up a redirect / worker that serves
   `scripts/install.sh` and `scripts/install.ps1` from the repo root, or
   change the URLs in `src/data/content.ts` and `src/pages/docs.astro`.
@@ -49,7 +49,7 @@ Also:
   `og.png` (1200×630) and switch the reference in `src/layouts/Base.astro`
   if link previews matter.
 - The capability list (`src/data/content.ts` → `capabilities`) is
-  first-person only — every row describes AgentGuard's own implementation
+  first-person only — every row describes Talyx's own implementation
   and is backed by the repo. Do **not** reintroduce claims about other
   named products (trademark / trade-libel exposure); if a capability line
   can't be pointed at code + a test, cut it.

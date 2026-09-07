@@ -1,9 +1,9 @@
 {
-  "name": "agentguard-site",
+  "name": "talyx-site",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Marketing site for AgentGuard — the security layer for AI coding agents.",
+  "description": "Marketing site for Talyx — the security layer for AI coding agents.",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",

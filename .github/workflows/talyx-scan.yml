@@ -1,0 +1,61 @@
+# Runs `talyx scan` on every push / pull request and uploads the
+# result to GitHub code scanning as SARIF, so a risky MCP server, skill,
+# hook, or poisoned agent-instruction file shows up as an annotation on
+# the PR (and, with a branch-protection rule on "Code scanning results",
+# can block the merge).
+#
+# This builds talyx from source because no published release / action
+# exists yet (see README.md and .github/workflows/release.yml). Once a
+# release is published, replace the "Build" + "Run" steps with a binary
+# download or a composite `uses:` action — the SARIF upload step stays the
+# same.
+name: Talyx scan
+
+"on":
+  push:
+    branches: [main, master]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write # required for github/codeql-action/upload-sarif
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-talyx-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build talyx
+        run: cargo build --release -p talyx-cli
+
+      - name: Run talyx scan
+        # --exit-code is deliberately NOT passed here: the SARIF upload +
+        # a branch-protection rule is the gate, so the scan step itself
+        # stays green and the results still post. Add `--exit-code` (exit
+        # 2 on BLOCK, 1 on ASK) if you want the job itself to fail instead.
+        run: |
+          ./target/release/talyx scan \
+            --project . \
+            --level balanced \
+            --format text \
+            --sarif-file talyx.sarif
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: talyx.sarif
+          category: talyx

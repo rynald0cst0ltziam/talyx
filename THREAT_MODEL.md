@@ -1,4 +1,4 @@
-# AgentGuard — Threat Model v1
+# Talyx — Threat Model v1
 
 This document exists so every risk-engine weight, every enforcement decision,
 and every UI claim traces back to a specific defended scenario. If a feature
@@ -21,7 +21,7 @@ doesn't map to something below, it doesn't belong in v1.
    malicious artifact automatically).
 6. **Trust in the AI agent itself** — if a user can't trust that their coding
    agent won't silently exfiltrate data, they stop using AI agents for
-   anything sensitive. This is the category-level thing AgentGuard sells
+   anything sensitive. This is the category-level thing Talyx sells
    confidence in.
 
 ## Attacker archetypes (every risk-engine weight in BUILD_PLAN.md §4 maps to one of these)
@@ -58,7 +58,7 @@ vs. requested capability) are built to catch.**
 
 ## Explicitly out of scope for v1 — say this publicly, don't imply otherwise
 
-- **A fully compromised OS or existing kernel-level malware.** AgentGuard is
+- **A fully compromised OS or existing kernel-level malware.** Talyx is
   not an antivirus/EDR replacement and doesn't claim to be one in v1.
 - **A compromised agent vendor binary itself** (Claude Code / Cursor / Codex
   compiled with a backdoor at the source). Out of scope — we trust the agent
@@ -66,7 +66,7 @@ vs. requested capability) are built to catch.**
 - **Zero-days in the artifact's own runtime** (a Node.js or Python interpreter
   sandbox escape triggered by data the artifact processes). Not defended
   against; static analysis and capability gating don't see this class of bug.
-- **A sophisticated, targeted attacker who specifically studies AgentGuard's
+- **A sophisticated, targeted attacker who specifically studies Talyx's
   detection and evades it.** v1 static analysis is heuristic, not formally
   verified — a determined, well-resourced, targeted adversary can construct
   something that slips past it. The trust graph, reputation requirements, and

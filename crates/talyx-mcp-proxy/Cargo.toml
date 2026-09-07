@@ -1,0 +1,25 @@
+[package]
+name = "talyx-mcp-proxy"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "talyx_mcp_proxy"
+path = "src/lib.rs"
+
+# Test-only: a scripted MCP server the integration tests proxy. Not part
+# of the shipped product (the install scripts package talyx + shim).
+[[bin]]
+name = "talyx-mcp-testserver"
+path = "src/bin/testserver.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+talyx-core = { path = "../talyx-core" }
+talyx-content = { path = "../talyx-content" }
+dirs = { workspace = true }
+sha2 = { workspace = true }
+regex = { workspace = true }
+serde-saphyr = { workspace = true }

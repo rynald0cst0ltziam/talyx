@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// postinstall — downloads the agentguard + agentguard-shim native binaries
+// postinstall — downloads the talyx + talyx-shim native binaries
 // matching this npm package's own version, and (unless
-// AGENTGUARD_SKIP_INIT is set) runs `agentguard init` against the user's
+// TALYX_SKIP_INIT is set) runs `talyx init` against the user's
 // home directory to activate protection immediately, mirroring
 // scripts/install.sh and install.ps1 in the main repo.
 //
 // Deliberately zero npm dependencies — no fetch/tar library — for a
 // postinstall script specifically, because "a package's postinstall
 // script downloads a binary from the network and executes it" is exactly
-// the kind of behavior AgentGuard exists to scrutinize in OTHER packages.
+// the kind of behavior Talyx exists to scrutinize in OTHER packages.
 // Fewer dependencies here means less to audit and less supply-chain
 // surface for this package's own postinstall step. Uses only Node's
 // built-in https/zlib/child_process, and shells out to the system's `tar`
@@ -16,7 +16,7 @@
 // extraction rather than bundling a tar/zip parser.
 //
 // NOT wired to a real release yet — see the root .github/workflows/
-// release.yml and the TODO on AGENTGUARD_REPO below. Until a real release
+// release.yml and the TODO on TALYX_REPO below. Until a real release
 // exists at that repo, this fails at the download step with a clear
 // error, on purpose, rather than silently doing nothing.
 
@@ -28,9 +28,9 @@ const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
 
-const REPO = process.env.AGENTGUARD_REPO || "your-org/agentguard"; // TODO: real repo
+const REPO = process.env.TALYX_REPO || "your-org/talyx"; // TODO: real repo
 const PKG_VERSION = require("../package.json").version;
-const VERSION = process.env.AGENTGUARD_VERSION || `v${PKG_VERSION}`;
+const VERSION = process.env.TALYX_VERSION || `v${PKG_VERSION}`;
 const NATIVE_DIR = path.join(__dirname, "..", ".bin-native");
 
 function targetTriple() {
@@ -97,18 +97,18 @@ function extract(archivePath, destDir, archiveExt) {
 
 async function main() {
   const { triple, archiveExt } = targetTriple();
-  const assetName = `agentguard-${triple}.${archiveExt}`;
+  const assetName = `talyx-${triple}.${archiveExt}`;
   const url = `https://github.com/${REPO}/releases/download/${VERSION}/${assetName}`;
 
-  console.log(`agentguard: downloading ${assetName} from ${REPO}@${VERSION}`);
+  console.log(`talyx: downloading ${assetName} from ${REPO}@${VERSION}`);
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-npm-install-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "talyx-npm-install-"));
   const archivePath = path.join(tmpDir, assetName);
 
   try {
     await download(url, archivePath);
   } catch (err) {
-    console.error(`agentguard: postinstall download failed: ${err.message}`);
+    console.error(`talyx: postinstall download failed: ${err.message}`);
     console.error(
       `Is ${REPO} a real repo with a published release for tag ${VERSION} yet? If you're testing this before any release exists, that's expected.`
     );
@@ -119,9 +119,9 @@ async function main() {
 
   const extractedDir = fs
     .readdirSync(tmpDir, { withFileTypes: true })
-    .find((e) => e.isDirectory() && e.name.startsWith("agentguard-"));
+    .find((e) => e.isDirectory() && e.name.startsWith("talyx-"));
   if (!extractedDir) {
-    console.error("agentguard: unexpected archive layout");
+    console.error("talyx: unexpected archive layout");
     process.exit(1);
   }
   const srcDir = path.join(tmpDir, extractedDir.name);
@@ -130,7 +130,7 @@ async function main() {
   fs.mkdirSync(NATIVE_DIR, { recursive: true });
 
   const exeSuffix = process.platform === "win32" ? ".exe" : "";
-  for (const name of ["agentguard", "agentguard-shim"]) {
+  for (const name of ["talyx", "talyx-shim"]) {
     const file = `${name}${exeSuffix}`;
     fs.copyFileSync(path.join(srcDir, file), path.join(NATIVE_DIR, file));
     if (process.platform !== "win32") {
@@ -139,24 +139,24 @@ async function main() {
   }
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
-  console.log(`agentguard: installed native binaries to ${NATIVE_DIR}`);
+  console.log(`talyx: installed native binaries to ${NATIVE_DIR}`);
 
-  if (process.env.AGENTGUARD_SKIP_INIT) {
-    console.log("agentguard: AGENTGUARD_SKIP_INIT set — skipping automatic activation.");
-    console.log(`Run \`agentguard init --project "${os.homedir()}"\` yourself when ready.`);
+  if (process.env.TALYX_SKIP_INIT) {
+    console.log("talyx: TALYX_SKIP_INIT set — skipping automatic activation.");
+    console.log(`Run \`talyx init --project "${os.homedir()}"\` yourself when ready.`);
     return;
   }
 
-  console.log("agentguard: activating protection for every Claude Code MCP server config under your home directory...");
-  const agentguardBin = path.join(NATIVE_DIR, `agentguard${exeSuffix}`);
-  const result = spawnSync(agentguardBin, ["init", "--project", os.homedir()], { stdio: "inherit" });
+  console.log("talyx: activating protection for every Claude Code MCP server config under your home directory...");
+  const talyxBin = path.join(NATIVE_DIR, `talyx${exeSuffix}`);
+  const result = spawnSync(talyxBin, ["init", "--project", os.homedir()], { stdio: "inherit" });
   if (result.status !== 0) {
-    console.error("agentguard: `agentguard init` did not exit cleanly — binaries are installed, but activation may be incomplete.");
-    console.error(`Re-run manually: agentguard init --project "${os.homedir()}"`);
+    console.error("talyx: `talyx init` did not exit cleanly — binaries are installed, but activation may be incomplete.");
+    console.error(`Re-run manually: talyx init --project "${os.homedir()}"`);
   }
 }
 
 main().catch((err) => {
-  console.error(`agentguard: postinstall failed: ${err.stack || err.message}`);
+  console.error(`talyx: postinstall failed: ${err.stack || err.message}`);
   process.exit(1);
 });

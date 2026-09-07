@@ -1,0 +1,17 @@
+[package]
+name = "talyx-advisories"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "talyx_advisories"
+path = "src/lib.rs"
+
+[dependencies]
+talyx-core = { path = "../talyx-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }

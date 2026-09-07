@@ -4,10 +4,10 @@ Status: **accepted** 2026-09-07 · Supersedes the "STATUS.md item 9" open questi
 
 ## Context
 
-`agentguard-shim` is today a launch-time gate: it checks the cached decision
+`talyx-shim` is today a launch-time gate: it checks the cached decision
 for an artifact, then `Command::new(real).status()` with inherited stdio. Once
 the real MCP server is running, the agent and the server talk directly over a
-pipe and AgentGuard is out of the loop for the rest of the session.
+pipe and Talyx is out of the loop for the rest of the session.
 
 Three attack classes live entirely in that blind spot:
 
@@ -35,23 +35,23 @@ today's static protection on any internal error.
 ### Non-negotiable properties (the "better, not just also" bar)
 
 - **The static gate still holds underneath.** A blocked server is still
-  physically removed from the config by `agentguard init`. If the proxy layer
+  physically removed from the config by `talyx init`. If the proxy layer
   fails — parser bug, panic, resource exhaustion — you fall back to exactly the
   protection you have today (launch-time scan + config removal of known-bad),
-  **never below it**. `mcp-scan` down = zero protection; AgentGuard proxy down
+  **never below it**. `mcp-scan` down = zero protection; Talyx proxy down
   = full static protection still in place.
 - **No daemon, no second process, no config.** The proxy *is* the shim — the
   same process the agent already spawns as the server's `command`. When the
   agent kills the server, the proxy dies with it. Nothing for the user to
   manage or keep running.
 - **Local only.** Session findings are written to
-  `~/.agentguard/sessions/<date>-<pid>.jsonl` (violations + drift events, not
-  the message stream). `agentguard status` surfaces recent ones. Nothing
+  `~/.talyx/sessions/<date>-<pid>.jsonl` (violations + drift events, not
+  the message stream). `talyx status` surfaces recent ones. Nothing
   leaves the machine.
 
 ### Architecture
 
-- Invocation: `agentguard-shim <id> --proxy -- <real-cmd> [args…]`. `init`
+- Invocation: `talyx-shim <id> --proxy -- <real-cmd> [args…]`. `init`
   gains `--live` to write this form; plain `init` is unchanged. `--shell` mode
   (hooks) is never proxied — hooks aren't MCP servers.
 - Spawn the child with `Stdio::piped()` on stdin/stdout; **stderr is inherited
@@ -64,7 +64,7 @@ today's static protection on any internal error.
   than buffer unboundedly.
 - **Threads, not `tokio`.** Keeps the shim a lean hot-path binary. Two
   unidirectional byte streams don't need an async runtime.
-- The framing + pump + classification live in a new `agentguard-mcp-proxy`
+- The framing + pump + classification live in a new `talyx-mcp-proxy`
   library crate, testable in isolation. The shim `main.rs` stays thin: parse
   args → look up decision → `launch()` or `mcp_proxy::run()`.
 
@@ -86,7 +86,7 @@ today's static protection on any internal error.
 
 ### The approved-tools baseline: trust-on-first-use
 
-`agentguard init` shims a server without its runtime tool list (we'd have to
+`talyx init` shims a server without its runtime tool list (we'd have to
 execute it to get one — which the project deliberately doesn't do). So the
 first `tools/list` response the proxy sees for an artifact is recorded as the
 baseline in the decision store, keyed by artifact id; **changes** after that
@@ -95,8 +95,8 @@ drift.
 
 ### Default vs opt-in
 
-Ships **opt-in** (`agentguard init --live`) so early adopters dogfood it. The
-code path is wired everywhere and `AGENTGUARD_NO_PROXY=1` is a hard kill
+Ships **opt-in** (`talyx init --live`) so early adopters dogfood it. The
+code path is wired everywhere and `TALYX_NO_PROXY=1` is a hard kill
 switch. **Target state is default-on** — the everyday coder benefits from it
 being automatic, and "install and forget" is the product's whole pitch —
 flipping the `init` default is a one-line change once Phase B is done and the
@@ -122,17 +122,17 @@ proxy has real multi-hour session mileage.
 
 - **Phase A — transparent proxy. DONE (STATUS #57).** `--proxy` mode, piped
   stdio, two pump threads, NDJSON framing + 16 MiB cap, per-message
-  `serde_json` classify, `AGENTGUARD_PROXY_LOG` JSONL capture, clean shutdown.
+  `serde_json` classify, `TALYX_PROXY_LOG` JSONL capture, clean shutdown.
   No policy. Byte-for-byte transparent, live-proven.
 - **Phase B — handshake inspection. DONE (STATUS #58).**
-  - B1: extracted `agentguard-content` (tree-sitter-free leaf crate) so the
+  - B1: extracted `talyx-content` (tree-sitter-free leaf crate) so the
     shim reuses the instruction-text detectors without the parser.
   - B2: response↔request id correlation; `initialize` / `tools/list` /
     `resources/list` / `prompts/list` responses scanned through the detectors;
     per-level action (`quiet` log / `balanced` replace with a JSON-RPC
-    `-32001` error / `strict` replace + teardown); `AGENTGUARD_PROXY_LEVEL`;
-    `~/.agentguard/sessions/<date>-<pid>.jsonl` findings log
-    (`AGENTGUARD_SESSIONS_DIR` override).
+    `-32001` error / `strict` replace + teardown); `TALYX_PROXY_LEVEL`;
+    `~/.talyx/sessions/<date>-<pid>.jsonl` findings log
+    (`TALYX_SESSIONS_DIR` override).
   - B3: trust-on-first-use tool baseline (`tool_baselines.json` next to the
     store) + mid-session drift / rug-pull detection.
   Only messages ≤ 256 KiB are inspect-before-forward; larger ones (big tool
@@ -142,8 +142,8 @@ proxy has real multi-hour session mileage.
     per-call latency stays negligible). These are *data*, so `quiet`/`balanced`
     flag + log + forward unchanged; `strict` redacts each flagged text block
     in place (clean blocks + non-text content pass through).
-  - C2: `agentguard status` prints a "Live proxy" summary of recent
-    `~/.agentguard/sessions/*.jsonl` findings; `agentguard why <id>` lists
+  - C2: `talyx status` prints a "Live proxy" summary of recent
+    `~/.talyx/sessions/*.jsonl` findings; `talyx why <id>` lists
     that artifact's proxy findings.
   - **Not done, on purpose:** flipping the `init` default from opt-in to
     on. Gated on real multi-hour session mileage (dogfooding), per the ADR
@@ -151,7 +151,7 @@ proxy has real multi-hour session mileage.
 - **Guardrails (STATUS #60).** A local `guardrails.yaml` whose `allow` /
   `warn` / `redact` / `block` rules the proxy runs on every message,
   before the built-in detectors. Matches mcp-scan's config-file guardrails
-  but keeps the "fails open to the static gate" property. `agentguard
+  but keeps the "fails open to the static gate" property. `talyx
   guardrails check | list | example`. The pump gained an upstream-reply
   path (`Action::Reply`) so a blocked client request gets a JSON-RPC error
   back instead of a session teardown.

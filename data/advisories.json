@@ -1,9 +1,9 @@
 {
-  "_comment": "AgentGuard known-bad advisory feed — BUILD_PLAN.md §7's 'known-bad' half. Each entry restates a PUBLIC security disclosure (a CVE, a vendor writeup, or a project's own statement) about a specific MCP artifact, matched by IDENTITY (exact package name + affected version range, exact repo, publisher, or a name pattern), not by heuristics. RULES for adding an entry: (1) it MUST carry at least one primary `references` URL — a CVE/NVD record, the disclosing vendor's post, or the project's own repo; (2) `detail` must be phrased as attributed reporting ('CVE-2025-XXXX records...', 'Snyk reported...'), never as AgentGuard's own unattributed accusation; (3) `severity: malicious` (-> Capability::KnownMalicious -> forced BLOCK) is reserved for an EXACT identity match backed by a direct disclosure of that exact package+version or repo; anything pattern-based (publisher-wide, name regex, typosquat shape) is `severity: advisory` (-> Capability::KnownAdvisory -> forced review, never an automatic block); (4) no speculative, unsourced, or borderline entries. Bundled into the binary (include_str!) so it works offline; overridable by ~/.agentguard/advisories.json or $AGENTGUARD_ADVISORIES.",
+  "_comment": "Talyx known-bad advisory feed — BUILD_PLAN.md §7's 'known-bad' half. Each entry restates a PUBLIC security disclosure (a CVE, a vendor writeup, or a project's own statement) about a specific MCP artifact, matched by IDENTITY (exact package name + affected version range, exact repo, publisher, or a name pattern), not by heuristics. RULES for adding an entry: (1) it MUST carry at least one primary `references` URL — a CVE/NVD record, the disclosing vendor's post, or the project's own repo; (2) `detail` must be phrased as attributed reporting ('CVE-2025-XXXX records...', 'Snyk reported...'), never as Talyx's own unattributed accusation; (3) `severity: malicious` (-> Capability::KnownMalicious -> forced BLOCK) is reserved for an EXACT identity match backed by a direct disclosure of that exact package+version or repo; anything pattern-based (publisher-wide, name regex, typosquat shape) is `severity: advisory` (-> Capability::KnownAdvisory -> forced review, never an automatic block); (4) no speculative, unsourced, or borderline entries. Bundled into the binary (include_str!) so it works offline; overridable by ~/.talyx/advisories.json or $TALYX_ADVISORIES.",
   "version": 1,
   "advisories": [
     {
-      "id": "AGA-2025-0001",
+      "id": "TLX-2025-0001",
       "title": "postmark-mcp (npm) — malicious version exfiltrated outbound email",
       "severity": "malicious",
       "detail": "Snyk reported in September 2025 that the npm package 'postmark-mcp', from version 1.0.16 onward, was modified to blind-copy the email it sent to an external address, and that the package was subsequently removed from npm. Multiple security vendors covered the same disclosure. Treat every version at or above 1.0.16 as compromised; the actively-maintained Postmark MCP server is published elsewhere.",
@@ -17,10 +17,10 @@
       "published": "2025-09-25"
     },
     {
-      "id": "AGA-2025-0002",
+      "id": "TLX-2025-0002",
       "title": "postmark-mcp (npm) — publisher account of a removed malicious package",
       "severity": "advisory",
-      "detail": "The npm account that published the 'postmark-mcp' package covered in AGA-2025-0001 (per Snyk's September 2025 report). This entry flags other packages from the same account for manual review — not as a finding of wrongdoing about any other package, only as a prompt to check the source and publisher before trusting it.",
+      "detail": "The npm account that published the 'postmark-mcp' package covered in TLX-2025-0001 (per Snyk's September 2025 report). This entry flags other packages from the same account for manual review — not as a finding of wrongdoing about any other package, only as a prompt to check the source and publisher before trusting it.",
       "match": [
         { "type": "npm_publisher", "value": "phanpak" }
       ],
@@ -30,7 +30,7 @@
       "published": "2025-09-25"
     },
     {
-      "id": "AGA-2025-0003",
+      "id": "TLX-2025-0003",
       "title": "mcp-remote (npm) < 0.1.16 — OS command injection (CVE-2025-6514)",
       "severity": "advisory",
       "detail": "CVE-2025-6514 records that the npm package 'mcp-remote' before 0.1.16 can be induced to execute an operating-system command via a crafted value from a remote MCP server's authorization endpoint, with a CVSS base score of 9.6. The record states the issue is fixed in 0.1.16. Upgrade to 0.1.16 or later, or connect only to a remote server you fully control.",
@@ -44,7 +44,7 @@
       "published": "2025-07-09"
     },
     {
-      "id": "AGA-2025-0004",
+      "id": "TLX-2025-0004",
       "title": "Invariant Labs mcp-injection-experiments — the project's own attack PoCs",
       "severity": "advisory",
       "detail": "Invariant Labs publishes the 'mcp-injection-experiments' repository as a set of deliberately-crafted MCP servers demonstrating tool-poisoning and 'rug pull' attacks, per its own security writeup and README. It is intended for study, not for connecting to an agent that holds real credentials. This entry also matches a few package names that explicitly advertise themselves as MCP injection/poisoning PoCs.",
@@ -59,10 +59,10 @@
       "published": "2025-04-09"
     },
     {
-      "id": "AGA-2025-0005",
+      "id": "TLX-2025-0005",
       "title": "Look-alike naming patterns for the well-known reference MCP servers",
       "severity": "advisory",
-      "detail": "A package whose name is shaped to resemble an official reference server — an 'unofficial' / 'community' / 'v2' / 'fork' style suffix on a well-known name such as 'github', 'filesystem', 'slack' or 'fetch'. This is not a finding of wrongdoing about any specific package; it is the naming shape a typosquat or tool-shadowing attempt takes, so AgentGuard asks you to review the source and publisher before trusting it. Complements the cross-artifact shadowing detector for the case where only one such server is configured. Public research on MCP naming attacks is cited below.",
+      "detail": "A package whose name is shaped to resemble an official reference server — an 'unofficial' / 'community' / 'v2' / 'fork' style suffix on a well-known name such as 'github', 'filesystem', 'slack' or 'fetch'. This is not a finding of wrongdoing about any specific package; it is the naming shape a typosquat or tool-shadowing attempt takes, so Talyx asks you to review the source and publisher before trusting it. Complements the cross-artifact shadowing detector for the case where only one such server is configured. Public research on MCP naming attacks is cited below.",
       "match": [
         { "type": "npm_name_regex", "value": "^(github|filesystem|git|slack|fetch|postgres|sqlite|memory|puppeteer)-(mcp-)?(unofficial|community|v2|fork|plus|pro|ng)$" },
         { "type": "npm_name_regex", "value": "^(unofficial|my|the|real)-(github|filesystem|slack|fetch)-mcp(-server)?$" }

@@ -1,12 +1,12 @@
-AgentGuard License
+Talyx License
 
-Copyright (c) 2026 AgentGuard. All rights reserved.
+Copyright (c) 2026 Talyx. All rights reserved.
 
 This is a source-available commercial license. The source is published so
 you can read, build, and security-audit it. It is not open source, and
 using it in production requires a paid license.
 
-Fill in before first public release: replace "AgentGuard" in the copyright
+Fill in before first public release: replace "Talyx" in the copyright
 line above with the legal name of the entity that owns the software, and
 set the governing law in Section 9. Nothing else needs changing.
 
@@ -14,8 +14,8 @@ set the governing law in Section 9. Nothing else needs changing.
 
 1. Definitions
 
-   "Software" means the AgentGuard source code in this repository and the
-   binaries built from it (including the `agentguard` and `agentguard-shim`
+   "Software" means the Talyx source code in this repository and the
+   binaries built from it (including the `talyx` and `talyx-shim`
    programs), but not the third-party components listed in
    THIRD-PARTY-LICENSES.txt, which are covered by their own licenses.
 
@@ -28,9 +28,9 @@ set the governing law in Section 9. Nothing else needs changing.
 
    "Enforcement Features" means any function of the Software that modifies
    another program's configuration or mediates its execution — including
-   `agentguard init`, `agentguard allow`, and the `agentguard-shim` gate.
-   The read-only reporting commands (`agentguard scan`, `agentguard status`,
-   `agentguard why`, `agentguard guardrails`, `agentguard advisories`) are
+   `talyx init`, `talyx allow`, and the `talyx-shim` gate.
+   The read-only reporting commands (`talyx scan`, `talyx status`,
+   `talyx why`, `talyx guardrails`, `talyx advisories`) are
    not Enforcement Features.
 
 2. What you may do without a License Key

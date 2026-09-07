@@ -1,25 +1,25 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/agentguard-core",
-    "crates/agentguard-scanner",
-    "crates/agentguard-adapters",
-    "crates/agentguard-risk",
-    "crates/agentguard-store",
-    "crates/agentguard-shim",
-    "crates/agentguard-cli",
-    "crates/agentguard-registry",
-    "crates/agentguard-mcp-proxy",
-    "crates/agentguard-content",
-    "crates/agentguard-advisories",
+    "crates/talyx-core",
+    "crates/talyx-scanner",
+    "crates/talyx-adapters",
+    "crates/talyx-risk",
+    "crates/talyx-store",
+    "crates/talyx-shim",
+    "crates/talyx-cli",
+    "crates/talyx-registry",
+    "crates/talyx-mcp-proxy",
+    "crates/talyx-content",
+    "crates/talyx-advisories",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license-file = "LICENSE"
-authors = ["AgentGuard"]
-# 1.89 is the floor because agentguard-store relies on std::fs::File's
+authors = ["Talyx"]
+# 1.89 is the floor because talyx-store relies on std::fs::File's
 # native lock/lock_shared/unlock (stabilized in 1.89) for the decision
 # store's cross-process file locking -- see that crate's module doc
 # comment. Verified against the Rust 1.89 release notes, not assumed.
@@ -61,7 +61,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha1 = "0.10"
 base64 = "0.22"
 # AST-based capability extraction + source-to-sink taint for JS/TS and
-# Python (agentguard-scanner/src/ast.rs, taint.rs). tree-sitter is an
+# Python (talyx-scanner/src/ast.rs, taint.rs). tree-sitter is an
 # error-tolerant parser — it produces a usable tree even for a file with
 # syntax errors, which matters for scanning attacker-controlled source.
 # The grammar crates bundle a C parser compiled by the `cc` crate at

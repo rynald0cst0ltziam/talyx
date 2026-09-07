@@ -9,148 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agentguard-adapters"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "agentguard-store",
- "dirs",
- "psl",
- "serde",
- "serde-saphyr",
- "serde_json",
- "sha2",
- "toml",
-]
-
-[[package]]
-name = "agentguard-advisories"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agentguard-cli"
-version = "0.1.0"
-dependencies = [
- "agentguard-adapters",
- "agentguard-advisories",
- "agentguard-core",
- "agentguard-mcp-proxy",
- "agentguard-registry",
- "agentguard-risk",
- "agentguard-scanner",
- "agentguard-store",
- "clap",
- "dirs",
- "serde",
- "serde-saphyr",
- "serde_json",
- "toml",
- "ureq",
-]
-
-[[package]]
-name = "agentguard-content"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "base64 0.22.1",
- "once_cell",
- "regex",
-]
-
-[[package]]
-name = "agentguard-core"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "agentguard-mcp-proxy"
-version = "0.1.0"
-dependencies = [
- "agentguard-content",
- "agentguard-core",
- "dirs",
- "regex",
- "serde-saphyr",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "agentguard-registry"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "base64 0.22.1",
- "dirs",
- "flate2",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "tar",
- "ureq",
- "zip",
-]
-
-[[package]]
-name = "agentguard-risk"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agentguard-scanner"
-version = "0.1.0"
-dependencies = [
- "agentguard-content",
- "agentguard-core",
- "base64 0.22.1",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tree-sitter",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "walkdir",
-]
-
-[[package]]
-name = "agentguard-shim"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "agentguard-mcp-proxy",
- "agentguard-store",
-]
-
-[[package]]
-name = "agentguard-store"
-version = "0.1.0"
-dependencies = [
- "agentguard-core",
- "dirs",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1152,6 +1010,148 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "talyx-adapters"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "psl",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2",
+ "talyx-core",
+ "talyx-store",
+ "toml",
+]
+
+[[package]]
+name = "talyx-advisories"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "talyx-core",
+]
+
+[[package]]
+name = "talyx-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dirs",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "talyx-adapters",
+ "talyx-advisories",
+ "talyx-core",
+ "talyx-mcp-proxy",
+ "talyx-registry",
+ "talyx-risk",
+ "talyx-scanner",
+ "talyx-store",
+ "toml",
+ "ureq",
+]
+
+[[package]]
+name = "talyx-content"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "once_cell",
+ "regex",
+ "talyx-core",
+]
+
+[[package]]
+name = "talyx-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "talyx-mcp-proxy"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "regex",
+ "serde-saphyr",
+ "serde_json",
+ "sha2",
+ "talyx-content",
+ "talyx-core",
+]
+
+[[package]]
+name = "talyx-registry"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "talyx-core",
+ "tar",
+ "ureq",
+ "zip",
+]
+
+[[package]]
+name = "talyx-risk"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "talyx-core",
+]
+
+[[package]]
+name = "talyx-scanner"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "talyx-content",
+ "talyx-core",
+ "thiserror 1.0.69",
+ "tree-sitter",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "walkdir",
+]
+
+[[package]]
+name = "talyx-shim"
+version = "0.1.0"
+dependencies = [
+ "talyx-core",
+ "talyx-mcp-proxy",
+ "talyx-store",
+]
+
+[[package]]
+name = "talyx-store"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "talyx-core",
 ]
 
 [[package]]

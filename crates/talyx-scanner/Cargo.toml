@@ -1,0 +1,22 @@
+[package]
+name = "talyx-scanner"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+talyx-core = { path = "../talyx-core" }
+talyx-content = { path = "../talyx-content" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+regex.workspace = true
+once_cell.workspace = true
+sha2.workspace = true
+base64.workspace = true
+tree-sitter.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-ruby.workspace = true

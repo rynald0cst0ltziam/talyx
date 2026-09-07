@@ -1,0 +1,77 @@
+# Talyx guardrails — custom rules the live proxy (`talyx init --live`)
+# enforces on every JSON-RPC message, on top of the built-in detectors.
+#
+# Put this at   ~/.talyx/guardrails.yaml           (all projects)
+#          or   <project>/.talyx/guardrails.yaml   (one project)
+#          or point $TALYX_GUARDRAILS at it.
+#
+# Validate with:  talyx guardrails check
+# List loaded:    talyx guardrails list
+#
+# ── how a rule works ────────────────────────────────────────────────────
+#   direction:  client-to-server | server-to-client | any   (default any)
+#   method:     an exact JSON-RPC method, or a "tools/*" glob, or omit
+#   all: / any: a list of conditions; `all` = every one must match,
+#               `any` = at least one. (`match:` is an alias for `all:`)
+#   action:     allow  — forward as-is and skip the built-in scan
+#               warn   — log it, keep checking
+#               redact — replace each matched string with a marker
+#               block  — the message never reaches its peer; a JSON-RPC
+#                        error goes back to the sender instead
+#
+# ── a condition ─────────────────────────────────────────────────────────
+#   path:   a dotted JSON path into the message. `*` = any key,
+#           `[*]` = any array element.
+#           e.g.  params.arguments.path
+#                 params.arguments.*            (any argument)
+#                 result.content[*].text
+#   then exactly one operator:
+#     contains: "substr"      not_contains: "substr"
+#     regex:    "pattern"     glob: "a*b"
+#     equals:   <value>       in: [<value>, ...]
+#     exists:   true|false    gt: <n>   lt: <n>
+
+version: 1
+
+rules:
+  # Stop the agent from ever asking a tool to touch your keys / cloud creds.
+  - name: block-secret-path-args
+    direction: client-to-server
+    method: tools/call
+    any:
+      - { path: params.arguments.*, contains: "/.ssh/" }
+      - { path: params.arguments.*, contains: "/.aws/" }
+      - { path: params.arguments.*, contains: "/.config/gcloud" }
+      - { path: params.arguments.*, contains: "/.netrc" }
+    action: block
+    message: "tool call argument references a credential path"
+
+  # Strip API keys / tokens out of anything a tool hands back to the model.
+  - name: redact-secrets-from-results
+    direction: server-to-client
+    method: tools/call
+    any:
+      - { path: "result.content[*].text", regex: "sk-[A-Za-z0-9]{20,}" }
+      - { path: "result.content[*].text", regex: "ghp_[A-Za-z0-9]{36}" }
+      - { path: "result.content[*].text", regex: "AKIA[0-9A-Z]{16}" }
+      - { path: "result.content[*].text", regex: "xox[baprs]-[A-Za-z0-9-]{10,}" }
+    action: redact
+
+  # A tool that can run shell — worth a note in the session log every time.
+  - name: warn-on-shell-tools
+    direction: client-to-server
+    method: tools/call
+    any:
+      - { path: params.name, contains: "exec" }
+      - { path: params.name, contains: "shell" }
+      - { path: params.name, contains: "command" }
+    action: warn
+    message: "agent invoked a shell-capable tool"
+
+  # You vetted the "docs" server's tools — don't second-guess its results.
+  # - name: trust-docs-server
+  #   direction: server-to-client
+  #   method: tools/call
+  #   all:
+  #     - { path: result._meta.server, equals: "docs" }
+  #   action: allow

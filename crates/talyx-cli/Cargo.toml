@@ -1,0 +1,34 @@
+[package]
+name = "talyx-cli"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "talyx"
+path = "src/main.rs"
+
+[dependencies]
+talyx-core = { path = "../talyx-core" }
+talyx-scanner = { path = "../talyx-scanner" }
+talyx-adapters = { path = "../talyx-adapters" }
+talyx-risk = { path = "../talyx-risk" }
+talyx-store = { path = "../talyx-store" }
+talyx-registry = { path = "../talyx-registry" }
+talyx-mcp-proxy = { path = "../talyx-mcp-proxy" }
+talyx-advisories = { path = "../talyx-advisories" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+dirs.workspace = true
+# License activation / verification against Lemon Squeezy's public License
+# API (talyx activate / license). Same HTTP client the registry crate
+# already uses — see crates/talyx-cli/src/license.rs.
+ureq.workspace = true
+# YAML read + write for `talyx init`'s rewrite of Goose / Continue.dev
+# / Aider configs (STATUS.md 5c). Same crate talyx-adapters uses for
+# discovery — see the workspace dependency's own comment on why not
+# serde_yaml/serde_yml.
+serde-saphyr.workspace = true

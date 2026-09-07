@@ -14,12 +14,12 @@ const sections = [
   { id: 'ci', label: 'Use in CI' },
   { id: 'offline', label: 'Offline & air-gapped' },
   { id: 'env', label: 'Environment variables' },
-  { id: 'files', label: 'Files AgentGuard writes' },
+  { id: 'files', label: 'Files Talyx writes' },
   { id: 'changelog', label: 'Changelog' },
 ];
 ---
 
-<Base title="Documentation" description="Install, activate and run AgentGuard — quickstart, command reference, CI usage.">
+<Base title="Documentation" description="Install, activate and run Talyx — quickstart, command reference, CI usage.">
   <Prose
     title="Documentation"
     lead="Install the binary, activate your license, scan. Everything runs on your machine."
@@ -31,12 +31,12 @@ const sections = [
 curl -fsSL https://get.{site.domain} | sh
 
 # 2 · activate the license from your purchase email
-agentguard activate AG-XXXX-XXXX-XXXX
+talyx activate AG-XXXX-XXXX-XXXX
 
 # 3 · scan this project + your user-level agent config
-agentguard scan --project .</code></pre>
+talyx scan --project .</code></pre>
     <p>
-      When you're ready to enforce, run <code>agentguard init --project ~</code>.
+      When you're ready to enforce, run <code>talyx init --project ~</code>.
       That's the only command that writes to an agent config, and it backs each
       one up first.
     </p>
@@ -45,40 +45,40 @@ agentguard scan --project .</code></pre>
     <h3>macOS / Linux</h3>
     <pre><code>curl -fsSL https://get.{site.domain} | sh</code></pre>
     <p>
-      Installs <code>agentguard</code> and <code>agentguard-shim</code> to
-      <code>~/.agentguard/bin</code>. It does not touch your shell profile unless
+      Installs <code>talyx</code> and <code>talyx-shim</code> to
+      <code>~/.talyx/bin</code>. It does not touch your shell profile unless
       you pass <code>--modify-path</code>.
     </p>
     <h3>Windows (PowerShell)</h3>
     <pre><code>irm https://get.{site.domain}/install.ps1 | iex</code></pre>
     <h3>npm</h3>
-    <pre><code>npm install -g agentguard</code></pre>
+    <pre><code>npm install -g talyx</code></pre>
     <h3>From source</h3>
     <pre><code>git clone {site.github}
-cd agentguard
+cd talyx
 cargo build --release
-./target/release/agentguard --help</code></pre>
+./target/release/talyx --help</code></pre>
 
     <h2 id="activate">Activate a license</h2>
     <p>
-      AgentGuard is a paid tool. After purchase you receive a key that looks like
+      Talyx is a paid tool. After purchase you receive a key that looks like
       <code>AG-1A2B-3C4D-5E6F</code>. Activate it once per machine:
     </p>
-    <pre><code>agentguard activate AG-1A2B-3C4D-5E6F</code></pre>
+    <pre><code>talyx activate AG-1A2B-3C4D-5E6F</code></pre>
     <p>
       This makes one HTTPS call to Lemon Squeezy to bind the key to this machine,
-      then writes <code>~/.agentguard/license.json</code>. You can activate on up
+      then writes <code>~/.talyx/license.json</code>. You can activate on up
       to <strong>3 machines</strong>. To free a slot:
     </p>
-    <pre><code>agentguard license deactivate     # release this machine's slot
-agentguard license status         # show seats used, renewal date, offline grace</code></pre>
+    <pre><code>talyx license deactivate     # release this machine's slot
+talyx license status         # show seats used, renewal date, offline grace</code></pre>
     <p>
       <code>scan</code> and <code>status</code> run without a license so you can
       evaluate. <code>init</code> and the shim require an active license.
     </p>
 
     <h2 id="commands">Commands</h2>
-    <h3><code>agentguard scan</code></h3>
+    <h3><code>talyx scan</code></h3>
     <p>Discover, score and report every artifact. Read-only.</p>
     <ul>
       <li><code>--project &lt;path&gt;</code> — project root to scan (default <code>.</code>). User-level config is always included.</li>
@@ -86,9 +86,9 @@ agentguard license status         # show seats used, renewal date, offline grace
       <li><code>--fetch-registry</code> — download &amp; statically scan the real code behind <code>npx</code>/<code>uvx</code> servers. Opt-in; makes outbound registry calls.</li>
       <li><code>--format text|sarif</code>, <code>--sarif-file &lt;path&gt;</code>, <code>--exit-code</code> — CI output.</li>
     </ul>
-    <h3><code>agentguard status</code></h3>
+    <h3><code>talyx status</code></h3>
     <p>One-screen summary: agents detected, artifact counts, what needs review.</p>
-    <h3><code>agentguard init</code></h3>
+    <h3><code>talyx init</code></h3>
     <p>
       Scans, caches your decisions, and rewrites configs so approved MCP servers
       launch through the shim and blocked ones are removed. The only mutating
@@ -102,20 +102,20 @@ agentguard license status         # show seats used, renewal date, offline grace
       <li><code>--live</code> — also keep the shim between the agent and each approved MCP server for the session and inspect its JSON-RPC traffic. See <a href="#live-proxy">Live traffic inspection</a>.</li>
       <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
     </ul>
-    <h3><code>agentguard allow &lt;id&gt;</code></h3>
+    <h3><code>talyx allow &lt;id&gt;</code></h3>
     <p>
       Approve an artifact flagged ASK/BLOCK — from now on the shim lets it run and
       a removed remote entry is restored to the config exactly as it was.
       <code>--store &lt;path&gt;</code> to point at a non-default store.
     </p>
-    <h3><code>agentguard why &lt;id&gt;</code></h3>
+    <h3><code>talyx why &lt;id&gt;</code></h3>
     <p>Full reasoning behind a cached decision — every capability, every score contribution, the band and the final decision.</p>
-    <h3><code>agentguard guardrails check|list|example</code></h3>
+    <h3><code>talyx guardrails check|list|example</code></h3>
     <p>
       Validate the live-proxy guardrails file, list the rules it would load, or
       print a commented starter. See <a href="#live-proxy">Guardrails</a>.
     </p>
-    <h3><code>agentguard advisories list|check</code></h3>
+    <h3><code>talyx advisories list|check</code></h3>
     <p>
       Inspect the bundled known-bad advisory feed. <code>list</code> prints every
       advisory (id, severity, detail, references). <code>check &lt;package&gt;
@@ -123,16 +123,16 @@ agentguard license status         # show seats used, renewal date, offline grace
       against the feed and exits non-zero on a match. See
       <a href="#advisories">The advisory feed</a>.
     </p>
-    <h3><code>agentguard activate &lt;key&gt;</code> · <code>agentguard license status|deactivate</code></h3>
+    <h3><code>talyx activate &lt;key&gt;</code> · <code>talyx license status|deactivate</code></h3>
     <p>See <a href="#activate">Activate a license</a>.</p>
 
     <h2 id="enforcement">How enforcement works</h2>
     <ol>
       <li>Every config file is checksummed and backed up before the first rewrite.</li>
-      <li>Approved servers get their launch command rewritten to call <code>agentguard-shim &lt;id&gt; -- &lt;original command&gt;</code>. The shim re-checks the cached decision, then execs the real server.</li>
+      <li>Approved servers get their launch command rewritten to call <code>talyx-shim &lt;id&gt; -- &lt;original command&gt;</code>. The shim re-checks the cached decision, then execs the real server.</li>
       <li>Blocked local servers get the same treatment but the shim refuses to exec. Blocked remote servers are removed from the config entirely and their original entry is stored.</li>
-      <li>Malicious skills are moved into a <code>.agentguard-quarantine/</code> directory next to the agent's skills folder, so the agent stops loading them.</li>
-      <li><code>agentguard allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
+      <li>Malicious skills are moved into a <code>.talyx-quarantine/</code> directory next to the agent's skills folder, so the agent stops loading them.</li>
+      <li><code>talyx allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
     </ol>
 
     <h2 id="advisories">The advisory feed</h2>
@@ -159,13 +159,13 @@ agentguard license status         # show seats used, renewal date, offline grace
       whatever the protection level's band mapping would otherwise say.
     </p>
     <p>Inspect and test it:</p>
-    <pre><code>agentguard advisories list
-agentguard advisories check postmark-mcp --version 1.0.17   # exits 1 — match
-agentguard advisories check mcp-remote --version 0.1.20      # exits 0 — clear</code></pre>
+    <pre><code>talyx advisories list
+talyx advisories check postmark-mcp --version 1.0.17   # exits 1 — match
+talyx advisories check mcp-remote --version 0.1.20      # exits 0 — clear</code></pre>
     <p>
       It works fully offline. To override the bundled feed with a newer copy,
-      drop it at <code>~/.agentguard/advisories.json</code> or point
-      <code>AGENTGUARD_ADVISORIES</code> at a file. The format is versioned and
+      drop it at <code>~/.talyx/advisories.json</code> or point
+      <code>TALYX_ADVISORIES</code> at a file. The format is versioned and
       documented in the repo's <code>data/advisories.json</code>.
     </p>
 
@@ -174,7 +174,7 @@ agentguard advisories check mcp-remote --version 0.1.20      # exits 0 — clear
       The launch-time scan checks an MCP server before it starts. It can't see a
       server that behaves at launch and turns malicious mid-session, a tool
       definition that's swapped after you approved it, or a tool <em>result</em>
-      crafted to steer the model. <strong><code>agentguard init --live</code></strong>
+      crafted to steer the model. <strong><code>talyx init --live</code></strong>
       closes that gap: the shim stays between the agent and each approved server
       for the whole session and inspects every JSON-RPC message.
     </p>
@@ -185,13 +185,13 @@ agentguard advisories check mcp-remote --version 0.1.20      # exits 0 — clear
       never leaves you worse off than the gate alone.</p>
 
     <h3>Turn it on</h3>
-    <pre><code>agentguard init --project ~ --live
+    <pre><code>talyx init --project ~ --live
 # or at a specific level:
-agentguard init --project ~ --live --level strict</code></pre>
+talyx init --project ~ --live --level strict</code></pre>
     <p>
-      This writes <code>agentguard-shim &lt;id&gt; --proxy -- &lt;command&gt;</code>
+      This writes <code>talyx-shim &lt;id&gt; --proxy -- &lt;command&gt;</code>
       into the config instead of the plain shim form. Running plain
-      <code>agentguard init</code> again downgrades those entries back in place;
+      <code>talyx init</code> again downgrades those entries back in place;
       both directions are idempotent. Restart your agent after either.
     </p>
 
@@ -204,7 +204,7 @@ agentguard init --project ~ --live --level strict</code></pre>
         detectors as a skill file, <em>before</em> the agent sees them.</li>
       <li><strong>Tool drift (trust-on-first-use)</strong> — the first clean
         <code>tools/list</code> a server serves becomes its baseline
-        (<code>~/.agentguard/tool_baselines.json</code>). A tool that appears, or
+        (<code>~/.talyx/tool_baselines.json</code>). A tool that appears, or
         whose description or input schema changes, mid-session is a rug pull and
         is flagged.</li>
       <li><strong>Tool results</strong> — <code>tools/call</code> and
@@ -213,7 +213,7 @@ agentguard init --project ~ --live --level strict</code></pre>
     </ul>
 
     <h3>Levels</h3>
-    <p>Set with <code>AGENTGUARD_PROXY_LEVEL</code> (or inherited from
+    <p>Set with <code>TALYX_PROXY_LEVEL</code> (or inherited from
       <code>init --live --level …</code>). Default <code>balanced</code>.</p>
     <table>
       <thead><tr><th>Level</th><th>Poisoned handshake / rug pull</th><th>Poisoned tool result</th></tr></thead>
@@ -227,9 +227,9 @@ agentguard init --project ~ --live --level strict</code></pre>
     <h3>Guardrails — your own rules</h3>
     <p>
       The three levels are a blunt instrument. <strong>Guardrails</strong> are a
-      local policy file — <code>~/.agentguard/guardrails.yaml</code>,
-      <code>&lt;project&gt;/.agentguard/guardrails.yaml</code>, or
-      <code>$AGENTGUARD_GUARDRAILS</code> — that the proxy runs on
+      local policy file — <code>~/.talyx/guardrails.yaml</code>,
+      <code>&lt;project&gt;/.talyx/guardrails.yaml</code>, or
+      <code>$TALYX_GUARDRAILS</code> — that the proxy runs on
       <em>every</em> JSON-RPC message, in addition to the built-in detectors.
       Each rule matches by direction, method and one or more path conditions,
       and takes an action:
@@ -243,7 +243,7 @@ agentguard init --project ~ --live --level strict</code></pre>
         <tr><td><code>block</code></td><td>the message never reaches its peer — a JSON-RPC error goes back to the sender (a blocked client <code>tools/call</code> → error to the agent, the server never sees it)</td></tr>
       </tbody>
     </table>
-    <pre><code># ~/.agentguard/guardrails.yaml
+    <pre><code># ~/.talyx/guardrails.yaml
 version: 1
 rules:
   - name: block-secret-path-args
@@ -271,26 +271,26 @@ rules:
       <code>glob</code>, <code>equals</code>, <code>in</code>,
       <code>exists</code>, <code>gt</code>, <code>lt</code>. Manage the file with:
     </p>
-    <pre><code>agentguard guardrails example &gt; ~/.agentguard/guardrails.yaml
-agentguard guardrails check      # validate — names the offending rule
-agentguard guardrails list       # show what the proxy would load</code></pre>
+    <pre><code>talyx guardrails example &gt; ~/.talyx/guardrails.yaml
+talyx guardrails check      # validate — names the offending rule
+talyx guardrails list       # show what the proxy would load</code></pre>
 
     <h3>Turn it off</h3>
     <ul>
-      <li><code>AGENTGUARD_NO_PROXY=1</code> in the agent's environment — a hard
+      <li><code>TALYX_NO_PROXY=1</code> in the agent's environment — a hard
         per-launch kill switch; the shim does a plain <code>exec</code> and the
         proxy code never runs.</li>
-      <li><code>agentguard init --project ~</code> (no <code>--live</code>) —
+      <li><code>talyx init --project ~</code> (no <code>--live</code>) —
         permanently downgrades the config entries.</li>
     </ul>
 
     <h3>What's recorded, and what leaves your machine</h3>
     <p>
       Nothing leaves your machine. Findings are appended to
-      <code>~/.agentguard/sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> (one JSON
+      <code>~/.talyx/sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> (one JSON
       object per finding) and echoed to the server's stderr.
-      <code>agentguard status</code> prints a summary of recent ones. For
-      debugging, <code>AGENTGUARD_PROXY_LOG=/path/to/log.jsonl</code> captures a
+      <code>talyx status</code> prints a summary of recent ones. For
+      debugging, <code>TALYX_PROXY_LOG=/path/to/log.jsonl</code> captures a
       full classified transcript of every message both directions.
     </p>
     <p>
@@ -303,22 +303,22 @@ agentguard guardrails list       # show what the proxy would load</code></pre>
 
     <h2 id="ci">Use in CI</h2>
     <p>Fail a build when a poisoned artifact lands in a PR:</p>
-    <pre><code># .github/workflows/agentguard.yml
-- run: agentguard scan --project . --format sarif --sarif-file agentguard.sarif --exit-code
+    <pre><code># .github/workflows/talyx.yml
+- run: talyx scan --project . --format sarif --sarif-file talyx.sarif --exit-code
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
-    sarif_file: agentguard.sarif
-    category: agentguard</code></pre>
+    sarif_file: talyx.sarif
+    category: talyx</code></pre>
     <p>
       <code>--exit-code</code> returns 2 on any Block/Quarantine, 1 on any Ask, 0
       otherwise. In CI, activate with a machine license via
-      <code>AGENTGUARD_LICENSE_KEY</code> in the job environment.
+      <code>TALYX_LICENSE_KEY</code> in the job environment.
     </p>
 
     <h2 id="offline">Offline &amp; air-gapped</h2>
     <p>
-      After activation, AgentGuard works offline for 30 days before it asks to
+      After activation, Talyx works offline for 30 days before it asks to
       re-verify. For fully air-gapped machines, enterprise licenses ship an
       offline activation file — email <a href={`mailto:${site.email}`}>{site.email}</a>.
     </p>
@@ -327,36 +327,36 @@ agentguard guardrails list       # show what the proxy would load</code></pre>
     <table>
       <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
       <tbody>
-        <tr><td><code>AGENTGUARD_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI. Set it in the job environment.</td></tr>
-        <tr><td><code>AGENTGUARD_STORE</code></td><td>Path to the decision store (default <code>~/.agentguard/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
-        <tr><td><code>AGENTGUARD_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.agentguard/license.json</code>).</td></tr>
-        <tr><td><code>AGENTGUARD_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.agentguard/</code>).</td></tr>
-        <tr><td><code>AGENTGUARD_NO_PROXY</code></td><td><code>=1</code> forces the shim to <code>exec</code> the real server directly even for a <code>--live</code> entry — a per-launch kill switch for the proxy.</td></tr>
-        <tr><td><code>AGENTGUARD_PROXY_LEVEL</code></td><td><code>quiet</code> | <code>balanced</code> | <code>strict</code> — the live proxy's inspection level (default <code>balanced</code>).</td></tr>
-        <tr><td><code>AGENTGUARD_PROXY_LOG</code></td><td>Path to write a full classified JSON-RPC transcript of a proxied session (debugging).</td></tr>
-        <tr><td><code>AGENTGUARD_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.agentguard/sessions/</code>).</td></tr>
-        <tr><td><code>AGENTGUARD_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.agentguard/</code> and <code>&lt;project&gt;/.agentguard/</code> defaults.</td></tr>
-        <tr><td><code>AGENTGUARD_ADVISORIES</code></td><td>Path to an advisory feed file, overriding the bundled one and <code>~/.agentguard/advisories.json</code>. See <a href="#advisories">The advisory feed</a>.</td></tr>
-        <tr><td><code>AGENTGUARD_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on AgentGuard itself.</td></tr>
+        <tr><td><code>TALYX_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI. Set it in the job environment.</td></tr>
+        <tr><td><code>TALYX_STORE</code></td><td>Path to the decision store (default <code>~/.talyx/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
+        <tr><td><code>TALYX_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.talyx/license.json</code>).</td></tr>
+        <tr><td><code>TALYX_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.talyx/</code>).</td></tr>
+        <tr><td><code>TALYX_NO_PROXY</code></td><td><code>=1</code> forces the shim to <code>exec</code> the real server directly even for a <code>--live</code> entry — a per-launch kill switch for the proxy.</td></tr>
+        <tr><td><code>TALYX_PROXY_LEVEL</code></td><td><code>quiet</code> | <code>balanced</code> | <code>strict</code> — the live proxy's inspection level (default <code>balanced</code>).</td></tr>
+        <tr><td><code>TALYX_PROXY_LOG</code></td><td>Path to write a full classified JSON-RPC transcript of a proxied session (debugging).</td></tr>
+        <tr><td><code>TALYX_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.talyx/sessions/</code>).</td></tr>
+        <tr><td><code>TALYX_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.talyx/</code> and <code>&lt;project&gt;/.talyx/</code> defaults.</td></tr>
+        <tr><td><code>TALYX_ADVISORIES</code></td><td>Path to an advisory feed file, overriding the bundled one and <code>~/.talyx/advisories.json</code>. See <a href="#advisories">The advisory feed</a>.</td></tr>
+        <tr><td><code>TALYX_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on Talyx itself.</td></tr>
       </tbody>
     </table>
 
-    <h2 id="files">Files AgentGuard writes</h2>
-    <p>Everything lives under <code>~/.agentguard/</code>. Nothing is sent anywhere.</p>
+    <h2 id="files">Files Talyx writes</h2>
+    <p>Everything lives under <code>~/.talyx/</code>. Nothing is sent anywhere.</p>
     <ul>
       <li><code>decisions.json</code> — the decision cache: every scanned artifact's id, capabilities, score, band and decision. Written by <code>scan</code>/<code>init</code>, read by the shim.</li>
       <li><code>tool_baselines.json</code> — trust-on-first-use snapshot of each server's approved tool list (live proxy).</li>
       <li><code>license.json</code> — cached license status and the 7-day / 30-day trust timers.</li>
       <li><code>sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> — live-proxy findings, one JSON object per line.</li>
-      <li>A <code>.agentguard-quarantine/</code> directory next to an agent's skills folder — blocked skills are moved here (not under <code>~/.agentguard/</code>, so the move stays within the same repo).</li>
-      <li>A <code>&lt;file&gt;.agentguard-backup</code> next to each agent config the first time <code>init</code> rewrites it.</li>
+      <li>A <code>.talyx-quarantine/</code> directory next to an agent's skills folder — blocked skills are moved here (not under <code>~/.talyx/</code>, so the move stays within the same repo).</li>
+      <li>A <code>&lt;file&gt;.talyx-backup</code> next to each agent config the first time <code>init</code> rewrites it.</li>
     </ul>
 
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
-      <li><strong>Live traffic inspection (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
-      <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable. Forces a block or a review regardless of behaviour score. <code>agentguard advisories list|check</code>. See <a href="#advisories">The advisory feed</a>.</li>
+      <li><strong>Live traffic inspection (opt-in).</strong> <code>talyx init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
+      <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable. Forces a block or a review regardless of behaviour score. <code>talyx advisories list|check</code>. See <a href="#advisories">The advisory feed</a>.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
       <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
       <li><strong>Warp</strong> added (27 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>
@@ -365,7 +365,7 @@ agentguard guardrails list       # show what the proxy would load</code></pre>
       <li>SARIF 2.1.0 output + GitHub Action; capability-drift re-review.</li>
       <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives.</li>
       <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers.</li>
-      <li><code>agentguard activate</code> / <code>license</code> commands.</li>
+      <li><code>talyx activate</code> / <code>license</code> commands.</li>
     </ul>
   </Prose>
 

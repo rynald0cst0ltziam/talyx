@@ -6,8 +6,8 @@
  *
  *   1. `checkoutUrl`   — Store → Products → your product → "Share" → copy the
  *                        checkout URL. Looks like
- *                        https://agentguard.lemonsqueezy.com/buy/xxxxxxxx-xxxx-...
- *   2. `storeSlug`     — your store subdomain (the "agentguard" in the URL above).
+ *                        https://talyx.lemonsqueezy.com/buy/xxxxxxxx-xxxx-...
+ *   2. `storeSlug`     — your store subdomain (the "talyx" in the URL above).
  *                        Used by the lemon.js overlay script.
  *   3. price fields    — keep in sync with the Lemon Squeezy variant price.
  *
@@ -16,18 +16,18 @@
  * in the overlay instead of a full navigation.
  */
 export const site = {
-  name: 'AgentGuard',
+  name: 'Talyx',
   tagline: 'Supply-chain security for AI coding agents.',
-  domain: 'agentguard.dev',
-  url: 'https://agentguard.dev',
+  domain: 'talyx.dev',
+  url: 'https://talyx.dev',
   description:
-    'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. AgentGuard scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
-  email: 'hello@agentguard.dev',
-  github: 'https://github.com/agentguard/agentguard',
+    'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. Talyx scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
+  email: 'hello@talyx.dev',
+  github: 'https://github.com/talyx/talyx',
 
   // ── commerce ──────────────────────────────────────────────
-  checkoutUrl: 'https://agentguard.lemonsqueezy.com/buy/REPLACE-WITH-REAL-CHECKOUT-ID',
-  storeSlug: 'agentguard',
+  checkoutUrl: 'https://talyx.lemonsqueezy.com/buy/REPLACE-WITH-REAL-CHECKOUT-ID',
+  storeSlug: 'talyx',
   price: {
     amount: 149,
     currency: 'USD',

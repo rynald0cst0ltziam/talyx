@@ -1,4 +1,4 @@
-# AgentGuard
+# Talyx
 
 Cross-agent security scanner for AI coding agent artifacts — MCP servers,
 skills, plugins, and hooks.
@@ -23,7 +23,7 @@ Unicode, base64/hex-encoded payloads, data-exfiltration directives — see
 STATUS.md #39), cross-artifact MCP tool-shadowing / server-impersonation
 detection (STATUS.md #44), the risk engine (capped evidence +
 reputation discount + context modifiers), and real enforcement —
-MCP-server config-rewrite through `agentguard-shim` (BUILD_PLAN.md §5a),
+MCP-server config-rewrite through `talyx-shim` (BUILD_PLAN.md §5a),
 remote-entry removal, skill quarantine, drift detection, and hook
 enforcement across five agents (Claude Code, Codex, Antigravity, Gemini
 CLI, GitHub Copilot CLI, sharing one discovery/rewrite path — see
@@ -56,21 +56,21 @@ irm https://<install-url>/install.ps1 | iex
 
 ```bash
 # npm (any platform)
-npm install -g agentguard
+npm install -g talyx
 ```
 
-All three do the same thing: install `agentguard` + `agentguard-shim`, then
-run `agentguard init --project "$HOME"` automatically so every MCP server
+All three do the same thing: install `talyx` + `talyx-shim`, then
+run `talyx init --project "$HOME"` automatically so every MCP server
 config reachable from your home directory (which is where Claude Code's own
 user-scope config lives) is immediately routed through enforcement. Pass
-`--no-init` (shell installers) or set `AGENTGUARD_SKIP_INIT=1` (npm) to
+`--no-init` (shell installers) or set `TALYX_SKIP_INIT=1` (npm) to
 install without activating.
 
-AgentGuard is a paid tool (per developer, per year, via Lemon Squeezy).
+Talyx is a paid tool (per developer, per year, via Lemon Squeezy).
 `scan` and `status` run unlicensed for evaluation; `init` requires
-`agentguard activate <key>` first (or `AGENTGUARD_LICENSE_KEY` in CI). The
+`talyx activate <key>` first (or `TALYX_LICENSE_KEY` in CI). The
 enforcement shim itself is never license-gated, so a lapsed license can't
-break a running agent. See [`crates/agentguard-cli/src/license.rs`](crates/agentguard-cli/src/license.rs).
+break a running agent. See [`crates/talyx-cli/src/license.rs`](crates/talyx-cli/src/license.rs).
 The marketing site lives in [`site/`](site/) (Astro, static).
 
 None of the installers modify your shell profile or PATH automatically —
@@ -81,27 +81,27 @@ otherwise they print the line to add yourself.
 
 ```
 crates/
-  agentguard-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
-  agentguard-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest); ast.rs: the authoritative capability + taint pass for JS/TS + Python + Ruby — tree-sitter AST, function-scoped interprocedural source-to-sink taint (secret read -> network sink, across helper returns and parameters); the regex rules are the parse-failure fallback; content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files; shadowing.rs: cross-artifact MCP tool-shadowing / server-impersonation / typosquat detection
-  agentguard-adapters    per-agent discovery: Claude Code (+ its plugin ecosystem: MCP servers, hooks, skills, agents, LSP servers, monitors from enabled plugins), Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity (+ plugins), Gemini CLI (+ extensions), GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Warp, Unknown Agent Mode
-  agentguard-risk        risk engine: capped evidence − reputation + context → decision
-  agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
-  agentguard-store       local decision cache (~/.agentguard/decisions.json)
-  agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch; with --proxy (init --live) runs the server through agentguard-mcp-proxy
-  agentguard-mcp-proxy   the live stdio firewall (ADR 0001): newline-delimited JSON-RPC forwarding between agent and server for the session; inspects the initialize/tools/list/... handshake responses through agentguard-content, blocks a poisoned or rug-pulled response per level (AGENTGUARD_PROXY_LEVEL), trust-on-first-use tool baseline, custom guardrails.yaml rules (block/redact/allow on any message), findings to ~/.agentguard/sessions/
-  agentguard-content     instruction-text / prompt-injection / hidden-unicode / encoded-payload / exfil-directive detectors (tree-sitter-free leaf crate, shared by scanner + mcp-proxy)
-  agentguard-advisories  known-bad feed: matches an artifact's identity (npm/PyPI package + version range, publisher, remote host, repo owner, typosquat pattern) against publicly-disclosed malicious/vulnerable MCP artifacts; include_str!-bundled, overridable by ~/.agentguard/advisories.json or $AGENTGUARD_ADVISORIES
-  agentguard-cli         `agentguard` binary: scan, status, init, allow, why, guardrails, advisories, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
+  talyx-core       shared types: Artifact, Capability, Decision, RiskBand, ScoreBreakdown
+  talyx-scanner     static capability extraction (JS/TS, Python, Ruby/Perl, shell scripts; package.json manifest); ast.rs: the authoritative capability + taint pass for JS/TS + Python + Ruby — tree-sitter AST, function-scoped interprocedural source-to-sink taint (secret read -> network sink, across helper returns and parameters); the regex rules are the parse-failure fallback; content.rs: prompt-injection / hidden-Unicode / encoded-payload / exfiltration-directive analysis of skill markdown and agent-instruction files; shadowing.rs: cross-artifact MCP tool-shadowing / server-impersonation / typosquat detection
+  talyx-adapters    per-agent discovery: Claude Code (+ its plugin ecosystem: MCP servers, hooks, skills, agents, LSP servers, monitors from enabled plugins), Claude Desktop, Cursor, Codex, Windsurf/Devin Desktop, Devin CLI, Antigravity (+ plugins), Gemini CLI (+ extensions), GitHub Copilot CLI, VS Code (Copilot), OpenClaw, Amp, Kiro, Amazon Q Developer CLI, Continue.dev, Cline, Roo Code, Zed, JetBrains AI Assistant, opencode, Tabnine, Cody, Goose, Aider, OpenHands, Crush, Warp, Unknown Agent Mode
+  talyx-risk        risk engine: capped evidence − reputation + context → decision
+  talyx-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
+  talyx-store       local decision cache (~/.talyx/decisions.json)
+  talyx-shim        the enforcement binary — allows/blocks a gated MCP server launch; with --proxy (init --live) runs the server through talyx-mcp-proxy
+  talyx-mcp-proxy   the live stdio firewall (ADR 0001): newline-delimited JSON-RPC forwarding between agent and server for the session; inspects the initialize/tools/list/... handshake responses through talyx-content, blocks a poisoned or rug-pulled response per level (TALYX_PROXY_LEVEL), trust-on-first-use tool baseline, custom guardrails.yaml rules (block/redact/allow on any message), findings to ~/.talyx/sessions/
+  talyx-content     instruction-text / prompt-injection / hidden-unicode / encoded-payload / exfil-directive detectors (tree-sitter-free leaf crate, shared by scanner + mcp-proxy)
+  talyx-advisories  known-bad feed: matches an artifact's identity (npm/PyPI package + version range, publisher, remote host, repo owner, typosquat pattern) against publicly-disclosed malicious/vulnerable MCP artifacts; include_str!-bundled, overridable by ~/.talyx/advisories.json or $TALYX_ADVISORIES
+  talyx-cli         `talyx` binary: scan, status, init, allow, why, guardrails, advisories, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
 data/
   trust_seed.json        v0 hand-seeded trust graph (stand-in for BUILD_PLAN.md §7's pre-launch scan)
-  advisories.json        BUILD_PLAN.md §7's "known-bad" half — hand-curated, fully-sourced disclosures of malicious/vulnerable MCP artifacts (agentguard-advisories)
+  advisories.json        BUILD_PLAN.md §7's "known-bad" half — hand-curated, fully-sourced disclosures of malicious/vulnerable MCP artifacts (talyx-advisories)
 scripts/
   install.sh              curl-pipeable installer (macOS/Linux)
   install.ps1              irm-pipeable installer (Windows)
 npm/
   package.json             npm-publishable wrapper (postinstall downloads the native binaries)
 site/
-  Astro static marketing site for agentguard.dev — see site/README.md for deploy + pre-launch edits
+  Astro static marketing site for talyx.dev — see site/README.md for deploy + pre-launch edits
 .github/workflows/
   release.yml              builds + drafts a GitHub Release for a pushed v* tag
 ```
@@ -118,60 +118,60 @@ cargo test --workspace
 
 # Scan the current project (and user-level Claude Code config) at the
 # Balanced protection preset:
-cargo run -p agentguard-cli -- scan --project .
+cargo run -p talyx-cli -- scan --project .
 
 # Add --fetch-registry to also fetch and statically scan the actual code
 # behind an npx/uvx-launched MCP server (off by default -- makes a real
-# outbound call to the npm/PyPI registry; see agentguard-registry's crate
+# outbound call to the npm/PyPI registry; see talyx-registry's crate
 # doc comment):
-cargo run -p agentguard-cli -- scan --project . --fetch-registry
+cargo run -p talyx-cli -- scan --project . --fetch-registry
 
 # Short status summary:
-cargo run -p agentguard-cli -- status --project .
+cargo run -p talyx-cli -- status --project .
 
 # Scan, cache decisions, AND route MCP servers through the enforcement
 # shim (only rewrites configs inside --project unless you pass
-# --include-user-config — see agentguard-cli/src/init.rs):
-cargo run -p agentguard-cli -- init --project .
+# --include-user-config — see talyx-cli/src/init.rs):
+cargo run -p talyx-cli -- init --project .
 
 # Add --live to ALSO keep the shim between the agent and each approved
 # server for the session and inspect its JSON-RPC traffic (ADR 0001):
 # handshake-response scanning, trust-on-first-use tool baseline / rug-pull
 # detection, tool-result scanning. Opt-in; fails open to the static gate.
-# AGENTGUARD_PROXY_LEVEL=quiet|balanced|strict, AGENTGUARD_NO_PROXY=1 to
-# disable per launch. Findings -> ~/.agentguard/sessions/*.jsonl.
-cargo run -p agentguard-cli -- init --project . --live
+# TALYX_PROXY_LEVEL=quiet|balanced|strict, TALYX_NO_PROXY=1 to
+# disable per launch. Findings -> ~/.talyx/sessions/*.jsonl.
+cargo run -p talyx-cli -- init --project . --live
 
 # Approve something flagged ASK/BLOCK, or see the full reasoning behind
 # a cached decision (ids are printed by `scan`/`init`):
-cargo run -p agentguard-cli -- allow "<artifact-id>"
-cargo run -p agentguard-cli -- why "<artifact-id>"
+cargo run -p talyx-cli -- allow "<artifact-id>"
+cargo run -p talyx-cli -- why "<artifact-id>"
 
 # Inspect the bundled known-bad advisory feed, or check one package:
-cargo run -p agentguard-cli -- advisories list
-cargo run -p agentguard-cli -- advisories check postmark-mcp --version 1.0.17
+cargo run -p talyx-cli -- advisories list
+cargo run -p talyx-cli -- advisories check postmark-mcp --version 1.0.17
 ```
 
 ## CI / pull-request gating (SARIF)
 
-`agentguard scan` can emit a [SARIF 2.1.0](https://sarifweb.azurewebsites.net)
+`talyx scan` can emit a [SARIF 2.1.0](https://sarifweb.azurewebsites.net)
 log for GitHub code scanning, Azure DevOps, or any CI security dashboard —
-no AgentGuard-hosted service involved:
+no Talyx-hosted service involved:
 
 ```bash
 # SARIF to stdout:
-agentguard scan --project . --format sarif
+talyx scan --project . --format sarif
 
 # keep the human-readable table on stdout AND write a file for CI to upload:
-agentguard scan --project . --sarif-file agentguard.sarif
+talyx scan --project . --sarif-file talyx.sarif
 
 # make the job itself fail: exit 2 on any BLOCK/QUARANTINE, 1 on any ASK:
-agentguard scan --project . --exit-code
+talyx scan --project . --exit-code
 ```
 
-A ready-to-use workflow that builds AgentGuard, scans the repo, and uploads
+A ready-to-use workflow that builds Talyx, scans the repo, and uploads
 the SARIF as PR annotations is at
-[`.github/workflows/agentguard-scan.yml`](.github/workflows/agentguard-scan.yml).
+[`.github/workflows/talyx-scan.yml`](.github/workflows/talyx-scan.yml).
 Each finding carries a repo-relative file location (the exact `SKILL.md`
 line for a poisoned skill, the config entry for a risky MCP server) and a
 stable fingerprint so results dedupe across runs.
@@ -190,7 +190,7 @@ From `BUILD_PLAN.md` / the project's coding principles:
 
 ## License
 
-AgentGuard is **source-available under a commercial license** — see
+Talyx is **source-available under a commercial license** — see
 [`LICENSE`](LICENSE). You may read, compile, run, and security-audit the
 source, and run the read-only commands (`scan`, `status`, `why`,
 `guardrails`, `advisories`) for any purpose including commercially;

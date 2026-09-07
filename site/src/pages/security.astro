@@ -14,7 +14,7 @@ const sections = [
 ];
 ---
 
-<Base title="Security & threat model" description="What AgentGuard defends against, what it deliberately doesn't, and how to verify every claim.">
+<Base title="Security & threat model" description="What Talyx defends against, what it deliberately doesn't, and how to verify every claim.">
   <Prose
     title="Security & threat model"
     lead="The honest version. What's covered, what isn't, and how to check for yourself."
@@ -22,7 +22,7 @@ const sections = [
   >
     <h2 id="model">What it defends</h2>
     <p>
-      AgentGuard secures the <strong>artifact supply chain</strong> for AI coding
+      Talyx secures the <strong>artifact supply chain</strong> for AI coding
       agents — the MCP servers, skills, plugins, hooks and instruction files an
       agent loads from config before or during a session. The threat actor is a
       malicious or compromised artifact: a repo config that launches an
@@ -48,7 +48,7 @@ const sections = [
 
     <h2 id="not">What it does not do (v1)</h2>
     <ul>
-      <li>Live traffic inspection (<code>agentguard init --live</code>, opt-in) covers the MCP handshake (<code>initialize</code> / <code>tools/list</code> / <code>resources/list</code> / <code>prompts/list</code>), a trust-on-first-use tool baseline that catches a mid-session rug-pull, the content of <code>tools/call</code> / <code>resources/read</code> results (≤ 64 KiB), and a local guardrails file (custom block / redact / allow rules on any message). It is opt-in while it builds real-session mileage, and fails open to the launch-time protection — it never leaves you worse off than the gate alone.</li>
+      <li>Live traffic inspection (<code>talyx init --live</code>, opt-in) covers the MCP handshake (<code>initialize</code> / <code>tools/list</code> / <code>resources/list</code> / <code>prompts/list</code>), a trust-on-first-use tool baseline that catches a mid-session rug-pull, the content of <code>tools/call</code> / <code>resources/read</code> results (≤ 64 KiB), and a local guardrails file (custom block / redact / allow rules on any message). It is opt-in while it builds real-session mileage, and fails open to the launch-time protection — it never leaves you worse off than the gate alone.</li>
       <li>No sandboxed detonation of untrusted code.</li>
       <li>No continuous filesystem watching or daemon.</li>
       <li>Detection is heuristic. High-signal findings drive automatic blocking; lower-signal ones surface as review prompts. It is a strong filter, not an oracle.</li>
@@ -59,7 +59,7 @@ const sections = [
       No account, no daemon, no cloud backend, no telemetry, no analytics. The
       only outbound calls are: optional npm/PyPI registry lookups when you pass
       <code>--fetch-registry</code>, and a license check against Lemon Squeezy on
-      activation and roughly monthly thereafter. AgentGuard never transmits your
+      activation and roughly monthly thereafter. Talyx never transmits your
       config contents, findings, file paths, or code anywhere.
     </p>
 
