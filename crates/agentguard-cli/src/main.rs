@@ -370,6 +370,63 @@ fn run_status(project: &Path) {
     } else {
         println!("\nProtection: \u{25cf} Active (static scan only — enforcement not applicable to what was found here)");
     }
+
+    print_recent_proxy_findings();
+}
+
+/// Summarise what the live MCP proxy (`init --live`) has caught recently,
+/// from `~/.agentguard/sessions/*.jsonl` (`AGENTGUARD_SESSIONS_DIR`
+/// overrides). Silent when the proxy isn't in use / nothing was flagged.
+fn print_recent_proxy_findings() {
+    let dir = std::env::var_os("AGENTGUARD_SESSIONS_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".agentguard").join("sessions")));
+    let Some(dir) = dir else { return };
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .collect();
+    if files.is_empty() {
+        return;
+    }
+    files.sort_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+
+    let mut by_action: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut recent: Vec<String> = Vec::new();
+    for path in files.iter().rev().take(5) {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        for line in text.lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let action = v.get("action").and_then(|a| a.as_str()).unwrap_or("flagged");
+            *by_action.entry(action.to_string()).or_insert(0) += 1;
+            if recent.len() < 3 {
+                recent.push(format!(
+                    "  {} — {} on {} ({})",
+                    action,
+                    v.get("capability").and_then(|c| c.as_str()).unwrap_or("?"),
+                    v.get("method").and_then(|m| m.as_str()).unwrap_or("?"),
+                    v.get("artifact").and_then(|a| a.as_str()).unwrap_or("?"),
+                ));
+            }
+        }
+    }
+    if by_action.is_empty() {
+        return;
+    }
+    let total: usize = by_action.values().sum();
+    let breakdown: Vec<String> = by_action.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    println!("\nLive proxy: {total} finding(s) in recent sessions ({}).", breakdown.join(", "));
+    for line in &recent {
+        println!("{line}");
+    }
 }
 
 /// Replaces control characters with U+FFFD before printing anything
