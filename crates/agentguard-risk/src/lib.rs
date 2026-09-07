@@ -166,7 +166,7 @@ impl RiskEngine {
         if caps.contains(&Capability::ToolShadowing) {
             extra += 30;
             reasons.push(
-                "this server's NAME shadows, impersonates, or is a typosquat of a well-known / trusted MCP server — the agent could route tool calls to it (+30)"
+                "shares a name with, impersonates, or typosquats a well-known / trusted name (an MCP server, or a system command a plugin binary shadows on PATH) — a tool call or command invocation could be routed to it (+30)"
                     .to_string(),
             );
         }
