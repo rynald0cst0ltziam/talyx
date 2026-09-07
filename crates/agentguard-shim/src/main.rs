@@ -21,7 +21,8 @@
 //!     `agentguard-mcp-proxy` stdio pass-through instead of `exec`'d, so
 //!     the session's JSON-RPC traffic can be inspected — see ADR 0001.
 //!     `AGENTGUARD_NO_PROXY=1` forces the plain `exec` path regardless (a
-//!     hard kill switch).
+//!     hard kill switch); `AGENTGUARD_PROXY_LEVEL=quiet|balanced|strict`
+//!     sets the proxy's inspection level (default `balanced`).
 //!
 //!   agentguard-shim <artifact-id> --shell
 //!     Shell mode — a Claude Code hook's `command` is a single shell-syntax
@@ -42,7 +43,7 @@
 //!     never proxied — they aren't MCP servers.
 
 use agentguard_core::Decision;
-use agentguard_mcp_proxy::ProxyConfig;
+use agentguard_mcp_proxy::{PolicyLevel, ProxyConfig};
 use agentguard_store::DecisionStore;
 use std::env;
 use std::process::{Command, ExitStatus};
@@ -146,6 +147,15 @@ fn launch(
             if *proxy && !kill_switch {
                 let mut cfg = ProxyConfig::new(artifact_id);
                 cfg.log_path = env::var_os("AGENTGUARD_PROXY_LOG").map(Into::into);
+                // The proxy's inspection level. Defaults to `balanced`
+                // (ADR 0001); `AGENTGUARD_PROXY_LEVEL` overrides it for a
+                // single launch without re-running `init`.
+                cfg.level = Some(match env::var("AGENTGUARD_PROXY_LEVEL").as_deref() {
+                    Ok("quiet") => PolicyLevel::Quiet,
+                    Ok("strict") => PolicyLevel::Strict,
+                    _ => PolicyLevel::Balanced,
+                });
+                cfg.sessions_dir = env::var_os("AGENTGUARD_SESSIONS_DIR").map(Into::into);
                 agentguard_mcp_proxy::run(command, args, cfg)
             } else {
                 Command::new(command).args(args).status()

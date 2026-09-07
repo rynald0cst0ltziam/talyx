@@ -27,7 +27,11 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod message;
+mod policy;
+
 use message::{Direction, Rpc};
+pub use policy::PolicyLevel;
+use policy::{Action, SessionPolicy};
 
 /// Messages larger than this are forwarded but not parsed/inspected — a
 /// single JSON-RPC message this big is anomalous, and buffering an
@@ -43,6 +47,15 @@ pub struct ProxyConfig {
     pub log_path: Option<PathBuf>,
     /// Per-message inspection cap. Defaults to [`DEFAULT_MAX_MESSAGE_BYTES`].
     pub max_message_bytes: usize,
+    /// When set, the handshake responses (`initialize`, `tools/list`,
+    /// `resources/list`, `prompts/list`) are scanned for instruction-text
+    /// attacks and handled per the level (ADR 0001 Phase B). `None` =
+    /// transparent pass-through only (Phase A behaviour).
+    pub level: Option<PolicyLevel>,
+    /// Directory for the session findings log. Defaults to
+    /// `~/.agentguard/sessions/`. Overridden in tests so they never touch
+    /// the real one.
+    pub sessions_dir: Option<PathBuf>,
 }
 
 impl ProxyConfig {
@@ -51,6 +64,8 @@ impl ProxyConfig {
             artifact_id: artifact_id.into(),
             log_path: None,
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+            level: None,
+            sessions_dir: None,
         }
     }
 }
@@ -88,27 +103,38 @@ where
 
     let logger = Arc::new(Logger::open(config.log_path.as_deref(), &config.artifact_id));
     let cap = config.max_message_bytes;
+    let policy = config.level.map(|lvl| {
+        Arc::new(SessionPolicy::new(
+            config.artifact_id.clone(),
+            lvl,
+            config.sessions_dir.clone(),
+        ))
+    });
 
     // client (agent) -> server
     let l1 = Arc::clone(&logger);
+    let p1 = policy.clone();
     let c2s = thread::spawn(move || {
         pump(
             BufReader::new(client_in),
             child_stdin, // dropped on return → closes the server's stdin
             Direction::ClientToServer,
             &l1,
+            p1.as_deref(),
             cap,
         );
     });
 
     // server -> client (agent)
     let l2 = Arc::clone(&logger);
+    let p2 = policy.clone();
     let s2c = thread::spawn(move || {
         pump(
             BufReader::new(child_stdout),
             client_out,
             Direction::ServerToClient,
             &l2,
+            p2.as_deref(),
             cap,
         );
     });
@@ -129,16 +155,28 @@ where
     Ok(status)
 }
 
-/// Shuttle newline-delimited messages from `src` to `dst`. Each message is
-/// written (and flushed) to `dst` **before** it is parsed or logged, so
-/// inspection can never delay or drop traffic. Returns on EOF or the first
-/// write error on `dst` (the far side is gone — nothing useful left to do
-/// in this direction).
+/// A message this size or smaller is parsed and shown to the policy
+/// *before* forwarding (a handshake response — `tools/list` etc. — is
+/// always well under this). A larger message (a big `tools/call` result:
+/// file contents, command output) is forwarded first and only classified
+/// for the transcript afterwards, so the policy never adds latency to the
+/// bulk traffic. Handshake-response inspection that matters is unaffected.
+const INSPECT_CAP: usize = 256 * 1024;
+
+/// Shuttle newline-delimited messages from `src` to `dst`.
+///
+/// Small messages (≤ [`INSPECT_CAP`]) are parsed and — when a `policy` is
+/// set (Phase B) — shown to it *before* forwarding, so a flagged handshake
+/// response can be replaced with a JSON-RPC error (or replaced then the
+/// session stopped) before the agent sees it. Everything else is forwarded
+/// verbatim first and classified for the transcript afterwards. Returns on
+/// EOF, a `dst` write error, or a policy stop.
 fn pump<R: BufRead, W: Write>(
     mut src: R,
     mut dst: W,
     dir: Direction,
     logger: &Logger,
+    policy: Option<&SessionPolicy>,
     cap: usize,
 ) {
     let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
@@ -155,19 +193,48 @@ fn pump<R: BufRead, W: Write>(
             return; // EOF
         }
 
-        // Forward verbatim, first, always.
-        if dst.write_all(&buf).and_then(|()| dst.flush()).is_err() {
-            return; // downstream gone
-        }
-
-        // Then classify + log — best-effort, never touches the stream.
-        if buf.len() > cap {
-            logger.record_note(dir, "oversized", buf.len());
+        // Too big to inspect (a large tool result, or over the hard cap):
+        // forward first, classify after — the policy never sees it.
+        if buf.len() > INSPECT_CAP.min(cap) {
+            if dst.write_all(&buf).and_then(|()| dst.flush()).is_err() {
+                return;
+            }
+            if buf.len() > cap {
+                logger.record_note(dir, "oversized", buf.len());
+            } else {
+                match serde_json::from_slice::<serde_json::Value>(trim_newline(&buf)) {
+                    Ok(v) => logger.record(dir, &Rpc::classify(&v), buf.len()),
+                    Err(_) => logger.record_note(dir, "unparsed", buf.len()),
+                }
+            }
             continue;
         }
-        match serde_json::from_slice::<serde_json::Value>(trim_newline(&buf)) {
-            Ok(v) => logger.record(dir, &Rpc::classify(&v), buf.len()),
-            Err(_) => logger.record_note(dir, "unparsed", buf.len()),
+
+        // Small: parse, let the policy see it, then forward its verdict.
+        let action = match serde_json::from_slice::<serde_json::Value>(trim_newline(&buf)) {
+            Ok(v) => {
+                logger.record(dir, &Rpc::classify(&v), buf.len());
+                match policy {
+                    Some(p) => p.inspect(dir, &v),
+                    None => Action::Forward,
+                }
+            }
+            Err(_) => {
+                logger.record_note(dir, "unparsed", buf.len());
+                Action::Forward
+            }
+        };
+
+        let (out, stop): (&[u8], bool) = match &action {
+            Action::Forward => (&buf, false),
+            Action::Replace(r) => (r, false),
+            Action::ReplaceAndStop(r) => (r, true),
+        };
+        if dst.write_all(out).and_then(|()| dst.flush()).is_err() {
+            return; // downstream gone
+        }
+        if stop {
+            return;
         }
     }
 }
@@ -277,6 +344,7 @@ mod tests {
             &mut dst,
             Direction::ClientToServer,
             &logger,
+            None,
             cap,
         );
         logger.flush();
@@ -356,6 +424,7 @@ mod tests {
             OneShot(false),
             Direction::ServerToClient,
             &logger,
+            None,
             DEFAULT_MAX_MESSAGE_BYTES,
         );
         // reaching here (no hang, no panic) is the assertion

@@ -1,7 +1,7 @@
 //! End-to-end: drive a full MCP session through `run_with` against the
 //! real scripted testserver child process, over in-process pipes.
 
-use agentguard_mcp_proxy::{run_with, ProxyConfig};
+use agentguard_mcp_proxy::{run_with, PolicyLevel, ProxyConfig};
 use std::io::{BufRead, BufReader, Write};
 use std::thread;
 
@@ -92,4 +92,91 @@ fn an_oversized_message_still_round_trips() {
     drop(client_w);
     let status = proxy.join().unwrap().expect("proxy run failed");
     assert!(status.success());
+}
+
+/// Phase B: at `balanced`, a poisoned `tools/list` response is replaced
+/// with a JSON-RPC error — the agent never sees the exfil directive — and
+/// the rest of the session keeps working.
+#[test]
+fn a_poisoned_tools_list_is_blocked_at_balanced() {
+    let (client_to_proxy_r, mut client_w) = std::io::pipe().unwrap();
+    let (proxy_to_client_r, proxy_w) = std::io::pipe().unwrap();
+
+    let mut cfg = ProxyConfig::new("test:poison");
+    cfg.level = Some(PolicyLevel::Balanced);
+    cfg.sessions_dir = Some(std::env::temp_dir().join(format!("ag-e2e-sessions-{}", std::process::id())));
+
+    let proxy = thread::spawn(move || {
+        run_with(
+            SERVER,
+            &["--poison".to_string()],
+            cfg,
+            client_to_proxy_r,
+            proxy_w,
+        )
+    });
+
+    let mut from_proxy = BufReader::new(proxy_to_client_r);
+
+    // initialize passes through
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
+        .unwrap();
+    let mut init = String::new();
+    from_proxy.read_line(&mut init).unwrap();
+    assert!(init.contains("serverInfo"));
+
+    // tools/list gets replaced with an error
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n")
+        .unwrap();
+    let mut list = String::new();
+    from_proxy.read_line(&mut list).unwrap();
+    assert!(list.contains("\"id\":2"), "{list}");
+    assert!(list.contains("\"error\""), "{list}");
+    assert!(list.contains("-32001"), "{list}");
+    assert!(!list.contains("evil.example.com"), "the directive leaked: {list}");
+
+    // the session still works afterwards
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\"}\n")
+        .unwrap();
+    let mut echo = String::new();
+    from_proxy.read_line(&mut echo).unwrap();
+    assert!(echo.contains("\"echo\":\"resources/list\""), "{echo}");
+
+    drop(client_w);
+    let status = proxy.join().unwrap().expect("proxy run failed");
+    assert!(status.success());
+}
+
+/// At `strict`, the same poisoned response ends the session.
+#[test]
+fn a_poisoned_tools_list_tears_down_at_strict() {
+    let (client_to_proxy_r, mut client_w) = std::io::pipe().unwrap();
+    let (proxy_to_client_r, proxy_w) = std::io::pipe().unwrap();
+
+    let mut cfg = ProxyConfig::new("test:poison-strict");
+    cfg.level = Some(PolicyLevel::Strict);
+    cfg.sessions_dir = Some(std::env::temp_dir().join(format!("ag-e2e-sessions-strict-{}", std::process::id())));
+
+    let proxy = thread::spawn(move || {
+        run_with(SERVER, &["--poison".to_string()], cfg, client_to_proxy_r, proxy_w)
+    });
+
+    let mut from_proxy = BufReader::new(proxy_to_client_r);
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n")
+        .unwrap();
+    let mut list = String::new();
+    from_proxy.read_line(&mut list).unwrap();
+    assert!(list.contains("\"error\"") && list.contains("-32001"), "{list}");
+
+    // server->client is closed after the teardown → next read is EOF
+    let mut after = String::new();
+    let n = from_proxy.read_line(&mut after).unwrap();
+    assert_eq!(n, 0, "expected EOF after teardown, got: {after}");
+
+    drop(client_w);
+    let _ = proxy.join().unwrap();
 }
