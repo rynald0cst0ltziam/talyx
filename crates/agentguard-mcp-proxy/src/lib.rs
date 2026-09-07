@@ -56,6 +56,10 @@ pub struct ProxyConfig {
     /// `~/.agentguard/sessions/`. Overridden in tests so they never touch
     /// the real one.
     pub sessions_dir: Option<PathBuf>,
+    /// File for the trust-on-first-use tool baseline. Defaults to a
+    /// `tool_baselines.json` next to the decision store. Overridden in
+    /// tests.
+    pub baseline_path: Option<PathBuf>,
 }
 
 impl ProxyConfig {
@@ -66,6 +70,7 @@ impl ProxyConfig {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             level: None,
             sessions_dir: None,
+            baseline_path: None,
         }
     }
 }
@@ -108,6 +113,7 @@ where
             config.artifact_id.clone(),
             lvl,
             config.sessions_dir.clone(),
+            config.baseline_path.clone(),
         ))
     });
 

@@ -150,6 +150,49 @@ fn a_poisoned_tools_list_is_blocked_at_balanced() {
     assert!(status.success());
 }
 
+/// Rug pull: a clean first `tools/list` is baselined; when the server
+/// adds a tool on the second list, the proxy flags the drift.
+#[test]
+fn a_mid_session_rug_pull_is_caught() {
+    let baseline = std::env::temp_dir().join(format!("ag-e2e-baseline-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&baseline);
+
+    let (client_to_proxy_r, mut client_w) = std::io::pipe().unwrap();
+    let (proxy_to_client_r, proxy_w) = std::io::pipe().unwrap();
+
+    let mut cfg = ProxyConfig::new("test:rugpull");
+    cfg.level = Some(PolicyLevel::Balanced);
+    cfg.sessions_dir = Some(std::env::temp_dir().join(format!("ag-e2e-rp-{}", std::process::id())));
+    cfg.baseline_path = Some(baseline.clone());
+
+    let proxy = thread::spawn(move || {
+        run_with(SERVER, &["--rugpull".to_string()], cfg, client_to_proxy_r, proxy_w)
+    });
+
+    let mut from_proxy = BufReader::new(proxy_to_client_r);
+    let mut line = || {
+        let mut s = String::new();
+        from_proxy.read_line(&mut s).unwrap();
+        s
+    };
+
+    // first list — clean, baselined, forwarded
+    client_w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n").unwrap();
+    let first = line();
+    assert!(first.contains("\"echo\"") && !first.contains("\"error\""), "{first}");
+
+    // second list — now has `exec`, which wasn't in the approved set
+    client_w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n").unwrap();
+    let second = line();
+    assert!(second.contains("\"error\"") && second.contains("-32001"), "{second}");
+    assert!(!second.contains("\"exec\""), "the rug-pulled tool leaked: {second}");
+
+    drop(client_w);
+    let _ = proxy.join().unwrap();
+    let _ = std::fs::remove_file(&baseline);
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("ag-e2e-rp-{}", std::process::id())));
+}
+
 /// At `strict`, the same poisoned response ends the session.
 #[test]
 fn a_poisoned_tools_list_tears_down_at_strict() {

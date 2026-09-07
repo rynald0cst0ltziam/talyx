@@ -20,3 +20,4 @@ serde_json = { workspace = true }
 agentguard-core = { path = "../agentguard-core" }
 agentguard-content = { path = "../agentguard-content" }
 dirs = { workspace = true }
+sha2 = { workspace = true }
