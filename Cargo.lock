@@ -63,7 +63,11 @@ dependencies = [
 name = "agentguard-mcp-proxy"
 version = "0.1.0"
 dependencies = [
+ "agentguard-content",
+ "agentguard-core",
+ "dirs",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
