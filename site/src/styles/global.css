@@ -58,18 +58,29 @@ body {
   overflow-x: hidden;
 }
 
-/* Every heading gets the display face + a tighter, "locked-down" track. */
-h1,
-h2,
-h3,
-h4,
+/* Headings default to the display face + a tighter, "locked-down" track.
+   In @layer base with :where() (zero specificity) so any utility on the
+   element — font-mono, tracking-*, a weight — still wins, e.g. a mono
+   severity label that happens to be an <h3>. Tailwind utilities live in a
+   later layer, so an unlayered rule here would always beat them. */
+@layer base {
+  :where(h1, h2, h3, h4) {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-feature-settings: 'ss01' 1;
+  }
+  :where(h1) {
+    letter-spacing: -0.035em;
+  }
+}
+
+/* Explicit display treatment for non-heading elements (the logo wordmark,
+   the price figure). Unlayered on purpose — it's an opt-in, nothing on the
+   site sets a competing font-family alongside it. */
 .font-display {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
   font-feature-settings: 'ss01' 1;
-}
-h1 {
-  letter-spacing: -0.035em;
 }
 
 ::selection {

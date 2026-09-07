@@ -31,7 +31,7 @@ const grouped = order.map((s) => ({ s, rows: detections.filter((d) => d.severity
           <div data-reveal>
             <div class="mb-4 flex items-center gap-2.5">
               <span class={`h-2 w-2 rounded-full ${sev[s].dot}`} />
-              <h3 class={`font-mono text-xs font-semibold uppercase tracking-wider ${sev[s].text}`}>
+              <h3 class={`font-mono text-xs font-bold uppercase tracking-wider ${sev[s].text}`}>
                 {sev[s].label}
               </h3>
               <span class="h-px flex-1 bg-line" />
