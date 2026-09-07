@@ -14,9 +14,14 @@
 //! Invocation contract (owned entirely by this binary + the config
 //! rewriter in agentguard-cli — not a public API, both sides are this repo):
 //!
-//!   agentguard-shim <artifact-id> -- <real-command> [real-args...]
+//!   agentguard-shim <artifact-id> [--proxy] -- <real-command> [real-args...]
 //!     Argv mode — an MCP server's `command`/`args` are a real argv array,
-//!     exec'd directly (no shell involved).
+//!     exec'd directly (no shell involved). With `--proxy` (written by
+//!     `agentguard init --live`), the real command is run through the
+//!     `agentguard-mcp-proxy` stdio pass-through instead of `exec`'d, so
+//!     the session's JSON-RPC traffic can be inspected — see ADR 0001.
+//!     `AGENTGUARD_NO_PROXY=1` forces the plain `exec` path regardless (a
+//!     hard kill switch).
 //!
 //!   agentguard-shim <artifact-id> --shell
 //!     Shell mode — a Claude Code hook's `command` is a single shell-syntax
@@ -33,9 +38,11 @@
 //!     completely bypassing a BLOCK decision. Instead, this mode looks up
 //!     `DecisionRecord.shell_command` — the real command, which only ever
 //!     travels through the local store, never through a re-parsed string —
-//!     and only after the decision below is confirmed ALLOW.
+//!     and only after the decision below is confirmed ALLOW. Hooks are
+//!     never proxied — they aren't MCP servers.
 
 use agentguard_core::Decision;
+use agentguard_mcp_proxy::ProxyConfig;
 use agentguard_store::DecisionStore;
 use std::env;
 use std::process::{Command, ExitStatus};
@@ -49,7 +56,13 @@ const EXIT_USAGE: i32 = 64; // matches BSD sysexits.h EX_USAGE, a reasonable con
 const EXIT_LAUNCH_FAILED: i32 = 127;
 
 enum LaunchMode {
-    Argv { command: String, args: Vec<String> },
+    Argv {
+        command: String,
+        args: Vec<String>,
+        /// `--proxy` was present — run the real command through the MCP
+        /// stdio proxy rather than a bare exec (unless `AGENTGUARD_NO_PROXY`).
+        proxy: bool,
+    },
     /// The real command isn't known yet at parse time — see this file's
     /// module doc comment. Resolved from the decision record after ALLOW.
     Shell,
@@ -57,7 +70,7 @@ enum LaunchMode {
 
 fn usage_error(msg: &str) -> ! {
     eprintln!("agentguard-shim: {msg}");
-    eprintln!("usage: agentguard-shim <artifact-id> -- <real-command> [real-args...]");
+    eprintln!("usage: agentguard-shim <artifact-id> [--proxy] -- <real-command> [real-args...]");
     eprintln!("       agentguard-shim <artifact-id> --shell");
     std::process::exit(EXIT_USAGE);
 }
@@ -82,6 +95,16 @@ fn parse_args(args: &[String]) -> (&str, LaunchMode) {
     if sep == 0 {
         usage_error("missing artifact id before '--'");
     }
+
+    // Flags between the id and `--`. Only `--proxy` is defined.
+    let mut proxy = false;
+    for flag in &args[1..sep] {
+        match flag.as_str() {
+            "--proxy" => proxy = true,
+            other => usage_error(&format!("unknown flag before '--': {other}")),
+        }
+    }
+
     let real: &[String] = &args[sep + 1..];
     let Some((real_command, real_args)) = real.split_first() else {
         usage_error("no real command given after '--'");
@@ -91,6 +114,7 @@ fn parse_args(args: &[String]) -> (&str, LaunchMode) {
         LaunchMode::Argv {
             command: real_command.clone(),
             args: real_args.to_vec(),
+            proxy,
         },
     )
 }
@@ -101,9 +125,32 @@ fn parse_args(args: &[String]) -> (&str, LaunchMode) {
 /// wrapping to be transparent to the agent. `shell_command` is only
 /// consulted for `LaunchMode::Shell`, resolved by the caller from the
 /// decision record.
-fn launch(mode: &LaunchMode, shell_command: Option<&str>) -> std::io::Result<ExitStatus> {
+///
+/// In `--proxy` argv mode (and without the `AGENTGUARD_NO_PROXY` kill
+/// switch) the real command is run through `agentguard-mcp-proxy` instead:
+/// same transparent stdio, but the JSON-RPC stream passes through the
+/// proxy for inspection (ADR 0001). `AGENTGUARD_PROXY_LOG` optionally
+/// names a JSONL transcript file.
+fn launch(
+    mode: &LaunchMode,
+    artifact_id: &str,
+    shell_command: Option<&str>,
+) -> std::io::Result<ExitStatus> {
     match mode {
-        LaunchMode::Argv { command, args } => Command::new(command).args(args).status(),
+        LaunchMode::Argv {
+            command,
+            args,
+            proxy,
+        } => {
+            let kill_switch = env::var("AGENTGUARD_NO_PROXY").as_deref() == Ok("1");
+            if *proxy && !kill_switch {
+                let mut cfg = ProxyConfig::new(artifact_id);
+                cfg.log_path = env::var_os("AGENTGUARD_PROXY_LOG").map(Into::into);
+                agentguard_mcp_proxy::run(command, args, cfg)
+            } else {
+                Command::new(command).args(args).status()
+            }
+        }
         LaunchMode::Shell => {
             let shell_command = shell_command.expect("caller guarantees Some for LaunchMode::Shell");
             #[cfg(target_os = "windows")]
@@ -167,7 +214,7 @@ fn main() {
         std::process::exit(EXIT_REFUSED);
     }
 
-    match launch(&mode, record.shell_command.as_deref()) {
+    match launch(&mode, artifact_id, record.shell_command.as_deref()) {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(e) => {
             let target = match &mode {
@@ -193,9 +240,36 @@ mod tests {
         let (id, mode) = parse_args(&args);
         assert_eq!(id, "id-1");
         match mode {
-            LaunchMode::Argv { command, args } => {
+            LaunchMode::Argv {
+                command,
+                args,
+                proxy,
+            } => {
                 assert_eq!(command, "node");
                 assert_eq!(args, vec!["server.js", "--port", "3000"]);
+                assert!(!proxy);
+            }
+            LaunchMode::Shell => panic!("expected argv mode"),
+        }
+    }
+
+    #[test]
+    fn parses_proxy_flag_before_the_separator() {
+        let args: Vec<String> = ["id-1", "--proxy", "--", "node", "s.js"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (id, mode) = parse_args(&args);
+        assert_eq!(id, "id-1");
+        match mode {
+            LaunchMode::Argv {
+                command,
+                args,
+                proxy,
+            } => {
+                assert_eq!(command, "node");
+                assert_eq!(args, vec!["s.js"]);
+                assert!(proxy);
             }
             LaunchMode::Shell => panic!("expected argv mode"),
         }

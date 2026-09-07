@@ -50,6 +50,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentguard-mcp-proxy"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "agentguard-registry"
 version = "0.1.0"
 dependencies = [
@@ -99,6 +106,7 @@ name = "agentguard-shim"
 version = "0.1.0"
 dependencies = [
  "agentguard-core",
+ "agentguard-mcp-proxy",
  "agentguard-store",
 ]
 

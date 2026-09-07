@@ -1,0 +1,19 @@
+[package]
+name = "agentguard-mcp-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "agentguard_mcp_proxy"
+path = "src/lib.rs"
+
+# Test-only: a scripted MCP server the integration tests proxy. Not part
+# of the shipped product (the install scripts package agentguard + shim).
+[[bin]]
+name = "agentguard-mcp-testserver"
+path = "src/bin/testserver.rs"
+
+[dependencies]
+serde_json = { workspace = true }

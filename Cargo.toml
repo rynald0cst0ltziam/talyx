@@ -9,6 +9,7 @@ members = [
     "crates/agentguard-shim",
     "crates/agentguard-cli",
     "crates/agentguard-registry",
+    "crates/agentguard-mcp-proxy",
 ]
 
 [workspace.package]

@@ -407,12 +407,19 @@ pub(crate) fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(
     if !looks_like_shim {
         return None;
     }
-    // Shape is [artifact_id, "--", real_command, ...real_args] — need at
-    // least 3 elements to have a real command to unwrap to.
-    if args.len() < 3 || args[1] != "--" {
+    // Shape is [artifact_id, ("--proxy")?, "--", real_command, ...real_args].
+    // Skip an optional `--proxy` flag (written by `agentguard init --live`)
+    // before the `--` separator.
+    let after_id = &args[1..];
+    let rest = match after_id.first().map(String::as_str) {
+        Some("--proxy") => &after_id[1..],
+        _ => after_id,
+    };
+    // need [ "--", real_command, ...] — at least 2 elements after the id/flag
+    if rest.len() < 2 || rest[0] != "--" {
         return None;
     }
-    Some((args[2].clone(), args[3..].to_vec()))
+    Some((rest[1].clone(), rest[2..].to_vec()))
 }
 
 /// For `<runner> <subcommand> [flags] <package>` shapes (`npm exec`,

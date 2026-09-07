@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 agentguard-core = { path = "../agentguard-core" }
 agentguard-store = { path = "../agentguard-store" }
+agentguard-mcp-proxy = { path = "../agentguard-mcp-proxy" }
