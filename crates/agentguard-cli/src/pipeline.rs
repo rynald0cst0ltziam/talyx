@@ -3,9 +3,22 @@
 //! what counts as "found" or how it's scored.
 
 use agentguard_adapters::{all_adapters, ConfigSource, DiscoveredArtifact, LaunchCommand};
-use agentguard_core::{Artifact, ArtifactKind, ArtifactSource, Decision, ProtectionLevel, RiskBand, ScoreBreakdown};
+use agentguard_core::{
+    Artifact, ArtifactKind, ArtifactSource, Capability, CapabilityFinding, Decision,
+    ProtectionLevel, RiskBand, ScoreBreakdown,
+};
 use agentguard_risk::RiskEngine;
 use std::path::{Path, PathBuf};
+
+/// Location of an optional refreshed advisory feed. `AGENTGUARD_ADVISORIES`
+/// overrides, else `~/.agentguard/advisories.json`. `None` (no home dir) or
+/// a missing/invalid file falls back to the feed embedded in the binary —
+/// see `agentguard_advisories::Advisories::load`.
+pub(crate) fn advisories_file() -> Option<PathBuf> {
+    std::env::var_os("AGENTGUARD_ADVISORIES")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".agentguard").join("advisories.json")))
+}
 
 pub struct ScannedArtifact {
     pub agent_name: &'static str,
@@ -58,6 +71,8 @@ pub fn collect(
     fetch_registry: bool,
 ) -> Vec<ScannedArtifact> {
     let mut out = Vec::new();
+    let advisories =
+        agentguard_advisories::Advisories::load(advisories_file().as_deref());
 
     for adapter in all_adapters() {
         if !adapter.detect(project_root) {
@@ -121,9 +136,20 @@ pub fn collect(
                 }
             }
 
+            // Known-bad advisory feed — matched by identity (package
+            // name+version, publisher, remote host, repo owner), before
+            // scoring so the risk engine's KnownMalicious/KnownAdvisory
+            // rules apply.
+            artifact.capabilities.extend(advisories.check(
+                &artifact.source,
+                artifact.publisher.name.as_deref(),
+                artifact.publisher.repo_url.as_deref(),
+                artifact.version.as_deref(),
+            ));
+
             let breakdown = engine.score(&artifact);
             let band = breakdown.band();
-            let decision = level.decision_for(band);
+            let decision = advisory_floor(&artifact.capabilities, level.decision_for(band));
 
             out.push(ScannedArtifact {
                 agent_name: adapter.agent_name(),
@@ -195,7 +221,23 @@ fn apply_tool_shadowing(
         breakdown.static_evidence_reasons.push(evidence);
         s.breakdown = breakdown;
         s.band = s.breakdown.band();
-        s.decision = level.decision_for(s.band);
+        s.decision = advisory_floor(&s.artifact.capabilities, level.decision_for(s.band));
+    }
+}
+
+/// The advisory feed floors a decision by *identity*, not only by score: a
+/// confirmed-malicious match (`KnownMalicious`) always BLOCKs, and a
+/// bounded-advisory match (`KnownAdvisory` — a fixed CVE, a "review before
+/// use") is never softer than ASK, whatever the protection level's band
+/// mapping would otherwise say.
+fn advisory_floor(caps: &[CapabilityFinding], decision: Decision) -> Decision {
+    let has = |c: Capability| caps.iter().any(|f| f.capability == c);
+    if has(Capability::KnownMalicious) {
+        Decision::Block
+    } else if has(Capability::KnownAdvisory) && matches!(decision, Decision::Allow | Decision::AllowLog) {
+        Decision::Ask
+    } else {
+        decision
     }
 }
 
@@ -282,5 +324,44 @@ pub fn print_registry_fetch_summary(scanned: &[ScannedArtifact], fetch_registry:
         for (s, error) in failed {
             println!("  {} — {error}", crate::sanitize_for_display(&s.artifact.name));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentguard_core::EvidenceBasis;
+
+    fn cap(c: Capability) -> CapabilityFinding {
+        CapabilityFinding {
+            capability: c,
+            basis: EvidenceBasis::Declared,
+            evidence: "test".to_string(),
+            location: None,
+        }
+    }
+
+    #[test]
+    fn advisory_floor_forces_block_and_ask_by_identity() {
+        // KnownMalicious -> BLOCK, whatever the band mapping said.
+        assert_eq!(
+            advisory_floor(&[cap(Capability::KnownMalicious)], Decision::Allow),
+            Decision::Block
+        );
+        // KnownAdvisory lifts a soft decision to ASK...
+        assert_eq!(
+            advisory_floor(&[cap(Capability::KnownAdvisory)], Decision::AllowLog),
+            Decision::Ask
+        );
+        // ...but never softens an already-harder one.
+        assert_eq!(
+            advisory_floor(&[cap(Capability::KnownAdvisory)], Decision::Block),
+            Decision::Block
+        );
+        // No advisory capability -> unchanged.
+        assert_eq!(
+            advisory_floor(&[cap(Capability::NetworkExternal)], Decision::AllowLog),
+            Decision::AllowLog
+        );
     }
 }

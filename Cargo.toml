@@ -11,6 +11,7 @@ members = [
     "crates/agentguard-registry",
     "crates/agentguard-mcp-proxy",
     "crates/agentguard-content",
+    "crates/agentguard-advisories",
 ]
 
 [workspace.package]

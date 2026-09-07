@@ -17,6 +17,7 @@ agentguard-risk = { path = "../agentguard-risk" }
 agentguard-store = { path = "../agentguard-store" }
 agentguard-registry = { path = "../agentguard-registry" }
 agentguard-mcp-proxy = { path = "../agentguard-mcp-proxy" }
+agentguard-advisories = { path = "../agentguard-advisories" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -64,6 +64,16 @@ pub enum Capability {
     /// a cross-artifact pass (agentguard-scanner's `shadowing` module),
     /// not per-artifact static analysis.
     ToolShadowing,
+    /// This exact artifact (a package name/version, a publisher, a remote
+    /// host) is named in AgentGuard's known-bad advisory feed — a
+    /// package that shipped a malicious version in the wild, a server
+    /// with a confirmed unpatched RCE, etc. Matched by identity, not
+    /// heuristics (agentguard-cli's `advisories` pass). Forces a BLOCK.
+    KnownMalicious,
+    /// This artifact matches an advisory for a *disclosed but bounded*
+    /// issue — a vulnerability fixed in a later version, a server the
+    /// advisory recommends reviewing before use. Forces at least ASK.
+    KnownAdvisory,
 }
 
 impl Capability {

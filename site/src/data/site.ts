@@ -40,8 +40,8 @@ export const site = {
 
   // ── product facts (keep in sync with repo STATUS.md) ──────
   agentsCovered: 27,
-  attackClasses: 14,
-  testsGreen: 333,
+  attackClasses: 15,
+  testsGreen: 341,
 } as const;
 
 export type Site = typeof site;

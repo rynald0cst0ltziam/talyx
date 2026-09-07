@@ -115,6 +115,14 @@ agentguard license status         # show seats used, renewal date, offline grace
       Validate the live-proxy guardrails file, list the rules it would load, or
       print a commented starter. See <a href="#live-proxy">Guardrails</a>.
     </p>
+    <h3><code>agentguard advisories list|check</code></h3>
+    <p>
+      Inspect the bundled known-bad advisory feed. <code>list</code> prints every
+      advisory (id, severity, detail, references). <code>check &lt;package&gt;
+      [--version &lt;v&gt;] [--registry npm|pypi]</code> tests one package name
+      against the feed and exits non-zero on a match. See
+      <a href="#advisories">The advisory feed</a>.
+    </p>
     <h3><code>agentguard activate &lt;key&gt;</code> · <code>agentguard license status|deactivate</code></h3>
     <p>See <a href="#activate">Activate a license</a>.</p>
 
@@ -126,6 +134,40 @@ agentguard license status         # show seats used, renewal date, offline grace
       <li>Malicious skills are moved into a <code>.agentguard-quarantine/</code> directory next to the agent's skills folder, so the agent stops loading them.</li>
       <li><code>agentguard allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
     </ol>
+
+    <h2 id="advisories">The advisory feed</h2>
+    <p>
+      Most detections score an artifact on its <em>behaviour</em> — what the code
+      does, what the text says. The advisory feed adds the other half: artifacts
+      the security community has already disclosed as malicious or vulnerable,
+      matched by <strong>identity</strong>, not behaviour.
+    </p>
+    <p>It ships as a small, hand-curated file compiled into the binary. Every entry carries at least one public reference URL. Matchers:</p>
+    <ul>
+      <li><strong>npm / PyPI package + version range</strong> — <code>min_affected</code> / <code>max_affected</code> / an explicit <code>affected</code> list / <code>fixed</code>. The version is conservative: an unknown or dist-tag version (<code>foo@latest</code>) still flags unless it is provably at or past the fixed version. A spec like <code>npx -y foo@1.2.3</code> is split so the bare name matches and the pin drives the range check.</li>
+      <li><strong>npm publisher</strong> — every package from a named account.</li>
+      <li><strong>npm name pattern</strong> — a regex, for typosquat shapes.</li>
+      <li><strong>remote host</strong> — a registrable host for a remote MCP server.</li>
+      <li><strong>source-repo owner</strong> (+ optional repo name).</li>
+    </ul>
+    <p>
+      A <code>malicious</code> match adds a decisive penalty, <strong>suppresses any
+      reputation discount</strong> (a trust-seeded publisher in the known-bad list
+      means the account or package is compromised) and forces a <strong>block</strong>.
+      An <code>advisory</code> match — a CVE fixed in a later version, a
+      review-before-use pattern — forces at least a <strong>review (ASK)</strong>,
+      whatever the protection level's band mapping would otherwise say.
+    </p>
+    <p>Inspect and test it:</p>
+    <pre><code>agentguard advisories list
+agentguard advisories check postmark-mcp --version 1.0.17   # exits 1 — match
+agentguard advisories check mcp-remote --version 0.1.20      # exits 0 — clear</code></pre>
+    <p>
+      It works fully offline. To override the bundled feed with a newer copy,
+      drop it at <code>~/.agentguard/advisories.json</code> or point
+      <code>AGENTGUARD_ADVISORIES</code> at a file. The format is versioned and
+      documented in the repo's <code>data/advisories.json</code>.
+    </p>
 
     <h2 id="live-proxy">Live traffic inspection</h2>
     <p>
@@ -294,6 +336,7 @@ agentguard guardrails list       # show what the proxy would load</code></pre>
         <tr><td><code>AGENTGUARD_PROXY_LOG</code></td><td>Path to write a full classified JSON-RPC transcript of a proxied session (debugging).</td></tr>
         <tr><td><code>AGENTGUARD_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.agentguard/sessions/</code>).</td></tr>
         <tr><td><code>AGENTGUARD_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.agentguard/</code> and <code>&lt;project&gt;/.agentguard/</code> defaults.</td></tr>
+        <tr><td><code>AGENTGUARD_ADVISORIES</code></td><td>Path to an advisory feed file, overriding the bundled one and <code>~/.agentguard/advisories.json</code>. See <a href="#advisories">The advisory feed</a>.</td></tr>
         <tr><td><code>AGENTGUARD_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on AgentGuard itself.</td></tr>
       </tbody>
     </table>
@@ -313,6 +356,7 @@ agentguard guardrails list       # show what the proxy would load</code></pre>
     <h3>Unreleased</h3>
     <ul>
       <li><strong>Live traffic inspection (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
+      <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable. Forces a block or a review regardless of behaviour score. <code>agentguard advisories list|check</code>. See <a href="#advisories">The advisory feed</a>.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
       <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
       <li><strong>Warp</strong> added (27 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>

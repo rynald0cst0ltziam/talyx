@@ -91,9 +91,11 @@ crates/
   agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch; with --proxy (init --live) runs the server through agentguard-mcp-proxy
   agentguard-mcp-proxy   the live stdio firewall (ADR 0001): newline-delimited JSON-RPC forwarding between agent and server for the session; inspects the initialize/tools/list/... handshake responses through agentguard-content, blocks a poisoned or rug-pulled response per level (AGENTGUARD_PROXY_LEVEL), trust-on-first-use tool baseline, custom guardrails.yaml rules (block/redact/allow on any message), findings to ~/.agentguard/sessions/
   agentguard-content     instruction-text / prompt-injection / hidden-unicode / encoded-payload / exfil-directive detectors (tree-sitter-free leaf crate, shared by scanner + mcp-proxy)
-  agentguard-cli         `agentguard` binary: scan, status, init, allow, why, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
+  agentguard-advisories  known-bad feed: matches an artifact's identity (npm/PyPI package + version range, publisher, remote host, repo owner, typosquat pattern) against publicly-disclosed malicious/vulnerable MCP artifacts; include_str!-bundled, overridable by ~/.agentguard/advisories.json or $AGENTGUARD_ADVISORIES
+  agentguard-cli         `agentguard` binary: scan, status, init, allow, why, guardrails, advisories, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
 data/
   trust_seed.json        v0 hand-seeded trust graph (stand-in for BUILD_PLAN.md §7's pre-launch scan)
+  advisories.json        BUILD_PLAN.md §7's "known-bad" half — hand-curated, fully-sourced disclosures of malicious/vulnerable MCP artifacts (agentguard-advisories)
 scripts/
   install.sh              curl-pipeable installer (macOS/Linux)
   install.ps1              irm-pipeable installer (Windows)
@@ -145,6 +147,10 @@ cargo run -p agentguard-cli -- init --project . --live
 # a cached decision (ids are printed by `scan`/`init`):
 cargo run -p agentguard-cli -- allow "<artifact-id>"
 cargo run -p agentguard-cli -- why "<artifact-id>"
+
+# Inspect the bundled known-bad advisory feed, or check one package:
+cargo run -p agentguard-cli -- advisories list
+cargo run -p agentguard-cli -- advisories check postmark-mcp --version 1.0.17
 ```
 
 ## CI / pull-request gating (SARIF)

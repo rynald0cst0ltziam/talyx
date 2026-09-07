@@ -41,6 +41,7 @@ export type IconName =
   | 'plug'
   | 'package'
   | 'drift'
+  | 'list'
   | 'terminal'
   | 'bolt';
 
@@ -87,6 +88,12 @@ export const features: Feature[] = [
     tag: 'Registry',
     title: 'Downloads the code behind `npx`',
     body: 'A config that runs `npx some-package` never shows you the code. With one flag, AgentGuard fetches the real package from npm or PyPI, verifies its integrity, and statically scans the actual source — including the declared tool descriptions inside it.',
+  },
+  {
+    icon: 'list',
+    tag: 'Advisory feed',
+    title: 'Knows the packages that are already known bad',
+    body: 'Behaviour analysis catches the unknown. The advisory feed catches the known: a small, hand-curated, fully-sourced list of MCP artifacts confirmed malicious or vulnerable in the wild — `postmark-mcp` and its publisher, `mcp-remote` before the CVE-2025-6514 fix, the public tool-poisoning PoCs, typosquat name patterns. Matched by identity — package + version range, publisher, host, repo owner — not heuristics. Bundled in the binary so it works offline, overridable by a local file. A confirmed-malicious match forces a block and cancels any reputation discount; a bounded advisory forces review.',
   },
   {
     icon: 'shield',
@@ -213,6 +220,12 @@ export const detections: Detection[] = [
     where: 'live MCP session (init --live)',
     blurb: 'A server that served a clean tool list at approval, then swaps or adds a tool definition mid-session — caught by the live proxy against a trust-on-first-use baseline.',
   },
+  {
+    name: 'Known-malicious artifact',
+    severity: 'critical',
+    where: 'any MCP server / package',
+    blurb: 'A package, publisher, host or repo owner named in the bundled advisory feed as confirmed malicious or vulnerable in the wild — matched by identity and version range, forcing a block or a review regardless of behaviour score.',
+  },
 ];
 
 export interface ThreatLine {
@@ -267,6 +280,7 @@ export const comparison: CompareRow[] = [
   { capability: 'Invisible-Unicode & encoded-payload detection', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
   { capability: 'Tool shadowing / typosquat detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
   { capability: 'Poisoned tool-description detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
+  { capability: 'Known-bad identity feed — confirmed-malicious packages / publishers / CVEs', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
   { capability: 'Actually blocks a server from launching', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
   { capability: 'Live JSON-RPC inspection — rug-pull & poisoned-response detection mid-session', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
   { capability: 'Custom local guardrail rules on live traffic (block / redact / allow)', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
@@ -355,6 +369,10 @@ export const faqs: Faq[] = [
   {
     q: 'Can I write my own rules for the proxy?',
     a: 'Yes — guardrails. A local YAML file (~/.agentguard/guardrails.yaml, or per-project, or $AGENTGUARD_GUARDRAILS) whose rules the proxy runs on every JSON-RPC message on top of the built-in detectors. A rule matches by direction, method and path conditions (contains / regex / glob / equals / exists / gt-lt, with wildcards in the JSON path) and does one of: allow (forward, skip the built-in scan), warn (log), redact (strip matched strings), or block (the message never reaches its peer — a blocked tools/call gets a JSON-RPC error back and the server never sees it). Validate with `agentguard guardrails check`; start from `agentguard guardrails example`.',
+  },
+  {
+    q: 'How does the advisory feed differ from the behaviour analysis?',
+    a: 'The AST, taint and content analysis catch code and text you have never seen before, on behaviour alone. The advisory feed catches artifacts the security community has already disclosed — matched by identity, not behaviour: a package name and affected version range, an npm publisher, a remote host, a source-repo owner, or a typosquat name pattern. It ships as a small hand-curated file inside the binary (every entry carries a public reference URL), works fully offline, and can be overridden by ~/.agentguard/advisories.json or $AGENTGUARD_ADVISORIES. A confirmed-malicious match adds a decisive penalty, suppresses any reputation discount (a trusted publisher in the known-bad list means the account is compromised) and forces a block; a bounded advisory — a CVE fixed in a later version, say — forces a review. Inspect it with `agentguard advisories list` or check one package with `agentguard advisories check <name> --version <v>`.',
   },
   {
     q: 'How is enforcement reversible?',

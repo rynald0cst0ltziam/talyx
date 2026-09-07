@@ -137,6 +137,12 @@ enum Command {
         #[command(subcommand)]
         action: GuardrailsAction,
     },
+    /// Inspect AgentGuard's known-bad advisory feed (identity matches for
+    /// publicly-disclosed malicious or vulnerable MCP artifacts).
+    Advisories {
+        #[command(subcommand)]
+        action: AdvisoriesAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -160,6 +166,23 @@ enum GuardrailsAction {
     },
     /// Print a commented starter guardrails file to stdout.
     Example,
+}
+
+#[derive(Subcommand)]
+enum AdvisoriesAction {
+    /// List every advisory in the active feed.
+    List,
+    /// Check a package name (and optional version) against the feed.
+    Check {
+        /// Package name, e.g. `postmark-mcp`.
+        package: String,
+        /// Version to check, e.g. `1.0.17`. Omit to check the whole line.
+        #[arg(long)]
+        version: Option<String>,
+        /// Registry the package lives in: `npm` (default) or `pypi`.
+        #[arg(long, default_value = "npm")]
+        registry: String,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -226,6 +249,53 @@ fn main() {
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
         Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
+        Command::Advisories { action } => std::process::exit(run_advisories(action)),
+    }
+}
+
+fn run_advisories(action: AdvisoriesAction) -> i32 {
+    use agentguard_core::ArtifactSource;
+
+    let feed = agentguard_advisories::Advisories::load(pipeline::advisories_file().as_deref());
+
+    match action {
+        AdvisoriesAction::List => {
+            println!("{} advisory(ies) — source: {}", feed.len(), feed.source);
+            for adv in feed.iter() {
+                println!(
+                    "\n  {}  [{}]  {}\n    {}\n    published {}",
+                    adv.id, adv.severity, adv.title, adv.detail, adv.published
+                );
+                for r in &adv.references {
+                    println!("    {r}");
+                }
+            }
+            0
+        }
+        AdvisoriesAction::Check {
+            package,
+            version,
+            registry,
+        } => {
+            let source = ArtifactSource::Registry {
+                name: package.clone(),
+                registry: registry.clone(),
+            };
+            let spec = match &version {
+                Some(v) => format!("{registry}:{package}@{v}"),
+                None => format!("{registry}:{package}"),
+            };
+            let hits = feed.check(&source, None, None, version.as_deref());
+            if hits.is_empty() {
+                println!("No advisory matches {spec}.");
+                0
+            } else {
+                for f in &hits {
+                    println!("MATCH  [{:?}]  {}", f.capability, f.evidence);
+                }
+                1
+            }
+        }
     }
 }
 

@@ -55,8 +55,22 @@ impl RiskEngine {
         let caps = artifact.capability_set();
 
         let (static_evidence, static_evidence_reasons) = self.static_evidence(&caps);
-        let (reputation_discount, reputation_reasons) = self.reputation_discount(artifact);
+        let (mut reputation_discount, mut reputation_reasons) = self.reputation_discount(artifact);
         let (context_modifier, context_reasons) = self.context_modifier(artifact, &caps);
+
+        // A publisher/package named in the known-bad feed as *confirmed
+        // malicious* gets no reputation discount — a verified identity or a
+        // trust-seeded vendor being in that feed means the account or
+        // package is compromised, which is exactly when past reputation
+        // stops being evidence of safety. Keeps a trusted-but-malicious
+        // match decisively in Critical rather than letting -30 pull it into
+        // High.
+        if caps.contains(&Capability::KnownMalicious) && reputation_discount != 0 {
+            reputation_discount = 0;
+            reputation_reasons = vec![
+                "reputation discount suppressed — this identity is named in the known-bad advisory feed as confirmed malicious (compromised account / package)".to_string(),
+            ];
+        }
 
         ScoreBreakdown {
             static_evidence,
@@ -103,6 +117,24 @@ impl RiskEngine {
         if caps.contains(&Capability::InstallPackage) {
             extra += 20;
             reasons.push("installs/downloads packages at runtime (+20)".to_string());
+        }
+
+        // Named in the known-bad advisory feed — matched by identity, not
+        // heuristics. A confirmed in-the-wild malicious package/publisher
+        // is decisive on its own; a bounded advisory (a fixed CVE, a
+        // "review before use") forces at least ASK.
+        if caps.contains(&Capability::KnownMalicious) {
+            extra += 100;
+            reasons.push(
+                "matches an AgentGuard advisory for a confirmed malicious artifact (package / publisher / host named in the known-bad feed) — +100, forces BLOCK"
+                    .to_string(),
+            );
+        } else if caps.contains(&Capability::KnownAdvisory) {
+            extra += 30;
+            reasons.push(
+                "matches an AgentGuard advisory for a disclosed issue (e.g. a vulnerability fixed in a later version) — +30, forces review"
+                    .to_string(),
+            );
         }
 
         // The canonical exfiltration pattern — reading raw secret material
@@ -558,6 +590,36 @@ mod tests {
         let artifact = artifact_with(ArtifactKind::Skill, None, false, &[]);
         let breakdown = engine.score(&artifact);
         assert_eq!(breakdown.band(), RiskBand::Low);
+    }
+
+    #[test]
+    fn advisory_feed_capabilities_drive_the_score() {
+        let engine = RiskEngine::new();
+
+        // A confirmed-malicious identity match is decisive on its own —
+        // +100 pushes any artifact past the Critical threshold (80).
+        let malicious =
+            artifact_with(ArtifactKind::McpServer, None, false, &[Capability::KnownMalicious]);
+        let b = engine.score(&malicious);
+        assert!(b.total() >= 100);
+        assert_eq!(b.band(), RiskBand::Critical);
+
+        // A bounded advisory adds +30 without being decisive by itself.
+        let advisory =
+            artifact_with(ArtifactKind::McpServer, None, false, &[Capability::KnownAdvisory]);
+        let b = engine.score(&advisory);
+        assert_eq!(b.total(), 30);
+        assert_eq!(b.band(), RiskBand::Medium);
+
+        // Even a trust-seeded publisher can't discount a malicious match
+        // below Critical.
+        let trusted_but_malicious = artifact_with(
+            ArtifactKind::McpServer,
+            Some("modelcontextprotocol"),
+            false,
+            &[Capability::KnownMalicious],
+        );
+        assert_eq!(engine.score(&trusted_but_malicious).band(), RiskBand::Critical);
     }
 
     #[test]

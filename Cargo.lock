@@ -24,10 +24,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentguard-advisories"
+version = "0.1.0"
+dependencies = [
+ "agentguard-core",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "agentguard-cli"
 version = "0.1.0"
 dependencies = [
  "agentguard-adapters",
+ "agentguard-advisories",
  "agentguard-core",
  "agentguard-mcp-proxy",
  "agentguard-registry",
