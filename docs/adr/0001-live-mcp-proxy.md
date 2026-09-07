@@ -137,7 +137,13 @@ proxy has real multi-hour session mileage.
     store) + mid-session drift / rug-pull detection.
   Only messages ≤ 256 KiB are inspect-before-forward; larger ones (big tool
   results) are forward-first so the policy adds no latency to bulk traffic.
-- **Phase C — response-content policy.** Optional `tools/call` result scanning
-  (report-only at `balanced`, inspect-then-forward at `strict`); `agentguard
-  status` / `why` surface the session findings; flip the `init` default to on
-  once real multi-hour session mileage exists.
+- **Phase C — response-content policy. Mostly DONE (STATUS #58).**
+  - C1: `tools/call` / `resources/read` results scanned too (≤ 64 KiB, so
+    per-call latency stays negligible). These are *data*, so `quiet`/`balanced`
+    flag + log + forward unchanged; `strict` redacts each flagged text block
+    in place (clean blocks + non-text content pass through).
+  - C2: `agentguard status` prints a "Live proxy" summary of recent
+    `~/.agentguard/sessions/*.jsonl` findings.
+  - **Not done, on purpose:** flipping the `init` default from opt-in to
+    on. Gated on real multi-hour session mileage (dogfooding), per the ADR
+    ceiling — not a code task.
