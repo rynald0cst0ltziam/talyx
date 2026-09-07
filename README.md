@@ -133,6 +133,14 @@ cargo run -p agentguard-cli -- status --project .
 # --include-user-config — see agentguard-cli/src/init.rs):
 cargo run -p agentguard-cli -- init --project .
 
+# Add --live to ALSO keep the shim between the agent and each approved
+# server for the session and inspect its JSON-RPC traffic (ADR 0001):
+# handshake-response scanning, trust-on-first-use tool baseline / rug-pull
+# detection, tool-result scanning. Opt-in; fails open to the static gate.
+# AGENTGUARD_PROXY_LEVEL=quiet|balanced|strict, AGENTGUARD_NO_PROXY=1 to
+# disable per launch. Findings -> ~/.agentguard/sessions/*.jsonl.
+cargo run -p agentguard-cli -- init --project . --live
+
 # Approve something flagged ASK/BLOCK, or see the full reasoning behind
 # a cached decision (ids are printed by `scan`/`init`):
 cargo run -p agentguard-cli -- allow "<artifact-id>"

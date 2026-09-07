@@ -10,8 +10,11 @@ const sections = [
   { id: 'activate', label: 'Activate a license' },
   { id: 'commands', label: 'Commands' },
   { id: 'enforcement', label: 'How enforcement works' },
+  { id: 'live-proxy', label: 'Live traffic inspection' },
   { id: 'ci', label: 'Use in CI' },
   { id: 'offline', label: 'Offline & air-gapped' },
+  { id: 'env', label: 'Environment variables' },
+  { id: 'files', label: 'Files AgentGuard writes' },
   { id: 'changelog', label: 'Changelog' },
 ];
 ---
@@ -89,25 +92,116 @@ agentguard license status         # show seats used, renewal date, offline grace
     <p>
       Scans, caches your decisions, and rewrites configs so approved MCP servers
       launch through the shim and blocked ones are removed. The only mutating
-      command.
+      command. Requires a license.
     </p>
     <ul>
-      <li><code>--include-user-config</code> — also rewrite configs outside the project (e.g. <code>~/.claude.json</code>).</li>
+      <li><code>--project &lt;path&gt;</code> — project root (default <code>.</code>). Only configs inside it are rewritten unless you add <code>--include-user-config</code>.</li>
+      <li><code>--level quiet|balanced|strict</code> — decision preset (default <code>balanced</code>): which risk bands become Block / Ask / Allow, and the proxy's inspection level when <code>--live</code> is set.</li>
+      <li><code>--include-user-config</code> — also rewrite configs outside the project (e.g. <code>~/.claude.json</code>, <code>~/.cursor/mcp.json</code>). A user-level config affects every project, so this is opt-in.</li>
+      <li><code>--fetch-registry</code> — download &amp; statically scan the real code behind <code>npx</code>/<code>uvx</code> servers before enforcing (outbound registry calls).</li>
+      <li><code>--live</code> — also keep the shim between the agent and each approved MCP server for the session and inspect its JSON-RPC traffic. See <a href="#live-proxy">Live traffic inspection</a>.</li>
       <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
     </ul>
     <h3><code>agentguard allow &lt;id&gt;</code></h3>
-    <p>Approve an artifact flagged ASK/BLOCK. Restores a removed remote entry exactly as it was.</p>
+    <p>
+      Approve an artifact flagged ASK/BLOCK — from now on the shim lets it run and
+      a removed remote entry is restored to the config exactly as it was.
+      <code>--store &lt;path&gt;</code> to point at a non-default store.
+    </p>
     <h3><code>agentguard why &lt;id&gt;</code></h3>
-    <p>Full reasoning behind a decision — every capability, every score contribution.</p>
+    <p>Full reasoning behind a cached decision — every capability, every score contribution, the band and the final decision.</p>
+    <h3><code>agentguard activate &lt;key&gt;</code> · <code>agentguard license status|deactivate</code></h3>
+    <p>See <a href="#activate">Activate a license</a>.</p>
 
     <h2 id="enforcement">How enforcement works</h2>
     <ol>
       <li>Every config file is checksummed and backed up before the first rewrite.</li>
       <li>Approved servers get their launch command rewritten to call <code>agentguard-shim &lt;id&gt; -- &lt;original command&gt;</code>. The shim re-checks the cached decision, then execs the real server.</li>
       <li>Blocked local servers get the same treatment but the shim refuses to exec. Blocked remote servers are removed from the config entirely and their original entry is stored.</li>
-      <li>Malicious skills are moved to <code>~/.agentguard/quarantine</code>.</li>
+      <li>Malicious skills are moved into a <code>.agentguard-quarantine/</code> directory next to the agent's skills folder, so the agent stops loading them.</li>
       <li><code>agentguard allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
     </ol>
+
+    <h2 id="live-proxy">Live traffic inspection</h2>
+    <p>
+      The launch-time scan checks an MCP server before it starts. It can't see a
+      server that behaves at launch and turns malicious mid-session, a tool
+      definition that's swapped after you approved it, or a tool <em>result</em>
+      crafted to steer the model. <strong><code>agentguard init --live</code></strong>
+      closes that gap: the shim stays between the agent and each approved server
+      for the whole session and inspects every JSON-RPC message.
+    </p>
+    <p>It is <strong>opt-in</strong> while it builds real-session mileage, and it
+      <strong>fails open</strong> — if the proxy ever hits an internal error it
+      falls back to exactly the launch-time protection you'd have without
+      <code>--live</code> (the blocked-server config removal still stands). It
+      never leaves you worse off than the gate alone.</p>
+
+    <h3>Turn it on</h3>
+    <pre><code>agentguard init --project ~ --live
+# or at a specific level:
+agentguard init --project ~ --live --level strict</code></pre>
+    <p>
+      This writes <code>agentguard-shim &lt;id&gt; --proxy -- &lt;command&gt;</code>
+      into the config instead of the plain shim form. Running plain
+      <code>agentguard init</code> again downgrades those entries back in place;
+      both directions are idempotent. Restart your agent after either.
+    </p>
+
+    <h3>What it inspects</h3>
+    <ul>
+      <li><strong>The handshake</strong> — <code>initialize</code>,
+        <code>tools/list</code>, <code>resources/list</code>,
+        <code>prompts/list</code> responses are run through the same
+        prompt-injection / hidden-Unicode / encoded-payload / exfil-directive
+        detectors as a skill file, <em>before</em> the agent sees them.</li>
+      <li><strong>Tool drift (trust-on-first-use)</strong> — the first clean
+        <code>tools/list</code> a server serves becomes its baseline
+        (<code>~/.agentguard/tool_baselines.json</code>). A tool that appears, or
+        whose description or input schema changes, mid-session is a rug pull and
+        is flagged.</li>
+      <li><strong>Tool results</strong> — <code>tools/call</code> and
+        <code>resources/read</code> results (up to 64&nbsp;KiB) are scanned for
+        an injection payload smuggled back as "file contents".</li>
+    </ul>
+
+    <h3>Levels</h3>
+    <p>Set with <code>AGENTGUARD_PROXY_LEVEL</code> (or inherited from
+      <code>init --live --level …</code>). Default <code>balanced</code>.</p>
+    <table>
+      <thead><tr><th>Level</th><th>Poisoned handshake / rug pull</th><th>Poisoned tool result</th></tr></thead>
+      <tbody>
+        <tr><td><code>quiet</code></td><td>log the finding, forward unchanged</td><td>log, forward unchanged</td></tr>
+        <tr><td><code>balanced</code></td><td>replace the response with a JSON-RPC error (<code>-32001</code>) — the agent never sees the poisoned content; session continues</td><td>log the finding, forward unchanged (a real result often contains phrases that trip a detector)</td></tr>
+        <tr><td><code>strict</code></td><td>replace the response, then end the session</td><td>redact — each flagged text block becomes a marker; clean blocks and non-text content pass through</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Turn it off</h3>
+    <ul>
+      <li><code>AGENTGUARD_NO_PROXY=1</code> in the agent's environment — a hard
+        per-launch kill switch; the shim does a plain <code>exec</code> and the
+        proxy code never runs.</li>
+      <li><code>agentguard init --project ~</code> (no <code>--live</code>) —
+        permanently downgrades the config entries.</li>
+    </ul>
+
+    <h3>What's recorded, and what leaves your machine</h3>
+    <p>
+      Nothing leaves your machine. Findings are appended to
+      <code>~/.agentguard/sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> (one JSON
+      object per finding) and echoed to the server's stderr.
+      <code>agentguard status</code> prints a summary of recent ones. For
+      debugging, <code>AGENTGUARD_PROXY_LOG=/path/to/log.jsonl</code> captures a
+      full classified transcript of every message both directions.
+    </p>
+    <p>
+      Only messages up to 256&nbsp;KiB are inspected before being forwarded; a
+      larger message (a big tool result — file contents, command output) is
+      forwarded first and only classified for the transcript afterwards, so the
+      proxy adds no latency to bulk traffic. The proxy is the same process your
+      agent already spawns for the server — there is no daemon.
+    </p>
 
     <h2 id="ci">Use in CI</h2>
     <p>Fail a build when a poisoned artifact lands in a PR:</p>
@@ -131,10 +225,37 @@ agentguard license status         # show seats used, renewal date, offline grace
       offline activation file — email <a href={`mailto:${site.email}`}>{site.email}</a>.
     </p>
 
+    <h2 id="env">Environment variables</h2>
+    <table>
+      <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>AGENTGUARD_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI. Set it in the job environment.</td></tr>
+        <tr><td><code>AGENTGUARD_STORE</code></td><td>Path to the decision store (default <code>~/.agentguard/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
+        <tr><td><code>AGENTGUARD_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.agentguard/license.json</code>).</td></tr>
+        <tr><td><code>AGENTGUARD_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.agentguard/</code>).</td></tr>
+        <tr><td><code>AGENTGUARD_NO_PROXY</code></td><td><code>=1</code> forces the shim to <code>exec</code> the real server directly even for a <code>--live</code> entry — a per-launch kill switch for the proxy.</td></tr>
+        <tr><td><code>AGENTGUARD_PROXY_LEVEL</code></td><td><code>quiet</code> | <code>balanced</code> | <code>strict</code> — the live proxy's inspection level (default <code>balanced</code>).</td></tr>
+        <tr><td><code>AGENTGUARD_PROXY_LOG</code></td><td>Path to write a full classified JSON-RPC transcript of a proxied session (debugging).</td></tr>
+        <tr><td><code>AGENTGUARD_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.agentguard/sessions/</code>).</td></tr>
+        <tr><td><code>AGENTGUARD_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on AgentGuard itself.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="files">Files AgentGuard writes</h2>
+    <p>Everything lives under <code>~/.agentguard/</code>. Nothing is sent anywhere.</p>
+    <ul>
+      <li><code>decisions.json</code> — the decision cache: every scanned artifact's id, capabilities, score, band and decision. Written by <code>scan</code>/<code>init</code>, read by the shim.</li>
+      <li><code>tool_baselines.json</code> — trust-on-first-use snapshot of each server's approved tool list (live proxy).</li>
+      <li><code>license.json</code> — cached license status and the 7-day / 30-day trust timers.</li>
+      <li><code>sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> — live-proxy findings, one JSON object per line.</li>
+      <li>A <code>.agentguard-quarantine/</code> directory next to an agent's skills folder — blocked skills are moved here (not under <code>~/.agentguard/</code>, so the move stays within the same repo).</li>
+      <li>A <code>&lt;file&gt;.agentguard-backup</code> next to each agent config the first time <code>init</code> rewrites it.</li>
+    </ul>
+
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
-      <li><strong>Live MCP proxy (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and an approved MCP server for the session. It inspects the <code>initialize</code> / <code>tools/list</code> / <code>resources/list</code> / <code>prompts/list</code> handshake responses for injection, hidden unicode and exfil directives, records a trust-on-first-use tool baseline and flags a mid-session rug-pull, and — per level (<code>AGENTGUARD_PROXY_LEVEL</code>) — logs, replaces a poisoned response with a JSON-RPC error, or ends the session. Fails open to the launch-time protection; <code>AGENTGUARD_NO_PROXY=1</code> disables it. It also scans <code>tools/call</code> / <code>resources/read</code> results — flagged at <code>balanced</code>, the offending block redacted at <code>strict</code>. Findings land in <code>~/.agentguard/sessions/</code> and show up in <code>agentguard status</code>.</li>
+      <li><strong>Live traffic inspection (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, and tool-result scanning. See <a href="#live-proxy">Live traffic inspection</a> for the full contract.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
       <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
       <li><strong>Warp</strong> added (27 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>

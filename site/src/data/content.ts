@@ -201,6 +201,12 @@ export const detections: Detection[] = [
     where: 'plugin & extension ecosystems',
     blurb: 'MCP servers, hooks and skills a plugin or extension contributes that never appear in the agent\'s own config.',
   },
+  {
+    name: 'Mid-session rug pull',
+    severity: 'high',
+    where: 'live MCP session (init --live)',
+    blurb: 'A server that served a clean tool list at approval, then swaps or adds a tool definition mid-session — caught by the live proxy against a trust-on-first-use baseline.',
+  },
 ];
 
 export interface ThreatLine {
@@ -256,7 +262,8 @@ export const comparison: CompareRow[] = [
   { capability: 'Tool shadowing / typosquat detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
   { capability: 'Poisoned tool-description detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
   { capability: 'Actually blocks a server from launching', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
-  { capability: 'Protection survives if a proxy is not running', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
+  { capability: 'Live JSON-RPC inspection — rug-pull & poisoned-response detection mid-session', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
+  { capability: 'Protection survives if the live proxy is not running', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
   { capability: 'Registry (npm / PyPI) pre-resolution', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
   { capability: 'Capability-drift re-review', agentguard: 'full', snyk: 'none', mcpscan: 'none' },
   { capability: 'SARIF + CI action', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
@@ -324,7 +331,19 @@ export const faqs: Faq[] = [
   },
   {
     q: 'How is this different from mcp-scan or Snyk agent-scan?',
-    a: 'Three things. Scope: they centre on the MCP server config; AgentGuard also covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, so protection does not depend on a proxy process staying up. There is a dated, point-in-time comparison table on this page and we keep it honest — corrections welcome.',
+    a: 'Three things. Scope: they centre on the MCP server config; AgentGuard also covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, and the optional live proxy (init --live) fails open to that static gate — so unlike an always-on external proxy, your protection never silently vanishes when a process isn\'t running. There is a dated, point-in-time comparison table on this page and we keep it honest — corrections welcome.',
+  },
+  {
+    q: 'What does `agentguard init --live` do?',
+    a: 'It keeps the AgentGuard shim between your agent and each approved MCP server for the whole session, inspecting the JSON-RPC traffic on top of the launch-time scan. It scans the initialize / tools/list / resources/list / prompts/list handshake responses for injection and exfil directives, records a trust-on-first-use snapshot of each server\'s tool list and flags a mid-session rug pull (a tool swapped or added after you approved it), and scans tool-call results for a payload smuggled back as "file contents". Per level (AGENTGUARD_PROXY_LEVEL: quiet / balanced / strict) it logs, replaces a poisoned response with a JSON-RPC error, or ends the session. It is opt-in while it builds real-session mileage.',
+  },
+  {
+    q: 'Won\'t the live proxy break my agent session?',
+    a: 'It is designed not to. It is opt-in (plain init never enables it), it is the same process your agent already spawns for the server (no daemon), and it fails open: if the proxy ever hits an internal error it falls back to exactly the launch-time protection you would have without --live. AGENTGUARD_NO_PROXY=1 is a hard per-launch kill switch, and running plain agentguard init again downgrades the config. Large tool results are forwarded before inspection, so bulk traffic gets no added latency. We will not flip it on by default until it has real multi-hour session mileage.',
+  },
+  {
+    q: 'Does the live proxy send my traffic anywhere?',
+    a: 'No. Every message is inspected locally by the shim. Findings are appended to ~/.agentguard/sessions/<date>-<pid>.jsonl and summarised by `agentguard status`; nothing about your traffic, your code or what was found leaves the machine. AGENTGUARD_PROXY_LOG can capture a full local transcript for debugging.',
   },
   {
     q: 'How is enforcement reversible?',
