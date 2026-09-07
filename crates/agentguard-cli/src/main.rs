@@ -101,6 +101,13 @@ enum Command {
         /// `scan --fetch-registry`'s help for why this is opt-in.
         #[arg(long)]
         fetch_registry: bool,
+        /// Route each approved MCP server through the AgentGuard stdio
+        /// proxy (ADR 0001): the shim stays between the agent and the
+        /// server for the session and inspects the JSON-RPC traffic, on
+        /// top of the launch-time scan. `AGENTGUARD_NO_PROXY=1` disables
+        /// it for a single launch without re-running init.
+        #[arg(long)]
+        live: bool,
     },
     /// Manually approve an artifact flagged ASK/BLOCK (by id, from `scan`/`why`).
     Allow {
@@ -175,12 +182,20 @@ fn main() {
             store,
             include_user_config,
             fetch_registry,
+            live,
         } => {
             let code = license::gate("init");
             if code != 0 {
                 std::process::exit(code);
             }
-            init::run_init(&project, level.into(), store, include_user_config, fetch_registry)
+            init::run_init(
+                &project,
+                level.into(),
+                store,
+                include_user_config,
+                fetch_registry,
+                live,
+            )
         }
         Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),

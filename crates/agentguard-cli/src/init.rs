@@ -354,10 +354,27 @@ struct RewriteOutcome {
 /// `by_config` group is always homogeneous (one physical file only ever
 /// holds one agent's config in one format), so checking the first
 /// artifact's kind is sufficient.
+/// The argv that precedes the real command in a shim-wrapped config
+/// entry: `[<artifact-id>, "--proxy"?, "--"]`. `--proxy` (from
+/// `agentguard init --live`, ADR 0001) tells the shim to run the real
+/// server through the MCP stdio proxy rather than a bare exec.
+fn shim_lead(artifact_id: &str, proxy: bool) -> Vec<String> {
+    if proxy {
+        vec![
+            artifact_id.to_string(),
+            "--proxy".to_string(),
+            "--".to_string(),
+        ]
+    } else {
+        vec![artifact_id.to_string(), "--".to_string()]
+    }
+}
+
 fn rewrite_config(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: Option<&Path>,
+    proxy: bool,
     store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let is_toml = artifacts.iter().any(|s| {
@@ -377,11 +394,11 @@ fn rewrite_config(
         .filter_map(|s| s.config_source.as_ref())
         .find_map(|cs| value_config_format(cs.kind));
     if is_toml {
-        rewrite_config_toml(config_path, artifacts, shim_path, store)
+        rewrite_config_toml(config_path, artifacts, shim_path, proxy, store)
     } else if let Some(format) = value_format {
-        rewrite_config_value(config_path, artifacts, shim_path, store, format)
+        rewrite_config_value(config_path, artifacts, shim_path, proxy, store, format)
     } else {
-        rewrite_config_json(config_path, artifacts, shim_path, store)
+        rewrite_config_json(config_path, artifacts, shim_path, proxy, store)
     }
 }
 
@@ -436,6 +453,7 @@ fn rewrite_config_value(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: Option<&Path>,
+    proxy: bool,
     store: &DecisionStore,
     format: ValueConfigFormat,
 ) -> io::Result<RewriteOutcome> {
@@ -457,9 +475,14 @@ fn rewrite_config_value(
     // entry doesn't need it (there's no process to launch), same as the
     // JSON path.
     let (newly_protected, already_protected) = match shim_path.map(|p| p.display().to_string()) {
-        Some(shim_str) => {
-            rewrite_servers_in_value(&mut root, &local, &shim_str, format.path, format.shape)
-        }
+        Some(shim_str) => rewrite_servers_in_value(
+            &mut root,
+            &local,
+            &shim_str,
+            proxy,
+            format.path,
+            format.shape,
+        ),
         None => (0, 0),
     };
 
@@ -565,6 +588,7 @@ fn rewrite_servers_in_value(
     root: &mut serde_json::Value,
     artifacts: &[&ScannedArtifact],
     shim_str: &str,
+    proxy: bool,
     path: &[&str],
     shape: ServerContainer,
 ) -> (usize, usize) {
@@ -585,7 +609,7 @@ fn rewrite_servers_in_value(
             for s in artifacts {
                 let key = &s.config_source.as_ref().unwrap().entry_key;
                 if let Some(entry) = servers.get_mut(key).and_then(|v| v.as_object_mut()) {
-                    match wrap_string_command_entry(entry, s, shim_str) {
+                    match wrap_string_command_entry(entry, s, shim_str, proxy) {
                         Some(true) => newly += 1,
                         Some(false) => already += 1,
                         None => {}
@@ -602,7 +626,7 @@ fn rewrite_servers_in_value(
                     if obj.get("name").and_then(|n| n.as_str()) != Some(key.as_str()) {
                         continue;
                     }
-                    match wrap_string_command_entry(obj, s, shim_str) {
+                    match wrap_string_command_entry(obj, s, shim_str, proxy) {
                         Some(true) => newly += 1,
                         Some(false) => already += 1,
                         None => {}
@@ -624,16 +648,29 @@ fn wrap_string_command_entry(
     entry: &mut serde_json::Map<String, serde_json::Value>,
     s: &ScannedArtifact,
     shim_str: &str,
+    proxy: bool,
 ) -> Option<bool> {
     let launch = s.launch.as_ref()?;
     if entry.get("command").and_then(|c| c.as_str()) == Some(shim_str) {
-        return Some(false);
+        // Already shim-wrapped. If the `--proxy` token already matches the
+        // requested mode, nothing to do. Otherwise fall through and
+        // re-wrap — the real command comes from `s.launch` (mcp_config
+        // already unwrapped it during discovery), not the stale args.
+        let has_proxy_token = entry
+            .get("args")
+            .and_then(|a| a.as_array())
+            .and_then(|a| a.get(1))
+            .and_then(|v| v.as_str())
+            == Some("--proxy");
+        if has_proxy_token == proxy {
+            return Some(false);
+        }
     }
-    let mut args = vec![
-        serde_json::Value::String(s.artifact.id.clone()),
-        serde_json::Value::String("--".to_string()),
-        serde_json::Value::String(launch.command.clone()),
-    ];
+    let mut args: Vec<serde_json::Value> = shim_lead(&s.artifact.id, proxy)
+        .into_iter()
+        .map(serde_json::Value::String)
+        .collect();
+    args.push(serde_json::Value::String(launch.command.clone()));
     args.extend(launch.args.iter().cloned().map(serde_json::Value::String));
     entry.insert(
         "command".to_string(),
@@ -778,6 +815,7 @@ fn rewrite_config_json(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: Option<&Path>,
+    proxy: bool,
     store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
@@ -902,7 +940,7 @@ fn rewrite_config_json(
     }
 
     let (mcp_new, mcp_already) = match &shim_str {
-        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s, key_path),
+        Some(s) => rewrite_mcp_servers(&mut json, &mcp_artifacts, s, proxy, key_path),
         None => (0, 0),
     };
     let (hook_new, hook_already) = match &shim_str {
@@ -986,6 +1024,7 @@ fn rewrite_config_toml(
     config_path: &Path,
     artifacts: &[&ScannedArtifact],
     shim_path: Option<&Path>,
+    proxy: bool,
     store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
@@ -1022,15 +1061,23 @@ fn rewrite_config_toml(
 
             let current_command = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
             if current_command == shim_str.as_str() {
-                already_protected += 1;
-                continue;
+                let has_proxy = entry
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.get(1))
+                    .and_then(|v| v.as_str())
+                    == Some("--proxy");
+                if has_proxy == proxy {
+                    already_protected += 1;
+                    continue;
+                }
             }
 
-            let mut new_args = vec![
-                toml::Value::String(s.artifact.id.clone()),
-                toml::Value::String("--".to_string()),
-                toml::Value::String(launch.command.clone()),
-            ];
+            let mut new_args: Vec<toml::Value> = shim_lead(&s.artifact.id, proxy)
+                .into_iter()
+                .map(toml::Value::String)
+                .collect();
+            new_args.push(toml::Value::String(launch.command.clone()));
             new_args.extend(launch.args.iter().cloned().map(toml::Value::String));
 
             entry.insert("command".to_string(), toml::Value::String(shim_str.clone()));
@@ -1125,6 +1172,7 @@ fn rewrite_mcp_servers(
     json: &mut serde_json::Value,
     artifacts: &[&ScannedArtifact],
     shim_str: &str,
+    proxy: bool,
     key_path: &[&str],
 ) -> (usize, usize) {
     let mut newly_protected = 0;
@@ -1145,16 +1193,24 @@ fn rewrite_mcp_servers(
         };
 
         let uses_array_command = entry.get("command").map(|c| c.is_array()).unwrap_or(false);
-        let already_wrapped = match entry.get("command") {
-            Some(serde_json::Value::String(c)) => c == shim_str,
-            Some(serde_json::Value::Array(a)) => {
-                a.first().and_then(|v| v.as_str()) == Some(shim_str)
+        // Wrapped, and the `--proxy` token already matches the requested
+        // mode? Leave it. Wrapped in the *other* mode → re-wrap below
+        // (the real command comes from `launch`, not the stale args).
+        let wrap_state = match entry.get("command") {
+            Some(serde_json::Value::String(c)) if c == shim_str => Some(
+                entry.get("args").and_then(|a| a.as_array()).and_then(|a| a.get(1)),
+            ),
+            Some(serde_json::Value::Array(a)) if a.first().and_then(|v| v.as_str()) == Some(shim_str) => {
+                Some(a.get(2))
             }
-            _ => false,
+            _ => None,
         };
-        if already_wrapped {
-            already_protected += 1;
-            continue;
+        if let Some(second_token) = wrap_state {
+            let has_proxy = second_token.and_then(|v| v.as_str()) == Some("--proxy");
+            if has_proxy == proxy {
+                already_protected += 1;
+                continue;
+            }
         }
 
         let real: Vec<serde_json::Value> = std::iter::once(launch.command.clone())
@@ -1163,18 +1219,15 @@ fn rewrite_mcp_servers(
             .collect();
 
         if uses_array_command {
-            let mut cmd = vec![
-                serde_json::Value::String(shim_str.to_string()),
-                serde_json::Value::String(s.artifact.id.clone()),
-                serde_json::Value::String("--".to_string()),
-            ];
+            let mut cmd = vec![serde_json::Value::String(shim_str.to_string())];
+            cmd.extend(shim_lead(&s.artifact.id, proxy).into_iter().map(serde_json::Value::String));
             cmd.extend(real);
             entry.insert("command".to_string(), serde_json::Value::Array(cmd));
         } else {
-            let mut new_args = vec![
-                serde_json::Value::String(s.artifact.id.clone()),
-                serde_json::Value::String("--".to_string()),
-            ];
+            let mut new_args: Vec<serde_json::Value> = shim_lead(&s.artifact.id, proxy)
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect();
             new_args.extend(real);
             entry.insert(
                 "command".to_string(),
@@ -1325,6 +1378,7 @@ pub fn run_init(
     store_override: Option<PathBuf>,
     include_user_config: bool,
     fetch_registry: bool,
+    live: bool,
 ) {
     let project_root = project
         .canonicalize()
@@ -1439,7 +1493,7 @@ pub fn run_init(
     let mut backups = Vec::new();
 
     for (config_path, artifacts) in &by_config {
-        match rewrite_config(config_path, artifacts, shim_path.as_deref(), &store) {
+        match rewrite_config(config_path, artifacts, shim_path.as_deref(), live, &store) {
             Ok(outcome) => {
                 newly_protected_total += outcome.newly_protected;
                 already_protected_total += outcome.already_protected;
@@ -1457,6 +1511,11 @@ pub fn run_init(
     println!(
         "{newly_protected_total} artifact(s) (MCP servers / hooks) newly routed through the enforcement shim."
     );
+    if live {
+        println!(
+            "  --live: MCP servers run through the stdio proxy — the session's JSON-RPC traffic is inspected (ADR 0001). AGENTGUARD_NO_PROXY=1 disables it per-launch."
+        );
+    }
     if already_protected_total > 0 {
         println!("{already_protected_total} artifact(s) already protected (unchanged).");
     }
@@ -1912,7 +1971,7 @@ mod tests {
             "npx",
             &["-y", "@mcp/fs"],
         );
-        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -1924,7 +1983,7 @@ mod tests {
         );
 
         // idempotent
-        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
 
@@ -1959,7 +2018,7 @@ mod tests {
             "node",
             &["h.js"],
         );
-        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -1972,7 +2031,7 @@ mod tests {
         // the unrelated remote entry at the root is untouched
         assert_eq!(j["github"]["url"], "https://api.githubcopilot.com/mcp/");
 
-        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.already_protected, 1);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -2002,7 +2061,7 @@ mod tests {
             "gh-mcp",
             &[],
         );
-        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -2048,7 +2107,7 @@ mod tests {
             "npx",
             &["-y", "@mcp/everything"],
         );
-        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -2071,9 +2130,59 @@ mod tests {
         assert_eq!(j["mcp"]["everything"]["env"]["TOKEN"], "x");
 
         // idempotent (already_wrapped detects the shim at array[0])
-        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn live_writes_the_proxy_flag_and_can_upgrade_downgrade_in_place() {
+        let dir = unique_temp_dir("live-rewrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join(".mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": { "fs": { "command": "node", "args": ["s.js"] } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+        let shim = dir.join("agentguard-shim");
+        std::fs::write(&shim, b"stub").unwrap();
+        let art = local_json_artifact(
+            "fs",
+            config_path.clone(),
+            ConfigSourceKind::ClaudeCodeMcpServersJson,
+            "node",
+            &["s.js"],
+        );
+        let read = || -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap()
+        };
+
+        // init --live → the lead carries --proxy
+        let out = rewrite_config_json(&config_path, &[&art], Some(&shim), true, &store).unwrap();
+        assert_eq!(out.newly_protected, 1);
+        assert_eq!(
+            read()["mcpServers"]["fs"]["args"],
+            serde_json::json!([art.artifact.id, "--proxy", "--", "node", "s.js"])
+        );
+
+        // re-run --live → idempotent
+        let again = rewrite_config_json(&config_path, &[&art], Some(&shim), true, &store).unwrap();
+        assert_eq!(again.already_protected, 1);
+
+        // plain init over a --live entry → downgrades it in place
+        let down = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
+        assert_eq!(down.newly_protected, 1);
+        assert_eq!(
+            read()["mcpServers"]["fs"]["args"],
+            serde_json::json!([art.artifact.id, "--", "node", "s.js"])
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2108,7 +2217,7 @@ mod tests {
             "node",
             &["server.js"],
         );
-        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -2160,7 +2269,7 @@ mod tests {
         );
         ok.config_source.as_mut().unwrap().kind = ConfigSourceKind::OpenCodeMcpJson;
 
-        let outcome = rewrite_config_json(&config_path, &[&evil, &ok], None, &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&evil, &ok], None, false, &store).unwrap();
         assert_eq!(outcome.removed_remote, 1);
 
         let j: serde_json::Value =
@@ -2192,7 +2301,7 @@ mod tests {
             "npx",
             &["-y", "pkg"],
         );
-        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
         assert!(outcome.backup_path.is_some());
 
@@ -2207,7 +2316,7 @@ mod tests {
         assert_eq!(j["other"], 1, "unrelated keys preserved");
 
         // idempotent
-        let again = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let again = rewrite_config(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
 
@@ -2235,7 +2344,7 @@ mod tests {
             "node",
             &["fetch.js"],
         );
-        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let j: serde_json::Value =
@@ -2275,7 +2384,7 @@ mod tests {
             "node",
             &["t.js"],
         );
-        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), &store).unwrap();
+        let outcome = rewrite_config(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         let reparsed: toml::Value =
@@ -2335,7 +2444,7 @@ mod tests {
             "https://ok.example.com/mcp",
             Decision::Allow,
         );
-        let outcome = rewrite_config(&config_path, &[&evil, &ok], None, &store).unwrap();
+        let outcome = rewrite_config(&config_path, &[&evil, &ok], None, false, &store).unwrap();
         assert_eq!(outcome.removed_remote, 1);
 
         let j: serde_json::Value =
@@ -2367,7 +2476,7 @@ mod tests {
             "https://evil.example.com/mcp",
             Decision::Block,
         );
-        let outcome = rewrite_config(&config_path, &[&evil], None, &store).unwrap();
+        let outcome = rewrite_config(&config_path, &[&evil], None, false, &store).unwrap();
         assert_eq!(outcome.removed_remote, 1);
 
         let j: serde_json::Value =
@@ -2467,7 +2576,7 @@ mod tests {
         );
 
         let outcome =
-            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
         assert_eq!(outcome.already_protected, 0);
         assert!(outcome.backup_path.is_some());
@@ -2498,7 +2607,7 @@ mod tests {
         // Idempotent: re-running against the now-rewritten file must not
         // re-wrap an already-protected entry.
         let outcome2 =
-            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), false, &store).unwrap();
         assert_eq!(outcome2.newly_protected, 0);
         assert_eq!(outcome2.already_protected, 1);
 
@@ -2529,7 +2638,7 @@ mod tests {
         );
 
         let outcome =
-            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), &store).unwrap();
+            rewrite_config_toml(&config_path, &[&scanned], Some(&shim_path), false, &store).unwrap();
         assert_eq!(outcome.newly_protected, 1);
 
         // And the rewritten file is now genuinely valid TOML, strictly.
@@ -2612,7 +2721,7 @@ mod tests {
 
         // Store is empty -- effective_decision_for falls back to each
         // artifact's own scan decision, same as a fresh first-ever scan.
-        let outcome = rewrite_config_json(&config_path, &[&evil, &good], None, &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&evil, &good], None, false, &store).unwrap();
         assert_eq!(outcome.removed_remote, 1);
         assert_eq!(outcome.newly_protected, 0);
         assert!(outcome.backup_path.is_some());
@@ -2682,7 +2791,7 @@ mod tests {
             })
             .unwrap();
 
-        let outcome = rewrite_config_json(&config_path, &[&askme], None, &store).unwrap();
+        let outcome = rewrite_config_json(&config_path, &[&askme], None, false, &store).unwrap();
         assert_eq!(outcome.removed_remote, 0);
 
         let rewritten: serde_json::Value =
