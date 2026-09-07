@@ -10,7 +10,7 @@
 use crate::pipeline::{collect, ScannedArtifact};
 use crate::sanitize_for_display;
 use agentguard_adapters::ConfigSourceKind;
-use agentguard_core::{ArtifactKind, Capability, Decision, ProtectionLevel, RiskBand};
+use agentguard_core::{ArtifactKind, ArtifactSource, Capability, Decision, ProtectionLevel, RiskBand};
 use agentguard_risk::RiskEngine;
 use agentguard_store::{DecisionRecord, DecisionStore};
 use std::collections::{BTreeMap, BTreeSet};
@@ -486,8 +486,11 @@ fn rewrite_config_value(
         None => (0, 0),
     };
 
-    let removed_remote =
+    let mut removed_remote =
         remove_flagged_remote_in_value(&mut root, &remote, store, format.path, format.shape);
+    // OpenHands' `[mcp].sse_servers` / `.shttp_servers` are URL-keyed
+    // arrays, not the name-keyed map/list the generic path handles.
+    removed_remote += remove_openhands_url_remotes(&mut root, &remote, store);
 
     if newly_protected == 0 && removed_remote == 0 {
         return Ok(RewriteOutcome {
@@ -527,6 +530,52 @@ fn rewrite_config_value(
         removed_remote,
         backup_path: Some(backup_path),
     })
+}
+
+/// URL of a `sse_servers` / `shttp_servers` element — a bare string, or an
+/// inline table with a `url` field.
+fn element_url(el: &serde_json::Value) -> Option<&str> {
+    el.as_str().or_else(|| el.get("url").and_then(|u| u.as_str()))
+}
+
+/// OpenHands keeps remote MCP servers in two URL-keyed arrays under
+/// `[mcp]` — `sse_servers` and `shttp_servers` — with no name field. The
+/// generic map/list remover can't touch them, so this walks both arrays
+/// and drops each element whose URL matches a remote artifact whose
+/// decision requires removal. Restore re-appends from the snapshot, see
+/// `restore_remote_entry_toml`.
+fn remove_openhands_url_remotes(
+    root: &mut serde_json::Value,
+    remote_artifacts: &[&ScannedArtifact],
+    store: &DecisionStore,
+) -> usize {
+    let flagged_urls: Vec<&str> = remote_artifacts
+        .iter()
+        .filter(|s| {
+            s.config_source.as_ref().map(|cs| cs.kind) == Some(ConfigSourceKind::OpenHandsMcpToml)
+                && decision_requires_removal(effective_decision_for(store, s))
+        })
+        .filter_map(|s| match &s.artifact.source {
+            ArtifactSource::RemoteUrl(u) => Some(u.as_str()),
+            _ => None,
+        })
+        .collect();
+    if flagged_urls.is_empty() {
+        return 0;
+    }
+
+    let Some(mcp) = root.get_mut("mcp").and_then(|v| v.as_object_mut()) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for key in ["sse_servers", "shttp_servers"] {
+        if let Some(arr) = mcp.get_mut(key).and_then(|v| v.as_array_mut()) {
+            let before = arr.len();
+            arr.retain(|el| !element_url(el).is_some_and(|u| flagged_urls.contains(&u)));
+            removed += before - arr.len();
+        }
+    }
+    removed
 }
 
 /// Removes each remote artifact's entry from a `serde_json::Value` config
@@ -1791,6 +1840,41 @@ fn restore_remote_entry_toml(
         )
     })?;
 
+    // OpenHands remote entries are keyed `sse:<url>` / `shttp:<url>` and
+    // live in an array under `[mcp]`, not the Codex `[mcp_servers.*]` map.
+    for (prefix, array) in [("sse:", "sse_servers"), ("shttp:", "shttp_servers")] {
+        if entry_key.strip_prefix(prefix).is_some() {
+            let want_url = snapshot.get("url").and_then(|u| u.as_str());
+            let root = doc.as_table_mut().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "config root is not a TOML table")
+            })?;
+            let mcp = root
+                .entry("mcp")
+                .or_insert_with(|| toml::Value::Table(Default::default()))
+                .as_table_mut()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "[mcp] is not a table"))?;
+            let arr = mcp
+                .entry(array)
+                .or_insert_with(|| toml::Value::Array(Vec::new()))
+                .as_array_mut()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "sse/shttp_servers is not an array"))?;
+            let already = arr.iter().any(|el| {
+                el.as_str() == want_url
+                    || el.get("url").and_then(|u| u.as_str()) == want_url
+            });
+            if already {
+                return Ok(false);
+            }
+            let toml_value: toml::Value = serde_json::from_value(snapshot.clone())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("snapshot: {e}")))?;
+            arr.push(toml_value);
+            let pretty = toml::to_string_pretty(&doc)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            std::fs::write(config_path, pretty)?;
+            return Ok(true);
+        }
+    }
+
     let root = doc
         .as_table_mut()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "config root is not a TOML table"))?;
@@ -2418,6 +2502,58 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(args, vec![art.artifact.id.as_str(), "--", "node", "t.js"]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn openhands_blocked_sse_and_shttp_remotes_are_removed_and_restored() {
+        let dir = unique_temp_dir("openhands-remote");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[mcp]\n\
+             sse_servers = [\"https://keep.example.com/sse\", \"https://drop.example.com/sse\"]\n\
+             shttp_servers = [\n  { url = \"https://drop2.example.com/mcp\", api_key = \"sk-x\" },\n]\n",
+        )
+        .unwrap();
+        let store = temp_store(&dir);
+
+        let mut drop1 = synthetic_remote_scanned_artifact(
+            "drop", config_path.clone(), "https://drop.example.com/sse", Decision::Block, RiskBand::High,
+        );
+        drop1.config_source.as_mut().unwrap().kind = ConfigSourceKind::OpenHandsMcpToml;
+        drop1.config_source.as_mut().unwrap().entry_key = "sse:drop.example.com/sse".to_string();
+        drop1.raw_config_entry = Some(serde_json::json!("https://drop.example.com/sse"));
+
+        let mut drop2 = synthetic_remote_scanned_artifact(
+            "drop2", config_path.clone(), "https://drop2.example.com/mcp", Decision::Block, RiskBand::High,
+        );
+        drop2.config_source.as_mut().unwrap().kind = ConfigSourceKind::OpenHandsMcpToml;
+        drop2.config_source.as_mut().unwrap().entry_key = "shttp:drop2.example.com/mcp".to_string();
+        drop2.raw_config_entry = Some(serde_json::json!({ "url": "https://drop2.example.com/mcp", "api_key": "sk-x" }));
+
+        let out = rewrite_config(&config_path, &[&drop1, &drop2], None, false, &store).unwrap();
+        assert_eq!(out.removed_remote, 2);
+
+        let v: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let sse: Vec<&str> = v["mcp"]["sse_servers"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+        assert_eq!(sse, vec!["https://keep.example.com/sse"]);
+        assert!(v["mcp"]["shttp_servers"].as_array().unwrap().is_empty());
+
+        // restore drop2 (the keyed one) from its snapshot
+        let restored = restore_remote_entry_toml(
+            &config_path,
+            "shttp:drop2.example.com/mcp",
+            drop2.raw_config_entry.as_ref().unwrap(),
+        )
+        .unwrap();
+        assert!(restored);
+        let v2: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let back = &v2["mcp"]["shttp_servers"].as_array().unwrap()[0];
+        assert_eq!(back["url"].as_str().unwrap(), "https://drop2.example.com/mcp");
+        assert_eq!(back["api_key"].as_str().unwrap(), "sk-x");
 
         std::fs::remove_dir_all(&dir).ok();
     }

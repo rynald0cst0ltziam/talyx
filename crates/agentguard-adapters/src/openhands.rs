@@ -88,31 +88,25 @@ fn parse_openhands_config(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifac
         let Some(arr) = mcp.and_then(|m| m.get(key)).and_then(|s| s.as_array()) else {
             continue;
         };
+        // Transport prefix on the synthetic entry_key so `agentguard init`
+        // (removal) and `agentguard allow` (restore) know which `[mcp]`
+        // array the entry belongs to — sse_servers vs shttp_servers.
+        let transport = if key == "sse_servers" { "sse" } else { "shttp" };
         let mut remote_map = serde_json::Map::new();
         for entry in arr {
-            let (url, has_api_key) = if let Some(s) = entry.as_str() {
-                (s.to_string(), false)
-            } else if let Some(t) = entry.as_table() {
-                let Some(u) = t.get("url").and_then(|u| u.as_str()) else {
-                    continue;
-                };
-                (u.to_string(), t.get("api_key").is_some())
+            // Bridge the TOML element to a serde_json object faithfully so
+            // the whole thing (url, api_key, timeout, …) is captured for
+            // restore; a bare-URL element becomes `{ url }`.
+            let cfg: serde_json::Value = if let Some(s) = entry.as_str() {
+                serde_json::json!({ "url": s })
             } else {
-                continue;
+                match serde_json::to_value(entry).ok().filter(|v| v.get("url").is_some()) {
+                    Some(v) => v,
+                    None => continue,
+                }
             };
-            let mut cfg = serde_json::Map::new();
-            cfg.insert("url".into(), serde_json::Value::String(url.clone()));
-            if has_api_key {
-                // Surface the ApiKeys capability the same way a header-based
-                // remote entry would — the shared parser checks key names.
-                let mut headers = serde_json::Map::new();
-                headers.insert(
-                    "Authorization".into(),
-                    serde_json::Value::String("<config api_key>".into()),
-                );
-                cfg.insert("headers".into(), serde_json::Value::Object(headers));
-            }
-            remote_map.insert(remote_server_name(&url), serde_json::Value::Object(cfg));
+            let url = cfg.get("url").and_then(|u| u.as_str()).unwrap_or_default().to_string();
+            remote_map.insert(format!("{transport}:{}", remote_server_name(&url)), cfg);
         }
         out.extend(parse_server_map(
             &remote_map,
@@ -251,12 +245,12 @@ sse_servers = ["http://example.com:8080/mcp/"]
         assert_eq!(mcp.len(), 3);
 
         let names: Vec<_> = mcp.iter().map(|d| d.artifact.name.as_str()).collect();
-        assert!(names.contains(&"api.example.com/mcp/shttp"));
-        assert!(names.contains(&"secure.example.com/mcp"));
-        assert!(names.contains(&"example.com:8080/mcp")); // trailing slash trimmed
+        assert!(names.contains(&"shttp:api.example.com/mcp/shttp"));
+        assert!(names.contains(&"shttp:secure.example.com/mcp"));
+        assert!(names.contains(&"sse:example.com:8080/mcp")); // trailing slash trimmed
 
         // The keyed remote picks up the ApiKeys capability from `api_key`.
-        let secure = mcp.iter().find(|d| d.artifact.name == "secure.example.com/mcp").unwrap();
+        let secure = mcp.iter().find(|d| d.artifact.name == "shttp:secure.example.com/mcp").unwrap();
         assert!(secure
             .artifact
             .capabilities

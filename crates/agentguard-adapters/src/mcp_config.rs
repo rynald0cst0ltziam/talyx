@@ -318,11 +318,23 @@ fn remote_mcp_artifact(
     };
     let has_auth_header = header_has_auth(cfg.get("headers"))
         || header_has_auth(cfg.get("requestOptions").and_then(|r| r.get("headers")));
-    if has_auth_header {
+    // Some configs (OpenHands' `sse_servers` / `shttp_servers`, a few
+    // others) carry the credential as a top-level `api_key` / `apiKey` /
+    // `token` field rather than a header.
+    let has_auth_field = cfg
+        .as_object()
+        .map(|o| {
+            o.keys().any(|k| {
+                let kl = k.to_lowercase();
+                kl == "api_key" || kl == "apikey" || kl == "token" || kl == "authorization"
+            })
+        })
+        .unwrap_or(false);
+    if has_auth_header || has_auth_field {
         capabilities.push(CapabilityFinding {
             capability: Capability::ApiKeys,
             basis: EvidenceBasis::Declared,
-            evidence: "config supplies an authorization/token header for this remote server".to_string(),
+            evidence: "config supplies an authorization token / API key for this remote server".to_string(),
             location: Some(path.display().to_string()),
         });
     }
