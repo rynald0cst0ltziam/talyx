@@ -1839,6 +1839,24 @@ pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     for r in &record.reasons {
         println!("  {r}");
     }
+
+    // Anything the live proxy (`init --live`) has caught for this artifact.
+    let proxy: Vec<_> = crate::sessions::recent(10)
+        .into_iter()
+        .filter(|f| f.artifact == artifact_id)
+        .collect();
+    if !proxy.is_empty() {
+        println!("\nLive proxy findings ({}):", proxy.len());
+        for f in proxy.iter().take(8) {
+            println!(
+                "  {} — {} on the {} response: {}",
+                f.action,
+                f.capability,
+                f.method,
+                sanitize_for_display(&f.evidence)
+            );
+        }
+    }
 }
 
 #[cfg(test)]
