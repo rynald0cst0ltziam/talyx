@@ -101,6 +101,12 @@ export const features: Feature[] = [
     body: 'Approval is bound to an artifact\'s content hash and capability set. A server you allowed that later gains SSH-key access, or a skill that grows a hidden-instruction payload, is forced back to review automatically — even when the raw score alone would not have tripped.',
   },
   {
+    icon: 'flow',
+    tag: 'Live proxy',
+    title: 'Watches the session, not just the launch',
+    body: 'With `init --live` the shim stays between the agent and each server for the whole session. It scans the `tools/list` handshake, pins the tool set on first use so a mid-session rug pull is caught, scans tool results, and — the part no fixed ruleset can match — runs your own guardrails: a local YAML file whose `block` / `redact` / `allow` rules fire on any JSON-RPC message you can describe with a path condition. It fails open to the launch-time gate, so it never leaves you worse off.',
+  },
+  {
     icon: 'ci',
     tag: 'CI',
     title: 'SARIF + a GitHub Action',
@@ -263,6 +269,7 @@ export const comparison: CompareRow[] = [
   { capability: 'Poisoned tool-description detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
   { capability: 'Actually blocks a server from launching', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
   { capability: 'Live JSON-RPC inspection — rug-pull & poisoned-response detection mid-session', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
+  { capability: 'Custom local guardrail rules on live traffic (block / redact / allow)', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
   { capability: 'Protection survives if the live proxy is not running', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
   { capability: 'Registry (npm / PyPI) pre-resolution', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
   { capability: 'Capability-drift re-review', agentguard: 'full', snyk: 'none', mcpscan: 'none' },
@@ -344,6 +351,10 @@ export const faqs: Faq[] = [
   {
     q: 'Does the live proxy send my traffic anywhere?',
     a: 'No. Every message is inspected locally by the shim. Findings are appended to ~/.agentguard/sessions/<date>-<pid>.jsonl and summarised by `agentguard status`; nothing about your traffic, your code or what was found leaves the machine. AGENTGUARD_PROXY_LOG can capture a full local transcript for debugging.',
+  },
+  {
+    q: 'Can I write my own rules for the proxy?',
+    a: 'Yes — guardrails. A local YAML file (~/.agentguard/guardrails.yaml, or per-project, or $AGENTGUARD_GUARDRAILS) whose rules the proxy runs on every JSON-RPC message on top of the built-in detectors. A rule matches by direction, method and path conditions (contains / regex / glob / equals / exists / gt-lt, with wildcards in the JSON path) and does one of: allow (forward, skip the built-in scan), warn (log), redact (strip matched strings), or block (the message never reaches its peer — a blocked tools/call gets a JSON-RPC error back and the server never sees it). Validate with `agentguard guardrails check`; start from `agentguard guardrails example`.',
   },
   {
     q: 'How is enforcement reversible?',

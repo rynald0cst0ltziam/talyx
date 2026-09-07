@@ -143,7 +143,15 @@ proxy has real multi-hour session mileage.
     flag + log + forward unchanged; `strict` redacts each flagged text block
     in place (clean blocks + non-text content pass through).
   - C2: `agentguard status` prints a "Live proxy" summary of recent
-    `~/.agentguard/sessions/*.jsonl` findings.
+    `~/.agentguard/sessions/*.jsonl` findings; `agentguard why <id>` lists
+    that artifact's proxy findings.
   - **Not done, on purpose:** flipping the `init` default from opt-in to
     on. Gated on real multi-hour session mileage (dogfooding), per the ADR
     ceiling — not a code task.
+- **Guardrails (STATUS #60).** A local `guardrails.yaml` whose `allow` /
+  `warn` / `redact` / `block` rules the proxy runs on every message,
+  before the built-in detectors. Matches mcp-scan's config-file guardrails
+  but keeps the "fails open to the static gate" property. `agentguard
+  guardrails check | list | example`. The pump gained an upstream-reply
+  path (`Action::Reply`) so a blocked client request gets a JSON-RPC error
+  back instead of a session teardown.

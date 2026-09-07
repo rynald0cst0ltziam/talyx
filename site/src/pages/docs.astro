@@ -110,6 +110,11 @@ agentguard license status         # show seats used, renewal date, offline grace
     </p>
     <h3><code>agentguard why &lt;id&gt;</code></h3>
     <p>Full reasoning behind a cached decision — every capability, every score contribution, the band and the final decision.</p>
+    <h3><code>agentguard guardrails check|list|example</code></h3>
+    <p>
+      Validate the live-proxy guardrails file, list the rules it would load, or
+      print a commented starter. See <a href="#live-proxy">Guardrails</a>.
+    </p>
     <h3><code>agentguard activate &lt;key&gt;</code> · <code>agentguard license status|deactivate</code></h3>
     <p>See <a href="#activate">Activate a license</a>.</p>
 
@@ -177,6 +182,57 @@ agentguard init --project ~ --live --level strict</code></pre>
       </tbody>
     </table>
 
+    <h3>Guardrails — your own rules</h3>
+    <p>
+      The three levels are a blunt instrument. <strong>Guardrails</strong> are a
+      local policy file — <code>~/.agentguard/guardrails.yaml</code>,
+      <code>&lt;project&gt;/.agentguard/guardrails.yaml</code>, or
+      <code>$AGENTGUARD_GUARDRAILS</code> — that the proxy runs on
+      <em>every</em> JSON-RPC message, in addition to the built-in detectors.
+      Each rule matches by direction, method and one or more path conditions,
+      and takes an action:
+    </p>
+    <table>
+      <thead><tr><th>Action</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>allow</code></td><td>forward the message and skip the built-in scan for it</td></tr>
+        <tr><td><code>warn</code></td><td>log it, keep checking</td></tr>
+        <tr><td><code>redact</code></td><td>replace each matched string with a marker, forward the rest</td></tr>
+        <tr><td><code>block</code></td><td>the message never reaches its peer — a JSON-RPC error goes back to the sender (a blocked client <code>tools/call</code> → error to the agent, the server never sees it)</td></tr>
+      </tbody>
+    </table>
+    <pre><code># ~/.agentguard/guardrails.yaml
+version: 1
+rules:
+  - name: block-secret-path-args
+    direction: client-to-server
+    method: tools/call
+    any:
+      - path: params.arguments.*
+        contains: "/.ssh/"
+      - path: params.arguments.*
+        contains: "/.aws/"
+    action: block
+    message: "tool call argument references a credential path"
+
+  - name: redact-aws-keys-from-results
+    direction: server-to-client
+    method: tools/call
+    any:
+      - path: "result.content[*].text"
+        regex: "AKIA[0-9A-Z]+"
+    action: redact</code></pre>
+    <p>
+      Path conditions use a dotted JSON path with <code>*</code> (any key) and
+      <code>[*]</code> (any array element) wildcards, then one operator:
+      <code>contains</code>, <code>not_contains</code>, <code>regex</code>,
+      <code>glob</code>, <code>equals</code>, <code>in</code>,
+      <code>exists</code>, <code>gt</code>, <code>lt</code>. Manage the file with:
+    </p>
+    <pre><code>agentguard guardrails example &gt; ~/.agentguard/guardrails.yaml
+agentguard guardrails check      # validate — names the offending rule
+agentguard guardrails list       # show what the proxy would load</code></pre>
+
     <h3>Turn it off</h3>
     <ul>
       <li><code>AGENTGUARD_NO_PROXY=1</code> in the agent's environment — a hard
@@ -237,6 +293,7 @@ agentguard init --project ~ --live --level strict</code></pre>
         <tr><td><code>AGENTGUARD_PROXY_LEVEL</code></td><td><code>quiet</code> | <code>balanced</code> | <code>strict</code> — the live proxy's inspection level (default <code>balanced</code>).</td></tr>
         <tr><td><code>AGENTGUARD_PROXY_LOG</code></td><td>Path to write a full classified JSON-RPC transcript of a proxied session (debugging).</td></tr>
         <tr><td><code>AGENTGUARD_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.agentguard/sessions/</code>).</td></tr>
+        <tr><td><code>AGENTGUARD_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.agentguard/</code> and <code>&lt;project&gt;/.agentguard/</code> defaults.</td></tr>
         <tr><td><code>AGENTGUARD_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on AgentGuard itself.</td></tr>
       </tbody>
     </table>
@@ -255,7 +312,7 @@ agentguard init --project ~ --live --level strict</code></pre>
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
-      <li><strong>Live traffic inspection (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, and tool-result scanning. See <a href="#live-proxy">Live traffic inspection</a> for the full contract.</li>
+      <li><strong>Live traffic inspection (opt-in).</strong> <code>agentguard init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
       <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
       <li><strong>Warp</strong> added (27 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>
