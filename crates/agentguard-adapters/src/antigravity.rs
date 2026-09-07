@@ -28,10 +28,12 @@
 //! wrapper-less shape), `rules/*.md`, and `skills/<name>/SKILL.md`. This
 //! is a second config surface the standalone-file discovery above does
 //! NOT cover — a plugin can ship a malicious MCP server, hook, or
-//! injection-bearing rule/skill file. `rules/` and `skills/` markdown are
-//! content-scanned as instruction files (same treatment as a top-level
-//! rules file); quarantine-style skill enforcement is a documented
-//! follow-up, not claimed here.
+//! injection-bearing rule/skill file. `rules/*.md` are content-scanned as
+//! instruction files (`AgentConfig` — same as a top-level rules file, no
+//! safe automatic action). `skills/<name>/` is a real skill: emitted as
+//! `ArtifactKind::Skill` with the skill directory as `scan_root`, so
+//! `agentguard init` quarantines a flagged one (moves the directory out)
+//! exactly as it does a standalone `.claude/skills/<name>`.
 
 use crate::hooks_config::parse_hooks_value;
 use crate::mcp_config::parse_mcp_servers_json;
@@ -158,27 +160,35 @@ fn parse_antigravity_plugins(plugins_dir: &Path) -> Vec<DiscoveredArtifact> {
         ));
         out.extend(parse_antigravity_hooks(&plugin_dir.join("hooks.json")));
 
-        for (subdir, glob_leaf) in [("rules", None), ("skills", Some("SKILL.md"))] {
-            let Ok(sub) = fs::read_dir(plugin_dir.join(subdir)) else {
-                continue;
-            };
-            for md in sub.flatten() {
+        // rules/<name>.md — loose instruction files: content-scanned as
+        // `AgentConfig` (no safe automatic action, same as `.cursorrules`).
+        if let Ok(rules) = fs::read_dir(plugin_dir.join("rules")) {
+            for md in rules.flatten() {
                 let p = md.path();
-                let (scan_path, label) = match glob_leaf {
-                    // rules/<name>.md
-                    None if p.extension().and_then(|e| e.to_str()) == Some("md") => {
-                        (p.clone(), p.file_name().and_then(|n| n.to_str()).unwrap_or("rule.md").to_string())
-                    }
-                    // skills/<name>/SKILL.md
-                    Some(leaf) if p.is_dir() && p.join(leaf).is_file() => {
-                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("skill");
-                        (p.join(leaf), format!("{name}/{leaf}"))
-                    }
-                    _ => continue,
-                };
+                if p.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("rule.md");
                 out.push(plugin_instruction_fingerprint(
-                    &scan_path,
-                    &format!("{plugin_name}/{subdir}/{label}"),
+                    &p,
+                    &format!("{plugin_name}/rules/{name}"),
+                ));
+            }
+        }
+        // skills/<name>/SKILL.md — a real skill: emitted as `Skill` with
+        // the skill DIRECTORY as scan_root, so `agentguard init` can
+        // quarantine a flagged one (move the directory out) the same way
+        // it does a standalone `.claude/skills/<name>`.
+        if let Ok(skills) = fs::read_dir(plugin_dir.join("skills")) {
+            for entry in skills.flatten() {
+                let dir = entry.path();
+                if !dir.is_dir() || !dir.join("SKILL.md").is_file() {
+                    continue;
+                }
+                let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("skill");
+                out.push(plugin_skill_fingerprint(
+                    &dir,
+                    &format!("{plugin_name}/skills/{name}"),
                 ));
             }
         }
@@ -187,12 +197,22 @@ fn parse_antigravity_plugins(plugins_dir: &Path) -> Vec<DiscoveredArtifact> {
 }
 
 fn plugin_instruction_fingerprint(path: &Path, marker: &str) -> DiscoveredArtifact {
+    fingerprint(path, marker, ArtifactKind::AgentConfig)
+}
+
+/// A plugin skill — `Skill` kind + the skill directory as scan_root, so
+/// `init` quarantines a flagged one.
+fn plugin_skill_fingerprint(dir: &Path, marker: &str) -> DiscoveredArtifact {
+    fingerprint(dir, marker, ArtifactKind::Skill)
+}
+
+fn fingerprint(path: &Path, marker: &str, kind: ArtifactKind) -> DiscoveredArtifact {
     let source = ArtifactSource::LocalPath(path.display().to_string());
     let mut discovered_by = BTreeSet::new();
     discovered_by.insert("antigravity".to_string());
     let artifact = Artifact {
-        id: Artifact::compute_id(ArtifactKind::AgentConfig, marker, &source),
-        kind: ArtifactKind::AgentConfig,
+        id: Artifact::compute_id(kind, marker, &source),
+        kind,
         name: marker.to_string(),
         version: None,
         publisher: PublisherIdentity::default(),
@@ -331,6 +351,30 @@ mod tests {
             .find(|d| d.artifact.kind == ArtifactKind::AgentConfig && d.artifact.name == "shady/rules/style.md");
         assert!(rule.is_some(), "plugin rule markdown should be content-scanned");
         assert!(rule.unwrap().scan_root.is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_plugin_skill_is_a_quarantinable_skill_artifact() {
+        let dir = unique_temp_dir("plugin-skill");
+        let plugin = dir.join(".agents").join("plugins").join("kit");
+        std::fs::create_dir_all(plugin.join("skills").join("reviewer")).unwrap();
+        std::fs::write(plugin.join("plugin.json"), r#"{"name":"kit"}"#).unwrap();
+        std::fs::write(
+            plugin.join("skills").join("reviewer").join("SKILL.md"),
+            "Review the diff carefully.",
+        )
+        .unwrap();
+
+        let discovered = AntigravityAdapter.discover(&dir);
+        let skill = discovered
+            .iter()
+            .find(|d| d.artifact.name == "kit/skills/reviewer")
+            .expect("plugin skill should be discovered");
+        assert_eq!(skill.artifact.kind, ArtifactKind::Skill);
+        // scan_root is the skill DIRECTORY (so init can move it out), not the file
+        assert_eq!(skill.scan_root.as_deref(), Some(plugin.join("skills").join("reviewer").as_path()));
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -1455,7 +1455,7 @@ pub fn run_init(
     let skill_outcome = quarantine_skills(&scanned, &store, &project_root, include_user_config);
     if skill_outcome.quarantined > 0 {
         println!(
-            "{} skill(s) quarantined (blocked or awaiting approval) — moved out of .claude/skills/.",
+            "{} skill(s) quarantined (blocked or awaiting approval) — moved into a sibling .agentguard-quarantine/ so the agent stops loading them.",
             skill_outcome.quarantined
         );
         println!("Run `agentguard allow <id>` to approve and restore one.");
