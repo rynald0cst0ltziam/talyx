@@ -1,0 +1,29 @@
+AgentGuard — Third-Party Software Notices and Licenses
+=====================================================
+
+AgentGuard is distributed as a compiled binary that statically links the
+open-source Rust crates listed below. Each crate is used unmodified. This
+file reproduces the required copyright notices and license texts.
+
+No dependency is licensed under the GPL, LGPL, AGPL, or SSPL. The only
+weak-copyleft license present is MPL-2.0 (file-level; imposes no obligation
+on AgentGuard's own source when the crate is used unmodified). Where a crate
+offers a choice of licenses, one has been selected and reproduced here.
+
+Generated with `cargo about`. Regenerate after any dependency change:
+
+    cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt
+
+{{#each licenses}}
+-------------------------------------------------------------------------------
+
+License: {{{name}}} ({{{id}}})
+
+Used by:
+{{#each used_by}}  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}}  ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}
+-------------------------------------------------------------------------------
+End of third-party notices.

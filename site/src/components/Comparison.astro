@@ -1,74 +1,39 @@
 ---
-import { comparison } from '../data/content';
+import { capabilities } from '../data/content';
 import Icon from './Icon.astro';
-
-const cell = (v: 'full' | 'partial' | 'none') =>
-  v === 'full'
-    ? { icon: 'check' as const, cls: 'text-safe' }
-    : v === 'partial'
-      ? { icon: 'dash' as const, cls: 'text-warn' }
-      : { icon: 'x' as const, cls: 'text-mist/50' };
 ---
 
-<section id="compare" class="scroll-mt-20 border-t border-line bg-void">
+<section id="capabilities" class="scroll-mt-20 border-t border-line bg-void">
   <div class="mx-auto max-w-6xl px-4 py-24 sm:px-6">
     <div class="max-w-2xl" data-reveal>
-      <p class="font-mono text-xs uppercase tracking-[0.2em] text-signal">Where it stands</p>
+      <p class="font-mono text-xs uppercase tracking-[0.2em] text-signal">What you get</p>
       <h2 class="mt-3 text-3xl font-bold tracking-tight text-chalk sm:text-4xl">
-        Built to match the field, then pass it.
+        The full capability list.
       </h2>
       <p class="mt-4 text-lg text-fog">
-        Snyk's <code class="text-fog">agent-scan</code> and Invariant's
-        <code class="text-fog">mcp-scan</code> are good tools. Here's the honest
-        gap analysis.
+        Every line is implemented in the repository and covered by tests, many
+        proven against live adversarial fixtures. Read the code to check any of it.
       </p>
     </div>
 
-    <div class="mt-12 overflow-x-auto" data-reveal>
-      <table class="w-full min-w-[640px] border-separate border-spacing-0 text-sm">
-        <thead>
-          <tr>
-            <th class="sticky left-0 bg-void py-3 text-left font-medium text-mist">Capability</th>
-            <th class="w-28 py-3 text-center">
-              <span class="font-semibold text-chalk">AgentGuard</span>
-            </th>
-            <th class="w-28 py-3 text-center font-medium text-mist">Snyk</th>
-            <th class="w-28 py-3 text-center font-medium text-mist">mcp-scan</th>
-          </tr>
-        </thead>
-        <tbody>
-          {
-            comparison.map((r) => {
-              const a = cell(r.agentguard);
-              const s = cell(r.snyk);
-              const m = cell(r.mcpscan);
-              return (
-                <tr class="group">
-                  <td class="sticky left-0 border-t border-line bg-void py-3.5 pr-4 text-fog group-hover:text-chalk">
-                    {r.capability}
-                  </td>
-                  <td class="border-t border-line bg-signal/[0.04] py-3.5 text-center">
-                    <Icon name={a.icon} class={`mx-auto h-4 w-4 ${a.cls}`} />
-                  </td>
-                  <td class="border-t border-line py-3.5 text-center">
-                    <Icon name={s.icon} class={`mx-auto h-4 w-4 ${s.cls}`} />
-                  </td>
-                  <td class="border-t border-line py-3.5 text-center">
-                    <Icon name={m.icon} class={`mx-auto h-4 w-4 ${m.cls}`} />
-                  </td>
-                </tr>
-              );
-            })
-          }
-        </tbody>
-      </table>
+    <div class="mt-12 grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2" data-reveal>
+      {
+        capabilities.map((r) => (
+          <div class="bg-void p-5">
+            <div class="flex items-start gap-2.5">
+              <Icon name="check" class="mt-0.5 h-4 w-4 shrink-0 text-safe" />
+              <div>
+                <p class="font-semibold text-chalk">{r.capability}</p>
+                <p class="mt-1 text-sm leading-relaxed text-fog">{r.how}</p>
+              </div>
+            </div>
+          </div>
+        ))
+      }
     </div>
 
-    <div class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-xs text-mist" data-reveal>
-      <span class="flex items-center gap-1.5"><Icon name="check" class="h-3.5 w-3.5 text-safe" /> full</span>
-      <span class="flex items-center gap-1.5"><Icon name="dash" class="h-3.5 w-3.5 text-warn" /> partial / conditional</span>
-      <span class="flex items-center gap-1.5"><Icon name="x" class="h-3.5 w-3.5 text-mist/50" /> not offered</span>
-      <span class="ml-auto">Based on public docs &amp; product behavior, {new Date().getFullYear()}. Corrections: hello@agentguard.dev</span>
-    </div>
+    <p class="mt-6 text-xs text-mist" data-reveal>
+      Something unclear or wrong? <a class="underline hover:text-fog" href="mailto:hello@agentguard.dev">hello@agentguard.dev</a>
+    </p>
   </div>
 </section>

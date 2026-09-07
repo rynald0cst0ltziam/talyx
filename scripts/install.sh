@@ -103,6 +103,11 @@ main() {
   cp "$extracted/agentguard" "$INSTALL_DIR/agentguard"
   cp "$extracted/agentguard-shim" "$INSTALL_DIR/agentguard-shim"
   chmod +x "$INSTALL_DIR/agentguard" "$INSTALL_DIR/agentguard-shim"
+  # Ship the license + third-party notices next to the binaries (the
+  # bundled MIT/BSD/Apache crates require their notices to travel along).
+  for f in LICENSE THIRD-PARTY-LICENSES.txt; do
+    [ -f "$extracted/$f" ] && cp "$extracted/$f" "$INSTALL_DIR/agentguard-$f" || true
+  done
 
   say "Installed:"
   say "  $INSTALL_DIR/agentguard"

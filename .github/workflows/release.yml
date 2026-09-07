@@ -48,6 +48,21 @@ jobs:
         run: |
           cargo build --release --target ${{ matrix.target }} -p agentguard-cli -p agentguard-shim
 
+      # The MIT / BSD / Apache-2.0 / ISC licenses of the bundled crates
+      # require their notices to travel with the binary. Regenerate and fail
+      # the release if the committed THIRD-PARTY-LICENSES.txt is stale (a new
+      # or changed dependency, or a license not vetted in about.toml).
+      - name: Verify third-party license notices
+        shell: bash
+        run: |
+          set -uo pipefail
+          cargo install cargo-about --features cli --locked
+          cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt
+          git diff --exit-code THIRD-PARTY-LICENSES.txt || {
+            echo "::error::THIRD-PARTY-LICENSES.txt is stale — run 'cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt' and commit the result."
+            exit 1
+          }
+
       - name: Package (tar.gz)
         if: matrix.archive_ext == 'tar.gz'
         shell: bash
@@ -58,6 +73,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/agentguard" "$out/"
           cp "target/${{ matrix.target }}/release/agentguard-shim" "$out/"
           cp README.md "$out/" 2>/dev/null || true
+          cp LICENSE "$out/" 2>/dev/null || true
+          cp THIRD-PARTY-LICENSES.txt "$out/"
           tar czf "$out.tar.gz" "$out"
 
       - name: Package (zip)
@@ -69,6 +86,8 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/agentguard.exe" "$out/"
           Copy-Item "target/${{ matrix.target }}/release/agentguard-shim.exe" "$out/"
           if (Test-Path README.md) { Copy-Item README.md "$out/" }
+          if (Test-Path LICENSE) { Copy-Item LICENSE "$out/" }
+          Copy-Item THIRD-PARTY-LICENSES.txt "$out/"
           Compress-Archive -Path $out -DestinationPath "$out.zip"
 
       - uses: actions/upload-artifact@v4

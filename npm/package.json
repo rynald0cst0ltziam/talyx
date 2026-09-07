@@ -2,11 +2,12 @@
   "name": "agentguard",
   "version": "0.1.0",
   "description": "Cross-agent security scanner and enforcement for AI coding agent artifacts (MCP servers, skills, plugins, hooks).",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "bin": {
     "agentguard": "bin/agentguard.js"
   },
   "scripts": {
+    "prepack": "node -e \"for (const f of ['LICENSE','THIRD-PARTY-LICENSES.txt']) require('fs').copyFileSync('../'+f, f)\"",
     "postinstall": "node scripts/install.js"
   },
   "os": ["darwin", "linux", "win32"],
@@ -15,6 +16,8 @@
   },
   "files": [
     "bin/",
-    "scripts/"
+    "scripts/",
+    "LICENSE",
+    "THIRD-PARTY-LICENSES.txt"
   ]
 }

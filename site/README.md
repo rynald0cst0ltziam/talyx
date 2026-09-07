@@ -48,16 +48,18 @@ Also:
 - **`public/og.svg`** — social card. Some scrapers want raster; convert to
   `og.png` (1200×630) and switch the reference in `src/layouts/Base.astro`
   if link previews matter.
-- The comparison table (`src/data/content.ts` → `comparison`) is a
-  point-in-time claim set. Re-verify against competitors' public docs
-  before launch and date it.
+- The capability list (`src/data/content.ts` → `capabilities`) is
+  first-person only — every row describes AgentGuard's own implementation
+  and is backed by the repo. Do **not** reintroduce claims about other
+  named products (trademark / trade-libel exposure); if a capability line
+  can't be pointed at code + a test, cut it.
 
 ## Structure
 
 ```
 src/
   data/site.ts        commerce + product config (edit this)
-  data/content.ts     copy, features, comparison rows, FAQ
+  data/content.ts     copy, features, capability list, FAQ
   layouts/Base.astro  <head>, nav, footer, lemon.js, reveal script
   components/          Hero, ThreatDemo (animated terminal), Features,
                       Comparison, Pricing, FAQ, CTA, …

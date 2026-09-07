@@ -31,11 +31,10 @@ STATUS.md #26-#30; VS Code Copilot rides on Claude Code's and Copilot
 CLI's own hook files for free) — are implemented and tested end-to-end,
 most proven against live adversarial fixtures (real SSH-exfiltration
 payloads genuinely blocked, benign hooks genuinely running), not just
-unit tests. Agent coverage was directly benchmarked against the live
-competitive landscape (Snyk's `agent-scan`, Invariant Labs' `mcp-scan`,
-others — see STATUS.md #31) rather than assumed comprehensive. See
-STATUS.md for what's proven vs. still open, and BUILD_PLAN.md §14 for the
-full picture.
+unit tests. Agent coverage was directly benchmarked against the other
+MCP/agent scanners in the space (see STATUS.md #31) rather than assumed
+comprehensive. See STATUS.md for what's proven vs. still open, and
+BUILD_PLAN.md §14 for the full picture.
 
 No published release exists yet — the install methods below (`curl`/`irm`,
 npm) are complete and tested as scripts, but will fail at the download step
@@ -188,3 +187,20 @@ From `BUILD_PLAN.md` / the project's coding principles:
   matched — no finding is asserted without evidence attached.
 - `verified` on a publisher is only ever set by an explicit verification
   step, never inferred from a name or package scope.
+
+## License
+
+AgentGuard is **source-available under a proprietary license** — see
+[`LICENSE`](LICENSE) (a working draft pending counsel review). In short: you
+may read, compile, run and security-audit the source, and run
+`agentguard scan` / `status` without a key; enforcement (`init` / the shim)
+needs a paid license, and redistribution / resale / hosting is not granted.
+
+Third-party open-source components are listed with their full license texts
+in [`THIRD-PARTY-LICENSES.txt`](THIRD-PARTY-LICENSES.txt). None are
+GPL/LGPL/AGPL/SSPL; the only weak-copyleft dependency is one MPL-2.0 crate
+used unmodified. Regenerate the notices after any dependency change:
+
+```bash
+cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt
+```

@@ -66,6 +66,11 @@ try {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item (Join-Path $extracted.FullName "agentguard.exe") $InstallDir -Force
     Copy-Item (Join-Path $extracted.FullName "agentguard-shim.exe") $InstallDir -Force
+    # Ship the license + third-party notices next to the binaries.
+    foreach ($f in "LICENSE", "THIRD-PARTY-LICENSES.txt") {
+        $src = Join-Path $extracted.FullName $f
+        if (Test-Path $src) { Copy-Item $src (Join-Path $InstallDir "agentguard-$f") -Force }
+    }
 
     Write-Info "Installed:"
     Write-Info "  $InstallDir\agentguard.exe"

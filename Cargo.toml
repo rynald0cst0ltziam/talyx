@@ -17,7 +17,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license-file = "LICENSE"
 authors = ["AgentGuard"]
 # 1.89 is the floor because agentguard-store relies on std::fs::File's
 # native lock/lock_shared/unlock (stabilized in 1.89) for the decision

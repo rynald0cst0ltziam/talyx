@@ -1,0 +1,97 @@
+AgentGuard — Proprietary Source-Available License
+================================================
+
+Copyright (c) 2026 [LEGAL ENTITY NAME]. All rights reserved.
+
+IMPORTANT: This license text is a working draft. Before the first public
+release or first paid sale, have it reviewed by qualified legal counsel and
+replace "[LEGAL ENTITY NAME]" and the notice address with the real values,
+or substitute an established source-available license (e.g. Business Source
+License 1.1, or a PolyForm license) if counsel prefers.
+
+1. Definitions
+
+   "Software" means the AgentGuard source code in this repository, its
+   compiled binaries (including `agentguard` and `agentguard-shim`), and the
+   bundled data files, excluding third-party components listed in
+   THIRD-PARTY-LICENSES.txt (which are governed by their own licenses).
+
+   "Licensor" means the copyright holder named above.
+
+   "You" means the individual or entity exercising rights under this
+   license.
+
+   "Valid License Key" means an activation key issued by Licensor or an
+   authorized reseller and not expired, revoked, or exceeded in its seat
+   count.
+
+2. Grant — source inspection and evaluation
+
+   Licensor grants You a worldwide, royalty-free, non-exclusive,
+   non-transferable license to:
+
+   (a) view, compile, and run the Software for the purpose of security
+       review, evaluation, and testing; and
+
+   (b) run the `agentguard scan` and `agentguard status` commands and their
+       read-only equivalents without a Valid License Key.
+
+3. Grant — production use
+
+   Running the Software's enforcement features (including `agentguard init`
+   and the `agentguard-shim` gate) other than for short-term evaluation
+   requires a Valid License Key for each developer using it. This grant is
+   co-extensive with the commercial terms accepted at purchase.
+
+4. Restrictions
+
+   Except as expressly permitted above, You may not:
+
+   (a) redistribute, sublicense, sell, rent, lease, or host the Software as
+       a service to third parties;
+
+   (b) distribute modified versions, or distribute the Software as part of
+       another product;
+
+   (c) remove or alter any copyright, trademark, or license notice,
+       including THIRD-PARTY-LICENSES.txt;
+
+   (d) use the name "AgentGuard", the Licensor's other marks, or confusingly
+       similar names, except to refer accurately to the Software; or
+
+   (e) circumvent or disable the license-key check.
+
+   Nothing here restricts rights You have under applicable law that cannot
+   be waived by contract (for example, certain rights to observe, study, or
+   decompile for interoperability).
+
+5. Third-party components
+
+   The Software links open-source components listed, with their license
+   texts, in THIRD-PARTY-LICENSES.txt. Those components remain under their
+   own licenses; nothing in this license limits Your rights under them.
+
+6. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+7. Limitation of liability
+
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL LICENSOR BE
+   LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+   OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+8. Termination
+
+   This license terminates automatically if You breach it. On termination
+   You must stop using the Software and destroy all copies, except that
+   Section 2(a) rights survive for genuine security-review purposes.
+
+9. Governing law
+
+   [JURISDICTION TO BE SET BY COUNSEL.]
+
+Notices: [CONTACT ADDRESS]

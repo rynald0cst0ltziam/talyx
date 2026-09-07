@@ -264,30 +264,73 @@ export const threatDemo: ThreatLine[] = [
   { t: 4700, text: 'protection active. run  agentguard why context7  for detail.', cls: 'text-signal' },
 ];
 
-export interface CompareRow {
+/**
+ * First-person capability checklist. Every row describes AgentGuard's own
+ * implementation and is substantiated by the repository — no claims about
+ * any other product.
+ */
+export interface Capability {
   capability: string;
-  agentguard: 'full' | 'partial' | 'none';
-  snyk: 'full' | 'partial' | 'none';
-  mcpscan: 'full' | 'partial' | 'none';
+  how: string;
 }
 
-export const comparison: CompareRow[] = [
-  { capability: 'Runs fully local — no account, no cloud, no telemetry', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
-  { capability: 'Coverage across 27 coding agents', agentguard: 'full', snyk: 'partial', mcpscan: 'partial' },
-  { capability: 'Scans plugin & extension ecosystems, not just the agent config', agentguard: 'full', snyk: 'none', mcpscan: 'none' },
-  { capability: 'AST parse + source-to-sink taint (secret → network)', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
-  { capability: 'Scans skills / instruction files for injection', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
-  { capability: 'Invisible-Unicode & encoded-payload detection', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
-  { capability: 'Tool shadowing / typosquat detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
-  { capability: 'Poisoned tool-description detection', agentguard: 'full', snyk: 'full', mcpscan: 'full' },
-  { capability: 'Known-bad identity feed — confirmed-malicious packages / publishers / CVEs', agentguard: 'full', snyk: 'partial', mcpscan: 'none' },
-  { capability: 'Actually blocks a server from launching', agentguard: 'full', snyk: 'none', mcpscan: 'partial' },
-  { capability: 'Live JSON-RPC inspection — rug-pull & poisoned-response detection mid-session', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
-  { capability: 'Custom local guardrail rules on live traffic (block / redact / allow)', agentguard: 'full', snyk: 'none', mcpscan: 'full' },
-  { capability: 'Protection survives if the live proxy is not running', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
-  { capability: 'Registry (npm / PyPI) pre-resolution', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
-  { capability: 'Capability-drift re-review', agentguard: 'full', snyk: 'none', mcpscan: 'none' },
-  { capability: 'SARIF + CI action', agentguard: 'full', snyk: 'full', mcpscan: 'none' },
+export const capabilities: Capability[] = [
+  {
+    capability: 'Runs fully local',
+    how: 'One binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI lookups and a periodic license check.',
+  },
+  {
+    capability: 'Covers 27 coding agents in one scan',
+    how: 'MCP servers, skills, plugins, extensions, hooks, LSP servers, background monitors and instruction files — user scope and project scope, JSON / YAML / TOML.',
+  },
+  {
+    capability: 'Scans plugin & extension ecosystems',
+    how: 'Every enabled Claude Code plugin, Gemini CLI extension and Antigravity plugin is resolved on disk and its bundled MCP servers, hooks, skills and LSP commands are scanned — not just the manifest.',
+  },
+  {
+    capability: 'AST parse + source-to-sink taint',
+    how: 'A tree-sitter parse of JS/TS, Python and Ruby with function-scoped, interprocedural taint that follows a secret from the read, through helpers and parameters, to a network sink.',
+  },
+  {
+    capability: 'Reads the text your agent will obey',
+    how: 'Skill markdown, instruction files and declared tool descriptions are scanned for prompt-injection phrasing, invisible Unicode, ASCII smuggling, encoded payloads and one-sentence exfiltration directives.',
+  },
+  {
+    capability: 'Catches impersonation across all servers',
+    how: 'Tool shadowing, name typosquatting (edit-distance and affix) and non-canonical launch sources — scored across every discovered server at once using each one’s reputation verdict.',
+  },
+  {
+    capability: 'Known-bad advisory feed',
+    how: 'Publicly-disclosed malicious or vulnerable MCP artifacts matched by identity — package + version range, publisher, host, repo owner, look-alike name pattern. Bundled, offline, overridable.',
+  },
+  {
+    capability: 'Blocks a server from launching — for real',
+    how: 'Approved servers run through the AgentGuard shim; blocked ones are removed from the config so the agent physically cannot start them; malicious skills are quarantined. Every change is checksum-verified and reversible.',
+  },
+  {
+    capability: 'Live JSON-RPC inspection',
+    how: 'With init --live the shim stays between agent and server for the session: handshake scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning.',
+  },
+  {
+    capability: 'Custom local guardrail rules',
+    how: 'A local YAML file whose block / redact / allow rules fire on any JSON-RPC message you can describe with a path condition — on top of the built-in detectors.',
+  },
+  {
+    capability: 'Protection survives the proxy not running',
+    how: 'The live proxy fails open to the launch-time gate. A blocked server is absent from the config whether or not any AgentGuard process is alive.',
+  },
+  {
+    capability: 'Registry pre-resolution',
+    how: 'With one flag, the real package behind npx / uvx is fetched from npm or PyPI, integrity-checked, and statically scanned — including the tool descriptions inside it.',
+  },
+  {
+    capability: 'Capability-drift re-review',
+    how: 'Approval is bound to an artifact’s content hash and capability set. One that later gains a dangerous capability is forced back to review automatically.',
+  },
+  {
+    capability: 'SARIF + a GitHub Action',
+    how: 'The same scan runs in CI, uploads as SARIF into GitHub code scanning, and exits non-zero on a Block so a poisoned dependency fails the build.',
+  },
 ];
 
 export interface Step {
@@ -351,8 +394,8 @@ export const faqs: Faq[] = [
     a: 'Scanning is a command you run when you choose to; it is never in your agent\'s hot path. Enforcement adds the shim to an approved server\'s launch line — one exec of a small native binary that re-checks a cached decision in well under a millisecond, then hands off to the real server. A blocked server is simply absent from the config. Every rewrite is checksummed, backed up, and reversible with one command, and your real secrets and hook commands are never written into the rewritten file.',
   },
   {
-    q: 'How is this different from mcp-scan or Snyk agent-scan?',
-    a: 'Three things. Scope: they centre on the MCP server config; AgentGuard also covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, and the optional live proxy (init --live) fails open to that static gate — so unlike an always-on external proxy, your protection never silently vanishes when a process isn\'t running. There is a dated, point-in-time comparison table on this page and we keep it honest — corrections welcome.',
+    q: 'How is this different from other MCP scanners?',
+    a: 'Three things define AgentGuard. Scope: it covers plugin and extension ecosystems, skills, hooks, LSP servers and instruction files across 27 agents — not just the MCP server config. Depth: a real tree-sitter AST with function-scoped, interprocedural source-to-sink taint — it proves a secret reaches the network rather than noting that both appear in a file. Enforcement that survives: a blocked server is physically removed from the config, and the optional live proxy (init --live) fails open to that static gate, so your protection never silently vanishes when a process is not running. Compare it against anything you like — the full capability list is on this page and every line is in the open repository.',
   },
   {
     q: 'What does `agentguard init --live` do?',
@@ -399,7 +442,7 @@ export const faqs: Faq[] = [
     a: '14-day no-questions refund through Lemon Squeezy, our merchant of record. If AgentGuard does not fit how your team works, you get your money back.',
   },
   {
-    q: 'What about open source / evaluation?',
-    a: 'The scanner core is source-available for audit — every regex, every score contribution, every threshold is in the repository and covered by tests, many proven against live adversarial fixtures. A time-limited evaluation key is available on request for security teams doing a formal review.',
+    q: 'Is it open source? Can I evaluate it first?',
+    a: 'The source is available for review, not open source in the OSI sense — it ships under a proprietary source-available license (LICENSE in the repo) that lets you read, compile, run and security-audit it freely, and run the scanner without a key, while enforcement and redistribution need a license. Every regex, score contribution and threshold is in the repository and covered by tests, many proven against live adversarial fixtures. A time-limited evaluation key is available on request for security teams doing a formal review.',
   },
 ];

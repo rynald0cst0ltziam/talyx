@@ -404,9 +404,12 @@ mod tests {
         // an earlier version isn't in range
         let ok = a.check(&reg("postmark-mcp", "npm"), None, None, Some("1.0.9"));
         assert!(ok.is_empty());
-        // its publisher is flagged for any package
+        // another package from the same publisher is flagged for REVIEW
+        // (advisory), not auto-blocked as malicious — pattern-based matches
+        // never force a block.
         let by_pub = a.check(&reg("something-else", "npm"), Some("phanpak"), None, None);
-        assert!(by_pub.iter().any(|f| f.capability == Capability::KnownMalicious));
+        assert!(by_pub.iter().any(|f| f.capability == Capability::KnownAdvisory));
+        assert!(!by_pub.iter().any(|f| f.capability == Capability::KnownMalicious));
     }
 
     #[test]
