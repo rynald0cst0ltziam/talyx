@@ -5,16 +5,16 @@
 //!
 //! A genuinely different TOML shape from Codex's `[mcp_servers.<name>]`:
 //! `[mcp]` has `stdio_servers` (an array of inline tables, each with
-//! `name`/`command`/`args`/`env` -- the only one this adapter covers),
-//! `sse_servers`, and `shttp_servers` (remote; each array element is
-//! either a bare URL string or `{url, api_key, timeout}`, with NO name
-//! field at all -- deliberately not covered here, see
-//! `ConfigSourceKind::OpenHandsMcpToml`'s doc comment for why that's a
-//! genuinely different problem, not a quick extension).
-//!
-//! `stdio_servers` converts through the same `list_to_server_map` pattern
-//! Continue.dev/Aider use, via a TOML->JSON `Value` bridge (the same
-//! conversion already proven in `codex.rs`'s `raw_config_entry` capture).
+//! `name`/`command`/`args`/`env`), plus `sse_servers` and `shttp_servers`
+//! (remote; each array element is either a bare URL string or
+//! `{url, api_key, timeout}`, with NO name field). All three are
+//! discovered and scored. `stdio_servers` converts through the same
+//! `list_to_server_map` pattern Continue.dev/Aider use, via a TOML->JSON
+//! `Value` bridge (the same conversion already proven in `codex.rs`'s
+//! `raw_config_entry` capture); the two remote arrays get a synthetic
+//! identity from the URL and go through the shared remote-server path.
+//! Remote entries are report-only — `init` has no array-element removal
+//! for them, see `ConfigSourceKind::OpenHandsMcpToml`'s doc comment.
 
 use crate::mcp_config::{list_to_server_map, parse_server_map};
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
@@ -62,14 +62,82 @@ fn parse_openhands_config(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifac
     let Some(root) = crate::codex::parse_toml_leniently(&text) else {
         return Vec::new();
     };
-    let Some(stdio_servers) = root.get("mcp").and_then(|m| m.get("stdio_servers")).and_then(|s| s.as_array())
-    else {
-        return Vec::new();
-    };
-    let list: Vec<serde_json::Value> =
-        stdio_servers.iter().filter_map(|entry| serde_json::to_value(entry).ok()).collect();
-    let servers = list_to_server_map(&list);
-    parse_server_map(&servers, path, base_dir, ConfigSourceKind::OpenHandsMcpToml, "openhands", "OpenHands")
+    let mcp = root.get("mcp");
+    let mut out = Vec::new();
+
+    // Local servers — name-keyed inline tables.
+    if let Some(stdio) = mcp.and_then(|m| m.get("stdio_servers")).and_then(|s| s.as_array()) {
+        let list: Vec<serde_json::Value> =
+            stdio.iter().filter_map(|entry| serde_json::to_value(entry).ok()).collect();
+        let servers = list_to_server_map(&list);
+        out.extend(parse_server_map(
+            &servers,
+            path,
+            base_dir,
+            ConfigSourceKind::OpenHandsMcpToml,
+            "openhands",
+            "OpenHands",
+        ));
+    }
+
+    // Remote servers — `sse_servers` / `shttp_servers`: arrays whose
+    // elements are a bare URL string or `{ url, api_key, timeout }`, no
+    // `name`. Synthesise a stable identity from the URL and feed the shared
+    // remote-server path (which routes a `url` key to `remote_mcp_artifact`).
+    for key in ["sse_servers", "shttp_servers"] {
+        let Some(arr) = mcp.and_then(|m| m.get(key)).and_then(|s| s.as_array()) else {
+            continue;
+        };
+        let mut remote_map = serde_json::Map::new();
+        for entry in arr {
+            let (url, has_api_key) = if let Some(s) = entry.as_str() {
+                (s.to_string(), false)
+            } else if let Some(t) = entry.as_table() {
+                let Some(u) = t.get("url").and_then(|u| u.as_str()) else {
+                    continue;
+                };
+                (u.to_string(), t.get("api_key").is_some())
+            } else {
+                continue;
+            };
+            let mut cfg = serde_json::Map::new();
+            cfg.insert("url".into(), serde_json::Value::String(url.clone()));
+            if has_api_key {
+                // Surface the ApiKeys capability the same way a header-based
+                // remote entry would — the shared parser checks key names.
+                let mut headers = serde_json::Map::new();
+                headers.insert(
+                    "Authorization".into(),
+                    serde_json::Value::String("<config api_key>".into()),
+                );
+                cfg.insert("headers".into(), serde_json::Value::Object(headers));
+            }
+            remote_map.insert(remote_server_name(&url), serde_json::Value::Object(cfg));
+        }
+        out.extend(parse_server_map(
+            &remote_map,
+            path,
+            base_dir,
+            ConfigSourceKind::OpenHandsMcpToml,
+            "openhands",
+            "OpenHands",
+        ));
+    }
+
+    out
+}
+
+/// A stable identity for an unnamed remote entry: the URL with the scheme
+/// stripped and any trailing slash trimmed (`https://api.x.com/mcp/` ->
+/// `api.x.com/mcp`). Deterministic, human-readable, and unique per endpoint.
+fn remote_server_name(url: &str) -> String {
+    let no_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    let trimmed = no_scheme.trim_end_matches('/');
+    if trimmed.is_empty() {
+        url.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -158,24 +226,44 @@ stdio_servers = [
     }
 
     #[test]
-    fn ignores_shttp_and_sse_servers_not_yet_supported() {
-        // Documents the real, deliberate gap: unnamed remote array
-        // entries aren't parsed at all -- this test exists so a future
-        // change to support them updates this assertion deliberately.
-        let dir = unique_temp_dir("remote-gap");
+    fn discovers_shttp_and_sse_remote_servers_with_a_synthetic_name() {
+        let dir = unique_temp_dir("remote");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("config.toml"),
             r#"
 [mcp]
-shttp_servers = ["https://api.example.com/mcp/shttp"]
-sse_servers = ["http://example.com:8080/mcp"]
+shttp_servers = [
+  "https://api.example.com/mcp/shttp",
+  { url = "https://secure.example.com/mcp", api_key = "sk-abc123" },
+]
+sse_servers = ["http://example.com:8080/mcp/"]
 "#,
         )
         .unwrap();
 
         let discovered = OpenHandsAdapter.discover(&dir);
-        assert!(discovered.iter().all(|d| d.artifact.kind != ArtifactKind::McpServer));
+        let mcp: Vec<_> = discovered
+            .iter()
+            .filter(|d| d.artifact.kind == ArtifactKind::McpServer)
+            .filter(|d| d.config_source.as_ref().map(|cs| cs.path.starts_with(&dir)).unwrap_or(false))
+            .collect();
+        assert_eq!(mcp.len(), 3);
+
+        let names: Vec<_> = mcp.iter().map(|d| d.artifact.name.as_str()).collect();
+        assert!(names.contains(&"api.example.com/mcp/shttp"));
+        assert!(names.contains(&"secure.example.com/mcp"));
+        assert!(names.contains(&"example.com:8080/mcp")); // trailing slash trimmed
+
+        // The keyed remote picks up the ApiKeys capability from `api_key`.
+        let secure = mcp.iter().find(|d| d.artifact.name == "secure.example.com/mcp").unwrap();
+        assert!(secure
+            .artifact
+            .capabilities
+            .iter()
+            .any(|c| matches!(c.capability, agentguard_core::Capability::ApiKeys)));
+        // All remote — no local launch command.
+        assert!(mcp.iter().all(|d| d.launch.is_none()));
 
         std::fs::remove_dir_all(&dir).ok();
     }

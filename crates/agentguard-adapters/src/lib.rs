@@ -607,17 +607,19 @@ pub enum ConfigSourceKind {
     /// converts cleanly through the same `list_to_server_map` pattern
     /// (via a TOML->JSON `Value` bridge, the same conversion already
     /// proven in `codex.rs`'s `raw_config_entry` capture) since it's
-    /// name-keyed like Continue.dev's/Aider's own lists. The two remote
-    /// arrays are deliberately NOT covered -- deriving a stable identity
-    /// for an unnamed URL-only entry is a different problem, not a quick
-    /// extension of the existing name-keyed machinery, left as a named,
-    /// honest gap rather than guessed at (e.g. hashing the URL as a
-    /// synthetic name would work but wasn't done without deciding that
-    /// deliberately, not as an afterthought). `stdio_servers` is now
-    /// enforced via `rewrite_config_value` -- STATUS.md #42 (the TOML is
-    /// parsed to a `serde_json::Value`, rewritten, and re-emitted with the
-    /// `toml` crate; the inline-table array comes back as `[[mcp.
-    /// stdio_servers]]` array-of-tables, semantically identical).
+    /// name-keyed like Continue.dev's/Aider's own lists. `sse_servers` and
+    /// `shttp_servers` are now discovered and scored too (their unnamed
+    /// URL-only elements get a stable synthetic identity from the URL —
+    /// scheme stripped, trailing slash trimmed — fed through the shared
+    /// remote-server path). They are report-only: `remote_entry_location`
+    /// returns `None` for this variant, so `agentguard init` does not
+    /// rewrite the `[mcp]` arrays to strip a blocked remote — a named,
+    /// honest gap (array-element removal for an unnamed TOML entry), not a
+    /// silent one. `stdio_servers` IS enforced via `rewrite_config_value`
+    /// -- STATUS.md #42 (the TOML is parsed to a `serde_json::Value`,
+    /// rewritten, and re-emitted with the `toml` crate; the inline-table
+    /// array comes back as `[[mcp.stdio_servers]]` array-of-tables,
+    /// semantically identical).
     OpenHandsMcpToml,
     /// Crush (Charmbracelet) -- verified 2026-09-05 by reading the REAL
     /// source (github.com/charmbracelet/crush's `internal/config/
