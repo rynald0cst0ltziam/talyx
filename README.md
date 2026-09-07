@@ -88,7 +88,8 @@ crates/
   agentguard-risk        risk engine: capped evidence − reputation + context → decision
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
-  agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch
+  agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch; with --proxy (init --live) runs the server through agentguard-mcp-proxy
+  agentguard-mcp-proxy   the live stdio pass-through (ADR 0001): transparent newline-delimited JSON-RPC forwarding between agent and server for the session, with an optional transcript; Phase A (no policy yet)
   agentguard-cli         `agentguard` binary: scan, status, init, allow, why, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
 data/
   trust_seed.json        v0 hand-seeded trust graph (stand-in for BUILD_PLAN.md §7's pre-launch scan)
