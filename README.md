@@ -89,7 +89,8 @@ crates/
   agentguard-registry    fetches + extracts npm/PyPI packages for a registry-resolved MCP server (--fetch-registry)
   agentguard-store       local decision cache (~/.agentguard/decisions.json)
   agentguard-shim        the enforcement binary — allows/blocks a gated MCP server launch; with --proxy (init --live) runs the server through agentguard-mcp-proxy
-  agentguard-mcp-proxy   the live stdio pass-through (ADR 0001): transparent newline-delimited JSON-RPC forwarding between agent and server for the session, with an optional transcript; Phase A (no policy yet)
+  agentguard-mcp-proxy   the live stdio firewall (ADR 0001): newline-delimited JSON-RPC forwarding between agent and server for the session; inspects the initialize/tools/list/... handshake responses through agentguard-content, blocks a poisoned or rug-pulled response per level (AGENTGUARD_PROXY_LEVEL), trust-on-first-use tool baseline, findings to ~/.agentguard/sessions/
+  agentguard-content     instruction-text / prompt-injection / hidden-unicode / encoded-payload / exfil-directive detectors (tree-sitter-free leaf crate, shared by scanner + mcp-proxy)
   agentguard-cli         `agentguard` binary: scan, status, init, allow, why, activate, license (license.rs: Lemon Squeezy activation, offline grace, CI key)
 data/
   trust_seed.json        v0 hand-seeded trust graph (stand-in for BUILD_PLAN.md §7's pre-launch scan)

@@ -120,14 +120,24 @@ proxy has real multi-hour session mileage.
 
 ## Phasing
 
-- **Phase A — transparent proxy.** `--proxy` mode, piped stdio, two pump
-  threads, NDJSON framing + 16 MiB cap, per-message `serde_json` classify,
-  `--proxy-log <path>` JSONL capture, clean shutdown. **No policy.** Goal:
-  byte-for-byte transparent + negligible latency against every real MCP server
-  on the machine.
-- **Phase B — handshake inspection.** Scan `initialize`/`*/list` responses
-  through the detector leaf crate; TOFU baseline + drift/rug-pull detection;
-  the per-level action; `~/.agentguard/sessions/*.jsonl`.
-- **Phase C — response-content policy.** Optional `tools/call` result scanning,
-  drift-record persistence, `agentguard why` / `agentguard status`
-  integration, and the `init` default flip.
+- **Phase A — transparent proxy. DONE (STATUS #57).** `--proxy` mode, piped
+  stdio, two pump threads, NDJSON framing + 16 MiB cap, per-message
+  `serde_json` classify, `AGENTGUARD_PROXY_LOG` JSONL capture, clean shutdown.
+  No policy. Byte-for-byte transparent, live-proven.
+- **Phase B — handshake inspection. DONE (STATUS #58).**
+  - B1: extracted `agentguard-content` (tree-sitter-free leaf crate) so the
+    shim reuses the instruction-text detectors without the parser.
+  - B2: response↔request id correlation; `initialize` / `tools/list` /
+    `resources/list` / `prompts/list` responses scanned through the detectors;
+    per-level action (`quiet` log / `balanced` replace with a JSON-RPC
+    `-32001` error / `strict` replace + teardown); `AGENTGUARD_PROXY_LEVEL`;
+    `~/.agentguard/sessions/<date>-<pid>.jsonl` findings log
+    (`AGENTGUARD_SESSIONS_DIR` override).
+  - B3: trust-on-first-use tool baseline (`tool_baselines.json` next to the
+    store) + mid-session drift / rug-pull detection.
+  Only messages ≤ 256 KiB are inspect-before-forward; larger ones (big tool
+  results) are forward-first so the policy adds no latency to bulk traffic.
+- **Phase C — response-content policy.** Optional `tools/call` result scanning
+  (report-only at `balanced`, inspect-then-forward at `strict`); `agentguard
+  status` / `why` surface the session findings; flip the `init` default to on
+  once real multi-hour session mileage exists.

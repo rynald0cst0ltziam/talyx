@@ -48,7 +48,7 @@ const sections = [
 
     <h2 id="not">What it does not do (v1)</h2>
     <ul>
-      <li>No live man-in-the-middle of MCP stdio traffic after launch. Enforcement is a launch-time gate plus the shim; a server that behaves at launch and turns malicious mid-session is out of scope for v1. (This is a deliberate architecture choice — a proxy that silently stops protecting when it isn't running is worse than a gate that always holds.)</li>
+      <li>Live traffic inspection (<code>agentguard init --live</code>, opt-in) currently covers the MCP <strong>handshake</strong> — the <code>initialize</code> / <code>tools/list</code> / <code>resources/list</code> / <code>prompts/list</code> responses, plus a trust-on-first-use tool baseline that catches a mid-session rug-pull. Scanning the content of individual <code>tools/call</code> results is the next increment. The proxy fails open to the launch-time protection, so it never leaves you worse off than the gate alone.</li>
       <li>No sandboxed detonation of untrusted code.</li>
       <li>No continuous filesystem watching or daemon.</li>
       <li>Detection is heuristic. High-signal findings drive automatic blocking; lower-signal ones surface as review prompts. It is a strong filter, not an oracle.</li>
