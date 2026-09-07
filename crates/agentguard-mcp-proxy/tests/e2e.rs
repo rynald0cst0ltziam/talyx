@@ -193,6 +193,67 @@ fn a_mid_session_rug_pull_is_caught() {
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("ag-e2e-rp-{}", std::process::id())));
 }
 
+/// A user guardrail blocks a client `tools/call` whose argument references
+/// an SSH path — the client gets a JSON-RPC error, the server never sees
+/// the call, and the session keeps working.
+#[test]
+fn a_guardrail_blocks_a_client_request() {
+    let gr_file = std::env::temp_dir().join(format!("ag-e2e-gr-{}.yaml", std::process::id()));
+    std::fs::write(
+        &gr_file,
+        r#"
+version: 1
+rules:
+  - name: no-ssh-args
+    direction: client-to-server
+    method: tools/call
+    all:
+      - path: params.arguments.*
+        contains: "/.ssh/"
+    action: block
+    message: "argument references an SSH path"
+"#,
+    )
+    .unwrap();
+
+    let (client_to_proxy_r, mut client_w) = std::io::pipe().unwrap();
+    let (proxy_to_client_r, proxy_w) = std::io::pipe().unwrap();
+
+    let mut cfg = ProxyConfig::new("test:guardrail");
+    cfg.level = Some(PolicyLevel::Balanced);
+    cfg.sessions_dir = Some(std::env::temp_dir().join(format!("ag-e2e-grs-{}", std::process::id())));
+    cfg.guardrails_path = Some(gr_file.clone());
+
+    let proxy = thread::spawn(move || run_with(SERVER, &[], cfg, client_to_proxy_r, proxy_w));
+    let mut from_proxy = BufReader::new(proxy_to_client_r);
+    let mut line = || {
+        let mut s = String::new();
+        from_proxy.read_line(&mut s).unwrap();
+        s
+    };
+
+    // blocked call → error back to the client
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"read\",\"arguments\":{\"path\":\"/home/u/.ssh/id_rsa\"}}}\n")
+        .unwrap();
+    let blocked = line();
+    assert!(blocked.contains("\"id\":1") && blocked.contains("\"error\""), "{blocked}");
+    assert!(blocked.contains("no-ssh-args"), "{blocked}");
+
+    // a tools/call with a clean argument is NOT blocked (reaches the server)
+    client_w
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"read\",\"arguments\":{\"path\":\"/tmp/ok.txt\"}}}\n")
+        .unwrap();
+    let ok = line();
+    assert!(ok.contains("\"id\":2") && ok.contains("\"content\"") && !ok.contains("no-ssh-args"), "{ok}");
+
+    drop(client_w);
+    let status = proxy.join().unwrap().expect("proxy run failed");
+    assert!(status.success());
+    let _ = std::fs::remove_file(&gr_file);
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("ag-e2e-grs-{}", std::process::id())));
+}
+
 /// At `strict`, the same poisoned response ends the session.
 #[test]
 fn a_poisoned_tools_list_tears_down_at_strict() {
@@ -215,11 +276,12 @@ fn a_poisoned_tools_list_tears_down_at_strict() {
     from_proxy.read_line(&mut list).unwrap();
     assert!(list.contains("\"error\"") && list.contains("-32001"), "{list}");
 
-    // server->client is closed after the teardown → next read is EOF
+    // teardown killed the child; the proxy returns without waiting for the
+    // client to disconnect. Once we drop our write end the reader hits EOF.
+    drop(client_w);
     let mut after = String::new();
     let n = from_proxy.read_line(&mut after).unwrap();
     assert_eq!(n, 0, "expected EOF after teardown, got: {after}");
 
-    drop(client_w);
     let _ = proxy.join().unwrap();
 }

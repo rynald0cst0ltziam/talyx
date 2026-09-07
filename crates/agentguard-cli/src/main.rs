@@ -132,6 +132,11 @@ enum Command {
         #[command(subcommand)]
         action: LicenseAction,
     },
+    /// Work with the live-proxy guardrails file (see `agentguard init --live`).
+    Guardrails {
+        #[command(subcommand)]
+        action: GuardrailsAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -140,6 +145,21 @@ enum LicenseAction {
     Status,
     /// Release this machine's activation slot so it can be used elsewhere.
     Deactivate,
+}
+
+#[derive(Subcommand)]
+enum GuardrailsAction {
+    /// Validate the guardrails file (default: the one the proxy would load).
+    Check {
+        /// Path to a specific guardrails file to check.
+        path: Option<PathBuf>,
+    },
+    /// List the rules the proxy would load, one line each.
+    List {
+        path: Option<PathBuf>,
+    },
+    /// Print a commented starter guardrails file to stdout.
+    Example,
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -205,6 +225,55 @@ fn main() {
             LicenseAction::Status => license::run_status(),
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
+        Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
+    }
+}
+
+fn run_guardrails(action: GuardrailsAction) -> i32 {
+    use agentguard_mcp_proxy::guardrails::{default_paths, Guardrails};
+
+    if let GuardrailsAction::Example = action {
+        print!("{}", Guardrails::EXAMPLE);
+        return 0;
+    }
+
+    let (explicit, want_list) = match &action {
+        GuardrailsAction::Check { path } => (path.clone(), false),
+        GuardrailsAction::List { path } => (path.clone(), true),
+        GuardrailsAction::Example => unreachable!(),
+    };
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let candidates = match explicit {
+        Some(p) => vec![p],
+        None => default_paths(&cwd),
+    };
+
+    match Guardrails::load(&candidates) {
+        Ok(None) => {
+            println!(
+                "No guardrails file found. Looked at:\n{}\n\nRun `agentguard guardrails example > ~/.agentguard/guardrails.yaml` to start one.",
+                candidates
+                    .iter()
+                    .map(|p| format!("  {}", p.display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            0
+        }
+        Ok(Some(g)) => {
+            println!("{} rule(s), valid — {}", g.rule_count(), g.source);
+            if want_list {
+                for line in g.describe() {
+                    println!("  {line}");
+                }
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("guardrails file is invalid:\n  {e}");
+            1
+        }
     }
 }
 

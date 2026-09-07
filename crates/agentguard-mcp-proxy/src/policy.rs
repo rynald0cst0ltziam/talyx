@@ -11,6 +11,7 @@
 //! reaches the agent at `balanced`/`strict`; a synthesised JSON-RPC error
 //! goes in its place.
 
+use crate::guardrails::{self, GuardrailOutcome, Guardrails};
 use crate::message::{Direction, Rpc};
 use agentguard_core::{Capability, CapabilityFinding, EvidenceBasis};
 use serde_json::Value;
@@ -23,12 +24,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// What the pump should do with a message the policy just examined.
 pub(crate) enum Action {
-    /// Send the original bytes unchanged.
+    /// Send the original bytes unchanged, downstream.
     Forward,
-    /// Send these bytes instead (newline-terminated).
+    /// Send these bytes downstream instead (newline-terminated).
     Replace(Vec<u8>),
-    /// Send these bytes instead, then end the session.
+    /// Send these bytes downstream, then end the session.
     ReplaceAndStop(Vec<u8>),
+    /// Drop the message; send these bytes back *upstream* (to the sender)
+    /// instead — e.g. a JSON-RPC error for a client request a guardrail
+    /// blocked. Falls back to a session stop if the pump has no upstream
+    /// writer.
+    Reply(Vec<u8>),
+    /// Reply upstream, then end the session.
+    ReplyAndStop(Vec<u8>),
 }
 
 /// Protection level for a proxied session — mirrors the CLI's
@@ -89,6 +97,8 @@ pub(crate) struct SessionPolicy {
     /// loads it from disk. Empty inner map = no baseline recorded yet.
     baseline: Mutex<Option<BTreeMap<String, String>>>,
     baseline_path: Option<PathBuf>,
+    /// User-authored guardrails, run before the built-in detectors.
+    guardrails: Option<Guardrails>,
 }
 
 impl SessionPolicy {
@@ -97,7 +107,28 @@ impl SessionPolicy {
         level: PolicyLevel,
         sessions_dir: Option<PathBuf>,
         baseline_path_override: Option<PathBuf>,
+        guardrails_path: Option<PathBuf>,
+        project_dir: &Path,
     ) -> Self {
+        let candidates = match guardrails_path {
+            Some(p) => vec![p],
+            None => guardrails::default_paths(project_dir),
+        };
+        let guardrails = match Guardrails::load(&candidates) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("AgentGuard: ignoring guardrails file — {e}");
+                None
+            }
+        };
+        if let Some(g) = &guardrails {
+            eprintln!(
+                "AgentGuard: {} guardrail(s) loaded from {}",
+                g.rule_count(),
+                g.source
+            );
+        }
+
         SessionPolicy {
             artifact_id: artifact_id.into(),
             level,
@@ -106,18 +137,114 @@ impl SessionPolicy {
             findings_path: session_log_path(sessions_dir),
             baseline: Mutex::new(None),
             baseline_path: baseline_path_override.or_else(baseline_path),
+            guardrails,
         }
     }
 
     /// Called by the pump for every parsed message, before it is
-    /// forwarded.
+    /// forwarded. User guardrails run first; an `allow` short-circuits the
+    /// built-in detectors, a `block`/`redact` is decisive.
     pub(crate) fn inspect(&self, dir: Direction, msg: &Value) -> Action {
+        if let Some(g) = &self.guardrails {
+            // For a response, the method comes from the request/response
+            // id correlation — peek without consuming it.
+            let method = match dir {
+                Direction::ServerToClient => self.method_for_response(msg),
+                Direction::ClientToServer => None,
+            };
+            match g.evaluate(dir, method.as_deref(), msg) {
+                GuardrailOutcome::None => {}
+                GuardrailOutcome::Allow { rule } => {
+                    self.record_guardrail(dir, &rule, "allowed", "explicitly allowed by a guardrail");
+                    // still record a c2s request so response correlation works
+                    if dir == Direction::ClientToServer {
+                        self.track_request(msg);
+                    }
+                    return Action::Forward;
+                }
+                GuardrailOutcome::Warn { rule, message } => {
+                    self.record_guardrail(dir, &rule, "warned", &message);
+                    // fall through to the built-in path
+                }
+                GuardrailOutcome::Redact { rule, message, rewritten } => {
+                    self.record_guardrail(dir, &rule, "redacted", &message);
+                    if dir == Direction::ClientToServer {
+                        self.track_request(msg);
+                    }
+                    let mut bytes = rewritten.to_string().into_bytes();
+                    bytes.push(b'\n');
+                    return Action::Replace(bytes);
+                }
+                GuardrailOutcome::Block { rule, message } => {
+                    self.record_guardrail(dir, &rule, "blocked", &message);
+                    let id = msg.get("id");
+                    let err = guardrail_error(id, &rule, &message);
+                    return match (dir, self.level) {
+                        // block a client request → error back to the client
+                        (Direction::ClientToServer, PolicyLevel::Strict) => {
+                            Action::ReplyAndStop(err)
+                        }
+                        (Direction::ClientToServer, _) => Action::Reply(err),
+                        // block a server response → error to the client
+                        (Direction::ServerToClient, PolicyLevel::Strict) => {
+                            Action::ReplaceAndStop(err)
+                        }
+                        (Direction::ServerToClient, _) => Action::Replace(err),
+                    };
+                }
+            }
+        }
+
         match dir {
             Direction::ClientToServer => {
                 self.track_request(msg);
                 Action::Forward
             }
             Direction::ServerToClient => self.inspect_response(msg),
+        }
+    }
+
+    /// The method a server→client response answers, from the pending map —
+    /// a peek, so the built-in path can still consume it.
+    fn method_for_response(&self, msg: &Value) -> Option<String> {
+        let Rpc::Response { id, .. } = Rpc::classify(msg) else {
+            return None;
+        };
+        self.pending.lock().unwrap().get(&id_key(id)).cloned()
+    }
+
+    fn record_guardrail(&self, dir: Direction, rule: &str, action: &str, message: &str) {
+        eprintln!(
+            "AgentGuard guardrail '{rule}' — {action} a {} message: {message}",
+            dir.tag()
+        );
+        let Some(path) = &self.findings_path else {
+            return;
+        };
+        let mut guard = self.findings.lock().unwrap();
+        if guard.is_none() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            *guard = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
+                .map(std::io::BufWriter::new);
+        }
+        if let Some(w) = guard.as_mut() {
+            let line = serde_json::json!({
+                "ts_ms": now_ms(),
+                "artifact": self.artifact_id,
+                "kind": "guardrail",
+                "rule": rule,
+                "action": action,
+                "dir": dir.tag(),
+                "message": message,
+            });
+            let _ = writeln!(w, "{line}");
+            let _ = w.flush();
         }
     }
 
@@ -461,6 +588,20 @@ fn summarise(findings: &[CapabilityFinding]) -> String {
     format!("{} ({ev})", caps.join(", "))
 }
 
+fn guardrail_error(id: Option<&Value>, rule: &str, message: &str) -> Vec<u8> {
+    let v = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id.cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32001,
+            "message": format!("AgentGuard guardrail '{rule}' blocked this message — {message}"),
+        }
+    });
+    let mut bytes = v.to_string().into_bytes();
+    bytes.push(b'\n');
+    bytes
+}
+
 fn jsonrpc_error(id: &Value, method: &str, reason: &str) -> Vec<u8> {
     let v = serde_json::json!({
         "jsonrpc": "2.0",
@@ -539,6 +680,7 @@ mod tests {
             findings_path: None, // no file in tests
             baseline: Mutex::new(None),
             baseline_path: None, // no baseline persistence in unit tests
+            guardrails: None,
         }
     }
 
@@ -558,6 +700,7 @@ mod tests {
                 findings_path: None,
                 baseline: Mutex::new(None),
                 baseline_path: Some(p.clone()),
+                guardrails: None,
             },
             p,
         )

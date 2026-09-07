@@ -29,6 +29,7 @@ version = "0.1.0"
 dependencies = [
  "agentguard-adapters",
  "agentguard-core",
+ "agentguard-mcp-proxy",
  "agentguard-registry",
  "agentguard-risk",
  "agentguard-scanner",
@@ -66,6 +67,8 @@ dependencies = [
  "agentguard-content",
  "agentguard-core",
  "dirs",
+ "regex",
+ "serde-saphyr",
  "serde_json",
  "sha2",
 ]
