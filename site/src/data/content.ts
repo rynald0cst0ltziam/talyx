@@ -351,7 +351,7 @@ export const steps: Step[] = [
     n: '02',
     title: 'Activate your license',
     body: 'Paste the key from your purchase email. Works offline for 30 days at a time; activate on up to 3 machines.',
-    code: 'talyx activate AG-XXXX-XXXX-XXXX',
+    code: 'talyx activate TLX-XXXX-XXXX-XXXX',
   },
   {
     n: '03',

@@ -31,7 +31,7 @@ const sections = [
 curl -fsSL https://get.{site.domain} | sh
 
 # 2 · activate the license from your purchase email
-talyx activate AG-XXXX-XXXX-XXXX
+talyx activate TLX-XXXX-XXXX-XXXX
 
 # 3 · scan this project + your user-level agent config
 talyx scan --project .</code></pre>
@@ -62,9 +62,9 @@ cargo build --release
     <h2 id="activate">Activate a license</h2>
     <p>
       Talyx is a paid tool. After purchase you receive a key that looks like
-      <code>AG-1A2B-3C4D-5E6F</code>. Activate it once per machine:
+      <code>TLX-1A2B-3C4D-5E6F</code>. Activate it once per machine:
     </p>
-    <pre><code>talyx activate AG-1A2B-3C4D-5E6F</code></pre>
+    <pre><code>talyx activate TLX-1A2B-3C4D-5E6F</code></pre>
     <p>
       This makes one HTTPS call to Lemon Squeezy to bind the key to this machine,
       then writes <code>~/.talyx/license.json</code>. You can activate on up

@@ -124,7 +124,7 @@ enum Command {
     },
     /// Activate a paid license on this machine (required for `init`).
     Activate {
-        /// The key from your purchase email (looks like AG-XXXX-XXXX-XXXX).
+        /// The key from your purchase email (looks like TLX-XXXX-XXXX-XXXX).
         key: String,
     },
     /// Inspect or release this machine's license.

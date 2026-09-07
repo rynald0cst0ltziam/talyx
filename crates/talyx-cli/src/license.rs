@@ -524,7 +524,7 @@ mod tests {
 
     fn sample(status: &str, verified_epoch: u64) -> LicenseFile {
         LicenseFile {
-            key: "AG-TEST-KEY-1234".into(),
+            key: "TLX-TEST-KEY-1234".into(),
             instance_id: "inst-1".into(),
             instance_name: "test-host".into(),
             status: status.into(),
@@ -582,14 +582,14 @@ mod tests {
             "activated": true,
             "error": null,
             "license_key": {
-                "id": 1, "status": "active", "key": "AG-XXXX",
+                "id": 1, "status": "active", "key": "TLX-XXXX",
                 "activation_limit": 3, "activation_usage": 1,
                 "created_at": "2026-01-01T00:00:00.000000Z", "expires_at": null
             },
             "instance": { "id": "abc-123", "name": "laptop", "created_at": "2026-01-01T00:00:00.000000Z" },
             "meta": { "customer_email": "buyer@example.com", "variant_name": "Developer" }
         });
-        let lic = cache_from_response("AG-XXXX", &body, None);
+        let lic = cache_from_response("TLX-XXXX", &body, None);
         assert_eq!(lic.instance_id, "abc-123");
         assert_eq!(lic.instance_name, "laptop");
         assert_eq!(lic.status, "active");
