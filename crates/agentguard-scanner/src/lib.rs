@@ -27,9 +27,13 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 pub mod ast;
-pub mod content;
 pub mod shadowing;
-pub use content::analyze_markdown;
+/// Instruction-text / prompt-injection analysis. Lives in its own leaf
+/// crate (`agentguard-content`, no tree-sitter dependency) so the
+/// enforcement shim's live proxy can reuse it without the parser weight;
+/// re-exported here so existing `content::` paths keep working.
+pub use agentguard_content as content;
+pub use agentguard_content::analyze_markdown;
 
 #[derive(Debug, Error)]
 pub enum ScanError {

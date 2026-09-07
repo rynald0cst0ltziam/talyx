@@ -1,9 +1,10 @@
-//! agentguard-scanner::content
+//! agentguard-content
 //!
 //! Content analysis for TEXT an agent consumes as instructions rather than
 //! executes as code: a skill's `SKILL.md`, an agent-instruction file
-//! (`.cursorrules`, `GEMINI.md`, `AGENTS.md`, ...), and — wired in a later
-//! pass — an MCP server's declared tool descriptions. The source-code
+//! (`.cursorrules`, `GEMINI.md`, `AGENTS.md`, ...), an MCP server's
+//! declared tool descriptions, and (via `agentguard-mcp-proxy`) a
+//! server's *runtime* `tools/list` response. The source-code
 //! heuristics in `lib.rs` (JS/PY/SHELL_RULES) look for *executable*
 //! patterns; this module looks for *prompt-injection* patterns:
 //!
