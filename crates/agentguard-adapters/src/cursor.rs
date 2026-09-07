@@ -1,5 +1,5 @@
 //! Cursor adapter — BUILD_PLAN.md §0's locked v0 scope decision: discovery
-//! + config-gating only, no hook-level enforcement claim. Cursor has no
+//! and config-gating only, no hook-level enforcement claim. Cursor has no
 //! confirmed equivalent to Claude Code's `PreToolUse` hooks as of this
 //! writing, so this adapter never claims in-agent interception — only the
 //! same config-rewrite mechanism (§5a) that works without any agent

@@ -2907,7 +2907,7 @@ mod tests {
         let dir = unique_temp_dir("skill-restore");
         let skills_dir = dir.join(".claude").join("skills");
         let quarantine_dir = dir.join(".claude").join(".agentguard-quarantine");
-        std::fs::create_dir_all(&quarantine_dir.join("evil-skill")).unwrap();
+        std::fs::create_dir_all(quarantine_dir.join("evil-skill")).unwrap();
         std::fs::write(quarantine_dir.join("evil-skill").join("SKILL.md"), "evil").unwrap();
         std::fs::create_dir_all(&skills_dir).unwrap();
         let store = temp_store(&dir);

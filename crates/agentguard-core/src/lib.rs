@@ -337,9 +337,10 @@ impl RiskBand {
 }
 
 /// One of the three onboarding presets from BUILD_PLAN.md §6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ProtectionLevel {
     Quiet,
+    #[default]
     Balanced,
     Strict,
 }
@@ -365,12 +366,6 @@ impl ProtectionLevel {
             (Strict, High) => Block,
             (Strict, Critical) => Block,
         }
-    }
-}
-
-impl Default for ProtectionLevel {
-    fn default() -> Self {
-        ProtectionLevel::Balanced
     }
 }
 

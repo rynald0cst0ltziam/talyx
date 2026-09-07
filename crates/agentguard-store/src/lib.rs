@@ -269,6 +269,7 @@ impl DecisionStore {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&self.path)?;
         handle.lock()?;
 

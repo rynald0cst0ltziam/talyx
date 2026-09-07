@@ -112,15 +112,15 @@ impl AgentAdapter for CodexAdapter {
 /// repaired text ALSO parses successfully; can't make a truly-invalid file
 /// worse than the "return nothing" baseline it would have gotten anyway.
 ///
-/// Known, accepted limitation: a path component that happens to start with
-/// b/f/n/r/t (e.g. `\bin`, `\temp`, `\node_modules`) is indistinguishable
-/// from a genuine `\b`/`\f`/`\n`/`\r`/`\t` escape and is deliberately left
-/// alone rather than guessed at — see `repair_unescaped_backslashes`'s doc
-/// comment. This means a file can still recover incorrectly (a backslash
-/// silently becomes a control character instead of a literal backslash)
-/// for those specific cases; it just won't happen LOUDLY as a parse
-/// failure the way the unambiguous cases (anything else, including the
-/// `\U`sers example above) do.
+/// Residual limitation: a string whose ONLY backslashes are `\b`/`\f`/`\n`/
+/// `\r`/`\t` (e.g. a bare `"\bin"` with nothing else) is still ambiguous —
+/// there's no proof it's a path rather than a control escape, so it's left
+/// alone. But the common real case (`"C:\Users\bin\thing.exe"`, `"C:\temp\
+/// x"`) is now recovered: the moment the string contains one backslash that
+/// *cannot* be any TOML escape (`\U` not followed by hex, `\H`, `\ `, a
+/// trailing `\`, …), the whole string is treated as an unescaped path and
+/// every backslash in it is doubled — including the otherwise-ambiguous
+/// ones. See `repair_unescaped_backslashes`.
 pub fn parse_toml_leniently(text: &str) -> Option<Value> {
     if let Ok(v) = toml::from_str::<Value>(text) {
         return Some(v);
@@ -129,7 +129,67 @@ pub fn parse_toml_leniently(text: &str) -> Option<Value> {
     toml::from_str::<Value>(&repaired).ok()
 }
 
+/// True if `chars` contains a backslash that cannot begin any TOML escape
+/// sequence (`\U`/`\u` without the required hex digits, `\` before a letter
+/// that isn't an escape designator, `\` before a space or digit, a trailing
+/// `\`). Such a backslash is proof the string was written without escaping
+/// any of them — a raw filesystem path pasted into a basic string.
+fn has_unambiguous_raw_backslash(chars: &[char]) -> bool {
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '\\' {
+            i += 1;
+            continue;
+        }
+        match chars.get(i + 1).copied() {
+            None => return true, // trailing backslash
+            // A valid `\\` pair — skip BOTH so the second isn't re-examined
+            // against the character after it.
+            Some('\\') => i += 2,
+            // Valid on their own, OR the ambiguous control escapes: not, by
+            // themselves, proof of anything.
+            Some('"' | 'n' | 't' | 'r' | 'b' | 'f') => i += 2,
+            Some('u') => {
+                let ok = chars
+                    .get(i + 2..i + 6)
+                    .map(|h| h.iter().all(|c| c.is_ascii_hexdigit()))
+                    .unwrap_or(false);
+                if ok {
+                    i += 6;
+                } else {
+                    return true;
+                }
+            }
+            Some('U') => {
+                let ok = chars
+                    .get(i + 2..i + 10)
+                    .map(|h| h.iter().all(|c| c.is_ascii_hexdigit()))
+                    .unwrap_or(false);
+                if ok {
+                    i += 10;
+                } else {
+                    return true;
+                }
+            }
+            // `\S`, `\D`, `\ `, `\1`, … — cannot be an escape.
+            Some(_) => return true,
+        }
+    }
+    false
+}
+
 fn repair_unescaped_backslashes(text: &str) -> String {
+    // If the string contains a backslash that can't be any TOML escape, it
+    // was written without escaping backslashes at all — so double every
+    // backslash, including `\b \f \n \r \t`, which in that file are path
+    // components (`\bin`, `\temp`), not control characters. Without that
+    // proof, fall through to the conservative per-escape pass below, which
+    // leaves a lone `\b` alone rather than guessing.
+    let chars: Vec<char> = text.chars().collect();
+    if has_unambiguous_raw_backslash(&chars) {
+        return text.replace('\\', "\\\\");
+    }
+
     // Index-based rather than a char-by-char peekable iterator: telling a
     // genuinely-valid `\u`/`\U` escape apart from a raw backslash that
     // merely happens to be followed by 'u'/'U' (e.g. the "U" in "Users")
@@ -139,7 +199,6 @@ fn repair_unescaped_backslashes(text: &str) -> String {
     // character, so it treated `\Users` as "already an escape" (since 'U'
     // is a valid escape *designator*) and left it broken, which is exactly
     // the bug this whole function exists to fix.
-    let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < chars.len() {
@@ -357,26 +416,30 @@ mod tests {
     }
 
     #[test]
-    fn repair_cannot_disambiguate_a_path_component_that_looks_like_a_named_escape() {
-        // Known, intentional limitation, not a bug: `\b`, `\f`, `\n`, `\t`,
-        // `\r` are unambiguously VALID single-character TOML escapes on
-        // their own — a real TOML parser accepts "\bastion.exe" and reads
-        // it as a backspace control character followed by "astion.exe",
-        // it does not fail to parse. There's no way to tell "this \b was
-        // meant as an escape" from "this \b was an unescaped path
-        // separator before a word starting with b" without more context
-        // than a regex-shaped repair pass has, so this function correctly
-        // leaves it alone rather than guessing (guessing wrong here would
-        // be silent, not a loud parse failure like the \U case is).
-        // The first backslash (before "Users") is unambiguous -- \U isn't
-        // followed by 8 hex digits -- so it DOES get doubled. Only the
-        // second (\b, a syntactically valid escape on its own) is left as
-        // a bare backslash. Illustrates the mixed outcome honestly rather
-        // than asserting the whole string comes through untouched.
+    fn repair_recovers_a_path_component_that_looks_like_a_named_escape() {
+        // `\bastion.exe` on its own is a syntactically valid TOML escape
+        // (backspace + "astion.exe"), so in isolation it's ambiguous. But
+        // this string ALSO has `\Users` — `\U` not followed by 8 hex digits,
+        // which cannot be an escape — proving the whole thing is an
+        // unescaped Windows path. So every backslash is doubled, `\b`
+        // included, and the path round-trips intact instead of picking up a
+        // stray backspace control character (the real `~/.codex/config.toml`
+        // bastion-proxy case on the dev machine).
         assert_eq!(
             repair_unescaped_backslashes(r"C:\Users\bastion.exe"),
-            r"C:\\Users\bastion.exe"
+            r"C:\\Users\\bastion.exe"
         );
+        let wrapped = format!("x = \"{}\"", repair_unescaped_backslashes(r"C:\Users\bastion.exe"));
+        let parsed: Value = toml::from_str(&wrapped).unwrap();
+        assert_eq!(parsed["x"].as_str().unwrap(), r"C:\Users\bastion.exe");
+    }
+
+    #[test]
+    fn repair_leaves_a_truly_isolated_control_escape_alone() {
+        // The residual limitation, stated honestly: with no other backslash
+        // to prove intent, `\bin` could genuinely be a backspace escape, so
+        // it is left untouched rather than guessed at.
+        assert_eq!(repair_unescaped_backslashes(r"\bin"), r"\bin");
     }
 
     #[test]

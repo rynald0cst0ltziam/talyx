@@ -148,7 +148,7 @@ pub fn collect(
     apply_tool_shadowing(&mut out, engine, level);
 
     // Worst risk first — that's what a human should see first.
-    out.sort_by(|a, b| b.band.cmp(&a.band));
+    out.sort_by_key(|s| std::cmp::Reverse(s.band));
     out
 }
 
