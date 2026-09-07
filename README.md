@@ -190,11 +190,14 @@ From `BUILD_PLAN.md` / the project's coding principles:
 
 ## License
 
-AgentGuard is **source-available under a proprietary license** — see
-[`LICENSE`](LICENSE) (a working draft pending counsel review). In short: you
-may read, compile, run and security-audit the source, and run
-`agentguard scan` / `status` without a key; enforcement (`init` / the shim)
-needs a paid license, and redistribution / resale / hosting is not granted.
+AgentGuard is **source-available under a commercial license** — see
+[`LICENSE`](LICENSE). You may read, compile, run, and security-audit the
+source, and run the read-only commands (`scan`, `status`, `why`,
+`guardrails`, `advisories`) for any purpose including commercially;
+enforcement (`init` / the shim) needs a paid per-developer license, and
+redistribution / resale / hosting is not granted. Two placeholders to fill
+before publishing: the owning entity's legal name and the governing-law
+state — both marked in the file.
 
 Third-party open-source components are listed with their full license texts
 in [`THIRD-PARTY-LICENSES.txt`](THIRD-PARTY-LICENSES.txt). None are

@@ -1,97 +1,123 @@
-AgentGuard — Proprietary Source-Available License
-================================================
+AgentGuard License
 
-Copyright (c) 2026 [LEGAL ENTITY NAME]. All rights reserved.
+Copyright (c) 2026 AgentGuard. All rights reserved.
 
-IMPORTANT: This license text is a working draft. Before the first public
-release or first paid sale, have it reviewed by qualified legal counsel and
-replace "[LEGAL ENTITY NAME]" and the notice address with the real values,
-or substitute an established source-available license (e.g. Business Source
-License 1.1, or a PolyForm license) if counsel prefers.
+This is a source-available commercial license. The source is published so
+you can read, build, and security-audit it. It is not open source, and
+using it in production requires a paid license.
+
+Fill in before first public release: replace "AgentGuard" in the copyright
+line above with the legal name of the entity that owns the software, and
+set the governing law in Section 9. Nothing else needs changing.
+
+--------------------------------------------------------------------------
 
 1. Definitions
 
-   "Software" means the AgentGuard source code in this repository, its
-   compiled binaries (including `agentguard` and `agentguard-shim`), and the
-   bundled data files, excluding third-party components listed in
-   THIRD-PARTY-LICENSES.txt (which are governed by their own licenses).
+   "Software" means the AgentGuard source code in this repository and the
+   binaries built from it (including the `agentguard` and `agentguard-shim`
+   programs), but not the third-party components listed in
+   THIRD-PARTY-LICENSES.txt, which are covered by their own licenses.
 
-   "Licensor" means the copyright holder named above.
+   "We" / "us" means the copyright holder named above. "You" means the
+   person or entity using the Software.
 
-   "You" means the individual or entity exercising rights under this
-   license.
+   "License Key" means an activation key we (or an authorized reseller)
+   issue to you, that has not expired or been revoked, and whose seat count
+   you have not exceeded.
 
-   "Valid License Key" means an activation key issued by Licensor or an
-   authorized reseller and not expired, revoked, or exceeded in its seat
-   count.
+   "Enforcement Features" means any function of the Software that modifies
+   another program's configuration or mediates its execution — including
+   `agentguard init`, `agentguard allow`, and the `agentguard-shim` gate.
+   The read-only reporting commands (`agentguard scan`, `agentguard status`,
+   `agentguard why`, `agentguard guardrails`, `agentguard advisories`) are
+   not Enforcement Features.
 
-2. Grant — source inspection and evaluation
+2. What you may do without a License Key
 
-   Licensor grants You a worldwide, royalty-free, non-exclusive,
-   non-transferable license to:
+   We grant you a worldwide, royalty-free, non-exclusive, non-transferable
+   right to:
 
-   (a) view, compile, and run the Software for the purpose of security
-       review, evaluation, and testing; and
+   (a) download, view, and compile the Software;
 
-   (b) run the `agentguard scan` and `agentguard status` commands and their
-       read-only equivalents without a Valid License Key.
+   (b) run the Software for security review, evaluation, and testing; and
 
-3. Grant — production use
+   (c) run the read-only reporting commands for any purpose, including
+       commercially.
 
-   Running the Software's enforcement features (including `agentguard init`
-   and the `agentguard-shim` gate) other than for short-term evaluation
-   requires a Valid License Key for each developer using it. This grant is
-   co-extensive with the commercial terms accepted at purchase.
+3. What requires a License Key
 
-4. Restrictions
+   Running the Enforcement Features, other than briefly to evaluate them,
+   requires a valid License Key for each developer who uses them. The
+   commercial terms you accept when you obtain a License Key govern that
+   use alongside this license; if they conflict, those terms control for
+   License Key holders.
 
-   Except as expressly permitted above, You may not:
+4. What you may not do
 
-   (a) redistribute, sublicense, sell, rent, lease, or host the Software as
-       a service to third parties;
+   Except as Sections 2 and 3 allow, you may not:
 
-   (b) distribute modified versions, or distribute the Software as part of
-       another product;
+   (a) distribute, publish, sublicense, sell, rent, lease, or host the
+       Software, or provide it to a third party as part of a product or
+       service;
 
-   (c) remove or alter any copyright, trademark, or license notice,
+   (b) distribute modified copies or works derived from the Software;
+
+   (c) remove or alter any copyright, license, or attribution notice,
        including THIRD-PARTY-LICENSES.txt;
 
-   (d) use the name "AgentGuard", the Licensor's other marks, or confusingly
-       similar names, except to refer accurately to the Software; or
+   (d) use our names or trademarks except to identify the Software
+       accurately and to state that you use it; or
 
-   (e) circumvent or disable the license-key check.
+   (e) work around, disable, or defeat the License Key check.
 
-   Nothing here restricts rights You have under applicable law that cannot
-   be waived by contract (for example, certain rights to observe, study, or
-   decompile for interoperability).
+   This section does not limit any right you have under applicable law
+   that a contract cannot take away, such as rights to observe, study, or
+   (where permitted) decompile the Software for interoperability.
 
 5. Third-party components
 
-   The Software links open-source components listed, with their license
-   texts, in THIRD-PARTY-LICENSES.txt. Those components remain under their
-   own licenses; nothing in this license limits Your rights under them.
+   The Software links the open-source components listed, with their
+   license texts, in THIRD-PARTY-LICENSES.txt. Those components stay under
+   their own licenses and nothing here limits your rights under them.
 
-6. No warranty
+6. Ownership
 
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+   We keep all right, title, and interest in the Software. This license
+   grants permissions, not ownership.
 
-7. Limitation of liability
+7. Disclaimer of warranty
 
-   TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL LICENSOR BE
-   LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
-   OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
-   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+   THE SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTIES OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION WARRANTIES OF FITNESS
+   FOR A PARTICULAR PURPOSE, MERCHANTABILITY, TITLE, OR NON-INFRINGEMENT.
+   The Software analyzes untrusted input and reports risk; it does not
+   guarantee that every malicious artifact is detected or blocked.
 
-8. Termination
+8. Limitation of liability
 
-   This license terminates automatically if You breach it. On termination
-   You must stop using the Software and destroy all copies, except that
-   Section 2(a) rights survive for genuine security-review purposes.
+   IN NO EVENT WILL WE HAVE ANY LIABILITY TO YOU ARISING OUT OF OR RELATED
+   TO THE SOFTWARE, INCLUDING INDIRECT, SPECIAL, INCIDENTAL, OR
+   CONSEQUENTIAL DAMAGES, EVEN IF WE HAVE BEEN INFORMED OF THEIR
+   POSSIBILITY IN ADVANCE. AS FAR AS THE LAW ALLOWS, OUR TOTAL LIABILITY
+   UNDER THIS LICENSE WILL NOT EXCEED THE AMOUNT YOU PAID US FOR THE
+   SOFTWARE IN THE TWELVE MONTHS BEFORE THE CLAIM.
 
-9. Governing law
+9. Termination
 
-   [JURISDICTION TO BE SET BY COUNSEL.]
+   This license ends automatically if you breach it and do not fix the
+   breach within 30 days of notice. On termination you must stop using the
+   Software and destroy your copies, except that the Section 2(a)-(b)
+   rights survive for genuine security-review purposes.
 
-Notices: [CONTACT ADDRESS]
+10. Governing law
+
+   This license is governed by the laws of [STATE / COUNTRY — set this to
+   where the owning entity is based], without regard to its conflict-of-
+   laws rules.
+
+--------------------------------------------------------------------------
+
+The warranty disclaimer and liability language in Sections 7-8 is adapted
+from the Functional Source License 1.1 (https://fsl.software), used here
+under its permissive terms.
