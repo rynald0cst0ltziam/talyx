@@ -137,6 +137,40 @@ impl Advisories {
         }
     }
 
+    /// Strictly parse + sanity-check a candidate feed (used by
+    /// `talyx advisories refresh` before it overwrites the local file).
+    /// Enforces the same curation rules `data/advisories.json` documents:
+    /// `version == 1`, non-empty, and every advisory has a well-formed id,
+    /// a `malicious`/`advisory` severity, at least one `references` URL,
+    /// and at least one matcher. Returns the advisory count on success.
+    pub fn validate(text: &str) -> Result<usize, String> {
+        let feed: Feed = serde_json::from_str(text).map_err(|e| format!("not valid JSON: {e}"))?;
+        if feed.version != 1 {
+            return Err(format!("unsupported feed version {} (expected 1)", feed.version));
+        }
+        if feed.advisories.is_empty() {
+            return Err("feed contains no advisories".to_string());
+        }
+        for adv in &feed.advisories {
+            if adv.id.trim().is_empty() {
+                return Err("an advisory has an empty id".to_string());
+            }
+            if adv.severity != "malicious" && adv.severity != "advisory" {
+                return Err(format!(
+                    "advisory {} has severity {:?} (expected \"malicious\" or \"advisory\")",
+                    adv.id, adv.severity
+                ));
+            }
+            if adv.references.iter().all(|r| r.trim().is_empty()) {
+                return Err(format!("advisory {} has no reference URL", adv.id));
+            }
+            if adv.matchers.is_empty() {
+                return Err(format!("advisory {} has no matchers", adv.id));
+            }
+        }
+        Ok(feed.advisories.len())
+    }
+
     pub fn len(&self) -> usize {
         self.list.len()
     }
@@ -394,6 +428,29 @@ mod tests {
         assert!(a
             .iter()
             .all(|adv| adv.severity == "malicious" || adv.severity == "advisory"));
+    }
+
+    #[test]
+    fn validate_accepts_the_embedded_feed_and_rejects_malformed_ones() {
+        assert!(Advisories::validate(EMBEDDED).unwrap() >= 4);
+
+        assert!(Advisories::validate("not json").is_err());
+        assert!(Advisories::validate(r#"{"version":2,"advisories":[]}"#).is_err());
+        assert!(Advisories::validate(r#"{"version":1,"advisories":[]}"#)
+            .unwrap_err()
+            .contains("no advisories"));
+
+        // an advisory missing its references URL is rejected
+        let no_ref = r#"{"version":1,"advisories":[
+            {"id":"X-1","title":"t","severity":"malicious","references":[],
+             "match":[{"type":"npm_publisher","value":"x"}]}]}"#;
+        assert!(Advisories::validate(no_ref).unwrap_err().contains("reference"));
+
+        // a bad severity is rejected
+        let bad_sev = r#"{"version":1,"advisories":[
+            {"id":"X-1","title":"t","severity":"scary","references":["https://x"],
+             "match":[{"type":"npm_publisher","value":"x"}]}]}"#;
+        assert!(Advisories::validate(bad_sev).unwrap_err().contains("severity"));
     }
 
     #[test]

@@ -149,9 +149,11 @@ cargo run -p talyx-cli -- init --project . --live
 cargo run -p talyx-cli -- allow "<artifact-id>"
 cargo run -p talyx-cli -- why "<artifact-id>"
 
-# Inspect the bundled known-bad advisory feed, or check one package:
+# Inspect the known-bad advisory feed, check one package, or pull a newer
+# copy over HTTPS (validated before it replaces ~/.talyx/advisories.json):
 cargo run -p talyx-cli -- advisories list
 cargo run -p talyx-cli -- advisories check postmark-mcp --version 1.0.17
+cargo run -p talyx-cli -- advisories refresh
 ```
 
 ## CI / pull-request gating (SARIF)

@@ -115,13 +115,16 @@ talyx license status         # show seats used, renewal date, offline grace</cod
       Validate the live-proxy guardrails file, list the rules it would load, or
       print a commented starter. See <a href="#live-proxy">Guardrails</a>.
     </p>
-    <h3><code>talyx advisories list|check</code></h3>
+    <h3><code>talyx advisories list|check|refresh</code></h3>
     <p>
-      Inspect the bundled known-bad advisory feed. <code>list</code> prints every
+      Inspect the known-bad advisory feed. <code>list</code> prints every
       advisory (id, severity, detail, references). <code>check &lt;package&gt;
       [--version &lt;v&gt;] [--registry npm|pypi]</code> tests one package name
-      against the feed and exits non-zero on a match. See
-      <a href="#advisories">The advisory feed</a>.
+      against the feed and exits non-zero on a match. <code>refresh
+      [--url &lt;u&gt;]</code> downloads a newer feed over HTTPS and writes it
+      to <code>~/.talyx/advisories.json</code> (validated first — a bad
+      download never overwrites the local file); the copy bundled in the
+      binary is never touched. See <a href="#advisories">The advisory feed</a>.
     </p>
     <h3><code>talyx activate &lt;key&gt;</code> · <code>talyx license status|deactivate</code></h3>
     <p>See <a href="#activate">Activate a license</a>.</p>
@@ -163,10 +166,16 @@ talyx license status         # show seats used, renewal date, offline grace</cod
 talyx advisories check postmark-mcp --version 1.0.17   # exits 1 — match
 talyx advisories check mcp-remote --version 0.1.20      # exits 0 — clear</code></pre>
     <p>
-      It works fully offline. To override the bundled feed with a newer copy,
-      drop it at <code>~/.talyx/advisories.json</code> or point
-      <code>TALYX_ADVISORIES</code> at a file. The format is versioned and
-      documented in the repo's <code>data/advisories.json</code>.
+      It works fully offline. To pull a newer copy, run
+      <code>talyx advisories refresh</code> — it downloads over HTTPS,
+      validates the feed (a malformed or unreachable download never
+      overwrites your local file), and writes
+      <code>~/.talyx/advisories.json</code>, which <code>scan</code> and
+      <code>init</code> then prefer over the bundled copy. You can also just
+      drop a file there yourself, or point <code>TALYX_ADVISORIES</code> at
+      one. Delete it to fall back to the feed compiled into the binary. The
+      format is versioned and documented in the repo's
+      <code>data/advisories.json</code>.
     </p>
 
     <h2 id="live-proxy">Live traffic inspection</h2>
@@ -337,6 +346,7 @@ talyx guardrails list       # show what the proxy would load</code></pre>
         <tr><td><code>TALYX_SESSIONS_DIR</code></td><td>Directory for the proxy's findings log (default <code>~/.talyx/sessions/</code>).</td></tr>
         <tr><td><code>TALYX_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.talyx/</code> and <code>&lt;project&gt;/.talyx/</code> defaults.</td></tr>
         <tr><td><code>TALYX_ADVISORIES</code></td><td>Path to an advisory feed file, overriding the bundled one and <code>~/.talyx/advisories.json</code>. See <a href="#advisories">The advisory feed</a>.</td></tr>
+        <tr><td><code>TALYX_ADVISORIES_URL</code></td><td>Feed URL for <code>talyx advisories refresh</code> (default: the <code>advisories.json</code> asset of the latest <code>$TALYX_REPO</code> release).</td></tr>
         <tr><td><code>TALYX_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on Talyx itself.</td></tr>
       </tbody>
     </table>
@@ -356,7 +366,7 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     <h3>Unreleased</h3>
     <ul>
       <li><strong>Live traffic inspection (opt-in).</strong> <code>talyx init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
-      <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable. Forces a block or a review regardless of behaviour score. <code>talyx advisories list|check</code>. See <a href="#advisories">The advisory feed</a>.</li>
+      <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable, refreshable over HTTPS. Forces a block or a review regardless of behaviour score. <code>talyx advisories list|check|refresh</code>. See <a href="#advisories">The advisory feed</a>.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>
       <li><strong>Plugin &amp; extension ecosystems</strong> — Claude Code plugins, Gemini CLI extensions and Antigravity plugins: every enabled one's bundled MCP servers, hooks, skills, agents, LSP servers and monitors are discovered and scored.</li>
       <li><strong>Warp</strong> added (27 agents). <code>~/.warp/.mcp.json</code>, flat-root shape.</li>

@@ -183,6 +183,17 @@ enum AdvisoriesAction {
         #[arg(long, default_value = "npm")]
         registry: String,
     },
+    /// Download a newer feed over HTTPS and replace the local override
+    /// (`~/.talyx/advisories.json` or `$TALYX_ADVISORIES`). The bundled
+    /// feed is never touched; a fetch or validation failure leaves any
+    /// existing file untouched.
+    Refresh {
+        /// Feed URL. Defaults to `$TALYX_ADVISORIES_URL`, else the
+        /// `advisories.json` asset of the latest release of
+        /// `$TALYX_REPO` (`your-org/talyx` until a real repo is set).
+        #[arg(long)]
+        url: Option<String>,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -256,9 +267,14 @@ fn main() {
 fn run_advisories(action: AdvisoriesAction) -> i32 {
     use talyx_core::ArtifactSource;
 
+    if let AdvisoriesAction::Refresh { url } = action {
+        return run_advisories_refresh(url);
+    }
+
     let feed = talyx_advisories::Advisories::load(pipeline::advisories_file().as_deref());
 
     match action {
+        AdvisoriesAction::Refresh { .. } => unreachable!(),
         AdvisoriesAction::List => {
             println!("{} advisory(ies) — source: {}", feed.len(), feed.source);
             for adv in feed.iter() {
@@ -297,6 +313,85 @@ fn run_advisories(action: AdvisoriesAction) -> i32 {
             }
         }
     }
+}
+
+fn run_advisories_refresh(url: Option<String>) -> i32 {
+    let explicit = url.is_some() || std::env::var_os("TALYX_ADVISORIES_URL").is_some();
+    let url = url
+        .or_else(|| std::env::var("TALYX_ADVISORIES_URL").ok())
+        .unwrap_or_else(|| {
+            let repo =
+                std::env::var("TALYX_REPO").unwrap_or_else(|_| "your-org/talyx".to_string());
+            format!("https://github.com/{repo}/releases/latest/download/advisories.json")
+        });
+
+    let Some(dest) = pipeline::advisories_file() else {
+        eprintln!("talyx: no home directory — can't resolve where to write the feed.");
+        eprintln!("Set $TALYX_ADVISORIES to an explicit path and retry.");
+        return 1;
+    };
+
+    println!("Fetching {url}");
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .user_agent(concat!("talyx/", env!("CARGO_PKG_VERSION")))
+        .build();
+    let agent = ureq::Agent::new_with_config(agent);
+
+    let text = match agent.get(&url).call() {
+        Ok(mut resp) => match resp
+            .body_mut()
+            .with_config()
+            .limit(4 * 1024 * 1024)
+            .read_to_string()
+        {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("talyx: failed to read the feed response: {e}");
+                return 1;
+            }
+        },
+        Err(ureq::Error::StatusCode(404)) => {
+            eprintln!("talyx: {url} returned 404.");
+            if !explicit {
+                eprintln!(
+                    "No published feed yet — `$TALYX_REPO` is still the placeholder until a real repo + release exists (same as the install scripts). Pass --url or set $TALYX_ADVISORIES_URL to fetch from elsewhere."
+                );
+            }
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("talyx: could not fetch {url}: {e}");
+            return 1;
+        }
+    };
+
+    let count = match talyx_advisories::Advisories::validate(&text) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("talyx: the downloaded feed is not valid — {e}");
+            eprintln!("The local feed was left unchanged.");
+            return 1;
+        }
+    };
+
+    if let Some(parent) = dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("talyx: could not create {}: {e}", parent.display());
+            return 1;
+        }
+    }
+    if let Err(e) = std::fs::write(&dest, &text) {
+        eprintln!("talyx: could not write {}: {e}", dest.display());
+        return 1;
+    }
+
+    println!(
+        "Wrote {count} advisory(ies) to {} — `talyx scan`/`init` will use it from now on.",
+        dest.display()
+    );
+    println!("Delete that file to fall back to the feed bundled in the binary.");
+    0
 }
 
 fn run_guardrails(action: GuardrailsAction) -> i32 {
