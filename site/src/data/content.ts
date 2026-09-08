@@ -99,7 +99,7 @@ export const features: Feature[] = [
     icon: 'shield',
     tag: 'Enforcement',
     title: 'Blocks the bad ones — for real',
-    body: 'Approved servers launch through the Talyx shim. Blocked ones are removed from the config so the agent physically cannot start them. Remote entries are stripped and restored on approval. Malicious skills are quarantined. Every change is checksum-verified and reversible, and your real secrets and hook commands are never written into a rewritten file.',
+    body: 'Approved servers launch through the Talyx shim. Blocked ones are removed from the config so the agent physically cannot start them. Remote entries are stripped and restored on approval. Malicious skills — and repo-delivered instruction files carrying a prompt injection — are quarantined. Every change is checksum-verified and reversible, and your real secrets and hook commands are never written into a rewritten file.',
   },
   {
     icon: 'drift',
@@ -305,7 +305,7 @@ export const capabilities: Capability[] = [
   },
   {
     capability: 'Blocks a server from launching — for real',
-    how: 'Approved servers run through the Talyx shim; blocked ones are removed from the config so the agent physically cannot start them; malicious skills are quarantined. Every change is checksum-verified and reversible.',
+    how: 'Approved servers run through the Talyx shim; blocked ones are removed from the config so the agent physically cannot start them; malicious skills and repo-delivered instruction files are quarantined. Every change is checksum-verified and reversible.',
   },
   {
     capability: 'Live JSON-RPC inspection',

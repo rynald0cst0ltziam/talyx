@@ -161,7 +161,9 @@ fn parse_antigravity_plugins(plugins_dir: &Path) -> Vec<DiscoveredArtifact> {
         out.extend(parse_antigravity_hooks(&plugin_dir.join("hooks.json")));
 
         // rules/<name>.md — loose instruction files: content-scanned as
-        // `AgentConfig` (no safe automatic action, same as `.cursorrules`).
+        // `AgentConfig`. A project-scoped one that scores Block/Ask is
+        // quarantined by `talyx init` (moved to a sibling
+        // `.talyx-quarantine/`), same as `.cursorrules` and a flagged skill.
         if let Ok(rules) = fs::read_dir(plugin_dir.join("rules")) {
             for md in rules.flatten() {
                 let p = md.path();

@@ -134,7 +134,7 @@ talyx license status         # show seats used, renewal date, offline grace</cod
       <li>Every config file is checksummed and backed up before the first rewrite.</li>
       <li>Approved servers get their launch command rewritten to call <code>talyx-shim &lt;id&gt; -- &lt;original command&gt;</code>. The shim re-checks the cached decision, then execs the real server.</li>
       <li>Blocked local servers get the same treatment but the shim refuses to exec. Blocked remote servers are removed from the config entirely and their original entry is stored.</li>
-      <li>Malicious skills are moved into a <code>.talyx-quarantine/</code> directory next to the agent's skills folder, so the agent stops loading them.</li>
+      <li>Malicious skills — and project-scoped instruction files (<code>.cursorrules</code>, <code>GEMINI.md</code>, a project <code>CLAUDE.md</code>) with a prompt-injection or exfiltration directive in them — are moved into a <code>.talyx-quarantine/</code> directory next to where the agent looks for them, so it stops loading them. Your own user-level instruction files are scored and reported but never moved unless you pass <code>--include-user-config</code>.</li>
       <li><code>talyx allow &lt;id&gt;</code> or restoring from the backup reverses any of this. Your real secrets and hook commands are never written into a rewritten file.</li>
     </ol>
 
@@ -358,7 +358,7 @@ talyx guardrails list       # show what the proxy would load</code></pre>
       <li><code>tool_baselines.json</code> — trust-on-first-use snapshot of each server's approved tool list (live proxy).</li>
       <li><code>license.json</code> — cached license status and the 7-day / 30-day trust timers.</li>
       <li><code>sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> — live-proxy findings, one JSON object per line.</li>
-      <li>A <code>.talyx-quarantine/</code> directory next to an agent's skills folder — blocked skills are moved here (not under <code>~/.talyx/</code>, so the move stays within the same repo).</li>
+      <li>A <code>.talyx-quarantine/</code> directory next to an agent's skills folder or a flagged instruction file — blocked skills and project-scoped instruction files are moved here (not under <code>~/.talyx/</code>, so the move stays within the same repo and is easy to inspect / undo).</li>
       <li>A <code>&lt;file&gt;.talyx-backup</code> next to each agent config the first time <code>init</code> rewrites it.</li>
     </ul>
 

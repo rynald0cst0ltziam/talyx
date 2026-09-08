@@ -74,11 +74,13 @@ impl AgentAdapter for CursorAdapter {
         }
 
         // .cursorrules — instruction/prompt text fed straight into the
-        // agent's context. Content-scanned (talyx-scanner's
-        // content.rs: prompt-injection phrasing, hidden Unicode, encoded
-        // payloads, exfiltration directives) via its `scan_root`, the same
-        // way a skill's SKILL.md now is — a poisoned `.cursorrules`
-        // committed to a shared repo is a real supply-chain vector.
+        // agent's context. Content-scanned (talyx-scanner's content.rs:
+        // prompt-injection phrasing, hidden Unicode, encoded payloads,
+        // exfiltration directives) via its `scan_root`, the same way a
+        // skill's SKILL.md is — a poisoned `.cursorrules` committed to a
+        // shared repo is a real supply-chain vector, and a project-scoped
+        // one that scores Block/Ask is quarantined by `talyx init` (moved
+        // to a sibling `.talyx-quarantine/`) exactly like a flagged skill.
         let rules_path = project_root.join(".cursorrules");
         if rules_path.exists() {
             out.push(config_fingerprint(&rules_path, ".cursorrules"));
