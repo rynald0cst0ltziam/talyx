@@ -103,7 +103,9 @@ npm/
 site/
   Astro static marketing site for talyx.dev — see site/README.md for deploy + pre-launch edits
 .github/workflows/
-  release.yml              builds + drafts a GitHub Release for a pushed v* tag
+  ci.yml                  clippy -D warnings + cargo test --workspace + site astro check/build, on every push/PR
+  talyx-scan.yml          runs `talyx scan` on the repo, uploads SARIF to code scanning
+  release.yml             builds + drafts a GitHub Release for a pushed v* tag
 ```
 
 ## Build & run

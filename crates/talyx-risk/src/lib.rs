@@ -126,13 +126,13 @@ impl RiskEngine {
         if caps.contains(&Capability::KnownMalicious) {
             extra += 100;
             reasons.push(
-                "matches an Talyx advisory for a confirmed malicious artifact (package / publisher / host named in the known-bad feed) — +100, forces BLOCK"
+                "matches a Talyx advisory for a confirmed malicious artifact (package / publisher / host named in the known-bad feed) — +100, forces BLOCK"
                     .to_string(),
             );
         } else if caps.contains(&Capability::KnownAdvisory) {
             extra += 30;
             reasons.push(
-                "matches an Talyx advisory for a disclosed issue (e.g. a vulnerability fixed in a later version) — +30, forces review"
+                "matches a Talyx advisory for a disclosed issue (e.g. a vulnerability fixed in a later version) — +30, forces review"
                     .to_string(),
             );
         }

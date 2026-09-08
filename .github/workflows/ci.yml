@@ -1,0 +1,67 @@
+# Runs the workspace test suite + clippy on every push and PR, and builds
+# the marketing site. This is the regression gate the repo's "if it's
+# listed as done, it's built and tested" discipline relies on — nothing
+# else ran the 340+ tests automatically before this.
+#
+# `cargo fmt --check` is deliberately NOT enforced: the codebase was
+# written to a house style that predates any rustfmt run, so turning it on
+# would mean a 400+ block reformat commit first. Add it (with a
+# `rustfmt.toml` matching the existing width) as a separate decision.
+name: CI
+
+"on":
+  push:
+    branches: [main, master]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-ci-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-ci-
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - run: npm ci
+      - run: npx astro check
+      - run: npx astro build
