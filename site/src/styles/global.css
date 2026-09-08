@@ -6,11 +6,12 @@
    signal color, one green "safe" color, one red "threat" color.
    ───────────────────────────────────────────────────────────── */
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* One typeface for the whole UI — Space Grotesk: geometric, precise, a
+     touch technical. Reads "engineered", not "generic SaaS". Everything
+     that isn't literal code/terminal output uses this. */
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
-  /* Display face — Space Grotesk: geometric, precise, a touch technical.
-     Reads "engineered", not "generic SaaS". Used for every heading. */
-  --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
 
   --color-ink: #05060a;
   --color-void: #0a0c12;
