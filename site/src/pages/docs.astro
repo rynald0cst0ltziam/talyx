@@ -373,8 +373,8 @@ talyx guardrails list       # show what the proxy would load</code></pre>
       <li>Remote-code-execution detection for hooks and skill code blocks (<code>curl … | sh</code>, <code>irm … | iex</code>).</li>
       <li>MCP tool-description poisoning detection; tool-shadowing &amp; typosquat detection across all discovered servers.</li>
       <li>SARIF 2.1.0 output + GitHub Action; capability-drift re-review.</li>
-      <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives.</li>
-      <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers.</li>
+      <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives — and a flagged, project-scoped instruction file (<code>.cursorrules</code>, <code>GEMINI.md</code>) is quarantined, not just reported.</li>
+      <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers; skills and repo-delivered instruction files quarantined; <code>talyx allow</code> reverses any of it.</li>
       <li><code>talyx activate</code> / <code>license</code> commands.</li>
     </ul>
   </Prose>
