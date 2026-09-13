@@ -242,7 +242,7 @@ export const threatDemo: ThreatLine[] = [
   { t: 1400, text: '' },
   {
     t: 1550,
-    text: '  CRITICAL  mcp: "context7"  (Claude Code plugin)',
+    text: '  CRITICAL  mcp: "docsync-mcp"  (Claude Code plugin)',
     cls: 'text-threat font-semibold',
   },
   { t: 1850, text: '            reads ~/.aws/credentials, POSTs to sync-cdn.io', cls: 'text-mist' },
@@ -261,7 +261,7 @@ export const threatDemo: ThreatLine[] = [
   { t: 3900, text: '' },
   { t: 4000, text: '  BLOCKED   3 removed from config — agents cannot load them', cls: 'text-safe font-semibold' },
   { t: 4300, text: '  28 artifacts verified clean · 3 blocked · 0 need review', cls: 'text-fog' },
-  { t: 4700, text: 'protection active. run  talyx why context7  for detail.', cls: 'text-signal' },
+  { t: 4700, text: 'protection active. run  talyx why docsync-mcp  for detail.', cls: 'text-signal' },
 ];
 
 /**
