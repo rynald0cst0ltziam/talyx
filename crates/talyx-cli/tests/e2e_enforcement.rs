@@ -243,6 +243,83 @@ fn init_blocks_a_known_bad_server_and_runs_a_benign_one() {
     assert_eq!(fs::read_to_string(&cursorrules).unwrap(), rules_text);
 }
 
+/// Everything above discovers a server from a top-level `.mcp.json`. A
+/// plugin/extension-sourced server is a structurally different discovery
+/// path (nested under a plugin directory, gated by a `plugin.json`
+/// manifest, its own `mcp_config.json`) that unit tests already cover
+/// (see `antigravity.rs`'s `discovers_an_mcp_server_and_a_rule_from_a_
+/// workspace_plugin`) but this e2e suite never proved end to end. Uses
+/// Antigravity's plugin system specifically because it's fully
+/// project-scoped — no `dirs::home_dir()` involved, unlike Claude Code's
+/// plugin marketplace, so it fits this test's `--project <scratch>`
+/// harness without needing a redirectable home directory.
+#[test]
+fn init_blocks_a_known_bad_server_sourced_from_a_workspace_plugin() {
+    let shim = shim_bin();
+    let scratch = Scratch::new("plugin-enforce");
+    let proj = scratch.path();
+    let store = proj.join("store.json");
+
+    let plugin_dir = proj.join(".agents").join("plugins").join("shady");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    fs::write(plugin_dir.join("plugin.json"), r#"{"name":"shady"}"#).unwrap();
+    let plugin_config = serde_json::json!({
+        "mcpServers": {
+            "known-bad": { "command": "npx", "args": ["-y", "postmark-mcp@1.0.17"] },
+        }
+    });
+    fs::write(
+        plugin_dir.join("mcp_config.json"),
+        serde_json::to_string_pretty(&plugin_config).unwrap(),
+    )
+    .unwrap();
+
+    let out = run(Command::new(TALYX)
+        .args(["init", "--project"])
+        .arg(proj)
+        .arg("--store")
+        .arg(&store)
+        .env("TALYX_DEV", "1"));
+    assert!(out.status.success(), "`talyx init` failed");
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("1 critical") && report.contains("1 blocked"),
+        "init should report the plugin-sourced known-bad server as critical/blocked:\n{report}"
+    );
+
+    // ── the plugin's own mcp_config.json was rewritten to route through
+    // the shim, exactly like a top-level .mcp.json entry would be ────────
+    let rewritten: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(plugin_dir.join("mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    let entry = &rewritten["mcpServers"]["known-bad"];
+    let shim_str = shim.display().to_string();
+    assert_eq!(entry["command"].as_str().unwrap(), shim_str, "plugin server not routed through the shim");
+    let args: Vec<String> = entry["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let bad_id = args[0].clone();
+    assert_eq!(args[1], "--");
+    assert_eq!(&args[2..], &["npx", "-y", "postmark-mcp@1.0.17"]);
+
+    let backup = plugin_dir.join("mcp_config.json.talyx-backup");
+    assert!(backup.exists(), "no .talyx-backup written for the plugin's own config");
+
+    // ── the shim REFUSES it, exactly as it would for a top-level entry ───
+    let out = run(Command::new(&shim)
+        .arg(&bad_id)
+        .arg("--")
+        .args(["npx", "-y", "postmark-mcp@1.0.17"])
+        .env("TALYX_STORE", &store));
+    assert_eq!(out.status.code(), Some(1), "shim should refuse a plugin-sourced BLOCK with exit 1");
+    let err = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    assert!(err.contains("blocked") && err.contains("known-bad"), "unexpected refusal message: {err}");
+}
+
 /// The store file is `{ "records": { "<id>": { "name": ..., ... } } }`.
 /// Return the id of the record whose `name` matches.
 fn store_id_for(store_path: &Path, name: &str) -> String {
