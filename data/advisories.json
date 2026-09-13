@@ -72,6 +72,20 @@
         "https://arxiv.org/abs/2508.14925"
       ],
       "published": "2025-08-20"
+    },
+    {
+      "id": "TLX-2025-0006",
+      "title": "mcp-server-github (npm) — name-squatted the official GitHub MCP server, exfiltrates system info on install",
+      "severity": "malicious",
+      "detail": "A GitHub Security Advisory (GHSA-95pj-hrh5-27gq, cross-referenced by OSV as MAL-2026-5479) records that the unscoped npm package 'mcp-server-github' squats the name developers would reasonably type when looking for the official '@modelcontextprotocol/server-github', and runs a postinstall script that unconditionally sends hostname, working directory, npm user agent, Node version and platform details to an attacker-controlled endpoint before the user can intervene. All published versions (0.0.1, 0.0.2) are affected and none is patched; the advisory states a machine with this package installed or running should be considered fully compromised and its secrets rotated from a separate device.",
+      "match": [
+        { "type": "npm", "name": "mcp-server-github" }
+      ],
+      "references": [
+        "https://github.com/advisories/GHSA-95pj-hrh5-27gq",
+        "https://osv.dev/vulnerability/MAL-2026-5479"
+      ],
+      "published": "2026-06-09"
     }
   ]
 }
