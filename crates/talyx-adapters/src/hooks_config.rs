@@ -97,14 +97,32 @@ fn collect_command_strings(value: &Value, out: &mut Vec<String>) {
 /// is unit-testable with an isolated store instead of racing on the real
 /// machine-wide one or a shared `TALYX_STORE` env var across parallel
 /// test threads.
+/// The file stem (name, minus a trailing `.ext`) of a path string,
+/// treating BOTH `/` and `\` as separators regardless of the host OS.
+/// `std::path::Path` only recognizes `\` as a separator when actually
+/// running on Windows — a Windows-produced shim path (`C:\tools\
+/// talyx-shim.exe`) embedded in a hook config that's shared across a team
+/// (a committed `.claude/settings.json`, say) needs to be recognized the
+/// same way on a teammate's Linux machine, or `talyx why` there silently
+/// fails to unwrap it. Found via real cross-platform test verification,
+/// not assumed.
+fn file_stem_either_separator(path: &str) -> Option<&str> {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    if name.is_empty() {
+        return None;
+    }
+    let without_ext = name.len().checked_sub(4).and_then(|i| {
+        name[i..].eq_ignore_ascii_case(".exe").then(|| &name[..i])
+    });
+    Some(without_ext.unwrap_or(name))
+}
+
 fn unwrap_shim_hook_invocation(command_str: &str, store: &DecisionStore) -> Option<String> {
     let trimmed = command_str.trim_start();
     let rest = trimmed.strip_prefix('"')?;
     let end_quote = rest.find('"')?;
     let shim_path_candidate = &rest[..end_quote];
-    let looks_like_shim = Path::new(shim_path_candidate)
-        .file_stem()
-        .and_then(|s| s.to_str())
+    let looks_like_shim = file_stem_either_separator(shim_path_candidate)
         .map(|s| s.eq_ignore_ascii_case("talyx-shim"))
         .unwrap_or(false);
     if !looks_like_shim {
@@ -343,6 +361,32 @@ mod tests {
         assert_eq!(
             unwrap_shim_hook_invocation(wrapped, &store),
             Some("./scripts/audit-log.sh --verbose".to_string())
+        );
+    }
+
+    #[test]
+    fn recognizes_a_windows_backslash_shim_path_regardless_of_the_host_os() {
+        // Found via real Linux verification (Docker, not assumed): a
+        // Windows-produced shim path embedded in a hook config shared
+        // across a team (a committed `.claude/settings.json`) needs to be
+        // recognized on a teammate's Linux/macOS machine too, but
+        // `Path::new(...).file_stem()` only treats `\` as a separator
+        // when actually running on Windows — on Linux the whole string
+        // was one opaque component and this returned `None`. This test
+        // pins the specific regression rather than relying on the test
+        // above happening to also exercise it only on a Windows CI runner.
+        let store = store_with_shell_command("abc123", "./scripts/audit-log.sh --verbose");
+        let windows_style = r#""C:\tools\talyx-shim.exe" "abc123" --shell"#;
+        let posix_style = r#""/usr/local/bin/talyx-shim" "abc123" --shell"#;
+        assert_eq!(
+            unwrap_shim_hook_invocation(windows_style, &store),
+            Some("./scripts/audit-log.sh --verbose".to_string()),
+            "a Windows-style backslash path must unwrap on any host OS"
+        );
+        assert_eq!(
+            unwrap_shim_hook_invocation(posix_style, &store),
+            Some("./scripts/audit-log.sh --verbose".to_string()),
+            "a POSIX-style forward-slash path (no .exe) must unwrap too"
         );
     }
 
