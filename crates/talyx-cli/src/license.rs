@@ -82,7 +82,7 @@ impl std::fmt::Display for LicenseError {
         match self {
             LicenseError::NotActivated => write!(
                 f,
-                "no active license on this machine.\n  Buy one at https://talyx.dev/pricing, then run:\n    talyx activate <YOUR-KEY>\n  In CI, set TALYX_LICENSE_KEY instead."
+                "no active license on this machine.\n  Buy one at https://gettalyx.dev/pricing, then run:\n    talyx activate <YOUR-KEY>\n  In CI, set TALYX_LICENSE_KEY instead."
             ),
             LicenseError::Rejected(m) => write!(f, "license rejected by Lemon Squeezy: {m}"),
             LicenseError::Unreachable(m) => write!(
@@ -314,7 +314,7 @@ pub fn run_deactivate() -> i32 {
 pub fn run_status() -> i32 {
     let Some(mut lic) = read_license() else {
         println!("Not activated on this machine.");
-        println!("  Buy: https://talyx.dev/pricing");
+        println!("  Buy: https://gettalyx.dev/pricing");
         println!("  Then: talyx activate <YOUR-KEY>");
         return 0;
     };

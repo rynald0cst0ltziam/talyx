@@ -9,16 +9,16 @@
 # (this script mirrors it)  -- same "no shell-profile edits without asking"
 # rule applies here via -ModifyPath for the User PATH environment variable.
 #
-# NOT wired to a real download yet: $Repo below is a placeholder until a
-# real release exists (see .github/workflows/release.yml, which is what
-# produces the archive this script downloads). Until then this fails at
-# the download step with a clear error, on purpose.
+# $Repo points at the real repo, but no release has been tagged yet (see
+# .github/workflows/release.yml, which is what produces the archive this
+# script downloads). Until then this fails at the download step with a
+# clear error, on purpose.
 #
 # v0 covers x86_64 Windows only (matches the release workflow's matrix)  --
 # Windows on ARM isn't built yet.
 
 param(
-    [string]$Repo = $(if ($env:TALYX_REPO) { $env:TALYX_REPO } else { "your-org/talyx" }), # TODO: real repo
+    [string]$Repo = $(if ($env:TALYX_REPO) { $env:TALYX_REPO } else { "rynald0cst0ltziam/talyx" }),
     [string]$Version = $(if ($env:TALYX_VERSION) { $env:TALYX_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:TALYX_INSTALL_DIR) { $env:TALYX_INSTALL_DIR } else { "$HOME\.talyx\bin" }),
     [switch]$ModifyPath,

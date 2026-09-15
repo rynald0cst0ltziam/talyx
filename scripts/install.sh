@@ -12,10 +12,10 @@
 # forget it exists" (BUILD_PLAN.md's product philosophy) actually requires
 # — a binary that's merely present but never activated protects nothing.
 #
-# NOT wired to a real download yet: TALYX_REPO below is a placeholder
-# until a real release exists (see .github/workflows/release.yml — this
-# script downloads exactly what that workflow publishes). Until then this
-# script will fail at the download step with a clear error, on purpose,
+# TALYX_REPO points at the real repo, but no release has been tagged yet
+# (see .github/workflows/release.yml — this script downloads exactly what
+# that workflow publishes). Until then this script will fail at the
+# download step with a clear error, on purpose,
 # rather than silently doing nothing.
 #
 # Does NOT modify your shell profile (.bashrc/.zshrc/etc.) unless you pass
@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-TALYX_REPO="${TALYX_REPO:-your-org/talyx}" # TODO: set to the real repo once one exists
+TALYX_REPO="${TALYX_REPO:-rynald0cst0ltziam/talyx}"
 TALYX_VERSION="${TALYX_VERSION:-latest}"
 INSTALL_DIR="${TALYX_INSTALL_DIR:-$HOME/.talyx/bin}"
 MODIFY_PATH=0

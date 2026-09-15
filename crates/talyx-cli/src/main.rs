@@ -190,7 +190,7 @@ enum AdvisoriesAction {
     Refresh {
         /// Feed URL. Defaults to `$TALYX_ADVISORIES_URL`, else the
         /// `advisories.json` asset of the latest release of
-        /// `$TALYX_REPO` (`your-org/talyx` until a real repo is set).
+        /// `$TALYX_REPO` (defaults to `rynald0cst0ltziam/talyx`).
         #[arg(long)]
         url: Option<String>,
     },
@@ -321,7 +321,8 @@ fn run_advisories_refresh(url: Option<String>) -> i32 {
         .or_else(|| std::env::var("TALYX_ADVISORIES_URL").ok())
         .unwrap_or_else(|| {
             let repo =
-                std::env::var("TALYX_REPO").unwrap_or_else(|_| "your-org/talyx".to_string());
+                std::env::var("TALYX_REPO")
+                    .unwrap_or_else(|_| "rynald0cst0ltziam/talyx".to_string());
             format!("https://github.com/{repo}/releases/latest/download/advisories.json")
         });
 

@@ -8,7 +8,7 @@ import sitemap from '@astrojs/sitemap';
 // real production origin before launch so canonical URLs and the sitemap
 // resolve correctly.
 export default defineConfig({
-  site: 'https://talyx.dev',
+  site: 'https://gettalyx.dev',
   trailingSlash: 'never',
   integrations: [sitemap()],
   vite: {

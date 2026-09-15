@@ -1,4 +1,4 @@
-# talyx.dev — marketing site
+# gettalyx.dev — marketing site
 
 Astro 5 + Tailwind 4, fully static. No SSR, no server, no database.
 
@@ -41,7 +41,7 @@ All in **`src/data/site.ts`**:
 
 Also:
 
-- **`get.talyx.dev`** — the install one-liner (`curl … | sh`,
+- **`gettalyx.dev`** — the install one-liner (`curl … | sh`,
   `irm … | iex`) points here. Stand up a redirect / worker that serves
   `scripts/install.sh` and `scripts/install.ps1` from the repo root, or
   change the URLs in `src/data/content.ts` and `src/pages/docs.astro`.

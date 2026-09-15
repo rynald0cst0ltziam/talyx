@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
-// Placeholder, consistent with the install scripts' `your-org/talyx`
+// Consistent with the install scripts' default `TALYX_REPO`
 // until a real repository exists.
-const INFO_URI: &str = "https://github.com/your-org/talyx";
+const INFO_URI: &str = "https://github.com/rynald0cst0ltziam/talyx";
 
 /// Build the full SARIF log for a scan result. `project_root` is used to
 /// emit repository-relative `uri`s (what GitHub needs to annotate a PR);

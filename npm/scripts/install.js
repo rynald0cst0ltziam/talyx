@@ -15,9 +15,9 @@
 // (present by default on macOS, Linux, and Windows 10 1803+) for archive
 // extraction rather than bundling a tar/zip parser.
 //
-// NOT wired to a real release yet — see the root .github/workflows/
-// release.yml and the TODO on TALYX_REPO below. Until a real release
-// exists at that repo, this fails at the download step with a clear
+// REPO points at the real repo, but no release has been tagged yet — see
+// the root .github/workflows/release.yml. Until a real release exists
+// at that repo, this fails at the download step with a clear
 // error, on purpose, rather than silently doing nothing.
 
 "use strict";
@@ -28,7 +28,7 @@ const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
 
-const REPO = process.env.TALYX_REPO || "your-org/talyx"; // TODO: real repo
+const REPO = process.env.TALYX_REPO || "rynald0cst0ltziam/talyx";
 const PKG_VERSION = require("../package.json").version;
 const VERSION = process.env.TALYX_VERSION || `v${PKG_VERSION}`;
 const NATIVE_DIR = path.join(__dirname, "..", ".bin-native");

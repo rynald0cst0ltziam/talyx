@@ -18,12 +18,14 @@
 export const site = {
   name: 'Talyx',
   tagline: 'Supply-chain security for AI coding agents.',
-  domain: 'talyx.dev',
-  url: 'https://talyx.dev',
+  domain: 'gettalyx.dev',
+  url: 'https://gettalyx.dev',
   description:
     'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. Talyx scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
-  email: 'hello@talyx.dev',
-  github: 'https://github.com/talyx/talyx',
+  email: 'hello@gettalyx.dev',
+  // Update if the repo moves to an org later — see LAUNCH_RUNBOOK.md §2 for
+  // the private/public decision this also depends on.
+  github: 'https://github.com/rynald0cst0ltziam/talyx',
 
   // ── commerce ──────────────────────────────────────────────
   checkoutUrl: 'https://talyx.lemonsqueezy.com/buy/REPLACE-WITH-REAL-CHECKOUT-ID',
