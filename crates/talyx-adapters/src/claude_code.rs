@@ -24,6 +24,29 @@ use std::path::Path;
 
 pub struct ClaudeCodeAdapter;
 
+/// `dirs::home_dir()`, with a test-only escape hatch: `TALYX_TEST_HOME`
+/// overrides it when set. Production behaviour is unchanged — the
+/// real `dirs::home_dir()` is always the fallback, and no real user
+/// would ever set this var. Exists because `dirs::home_dir()` on Windows
+/// queries the Shell API directly and ignores `HOME`/`USERPROFILE`
+/// (confirmed empirically, 2026-09-13/14 — setting those broke even
+/// rustup), so there was previously no way to point Claude Code's
+/// discovery at a scratch home directory in a test, e.g. for the plugin
+/// marketplace scenario (`claude_code_plugins.rs`), which is real,
+/// user-scope-only config with no other way to redirect it.
+fn resolve_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("TALYX_TEST_HOME")
+        .map(std::path::PathBuf::from)
+        // Canonicalize so a path built from this matches `init`'s own
+        // canonicalized `--project` for its in-scope check
+        // (`starts_with`) byte-for-byte — on Windows, `canonicalize()`
+        // adds the `\\?\` extended-path prefix that a raw env var value
+        // won't have, and a prefix mismatch there silently looks like
+        // "outside the project" rather than an error.
+        .and_then(|p| p.canonicalize().ok())
+        .or_else(dirs::home_dir)
+}
+
 impl AgentAdapter for ClaudeCodeAdapter {
     fn agent_id(&self) -> &'static str {
         "claude-code"
@@ -34,7 +57,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
     }
 
     fn detect(&self, project_root: &Path) -> bool {
-        let home = dirs::home_dir();
+        let home = resolve_home();
         project_root.join(".mcp.json").exists()
             || project_root.join(".claude").exists()
             || home
@@ -49,7 +72,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
 
     fn discover(&self, project_root: &Path) -> Vec<DiscoveredArtifact> {
         let mut out = Vec::new();
-        let home = dirs::home_dir();
+        let home = resolve_home();
 
         // MCP servers — project scope (.mcp.json) and user scope
         // (~/.claude.json). Both sit directly in their own base dir, so

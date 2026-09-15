@@ -320,6 +320,127 @@ fn init_blocks_a_known_bad_server_sourced_from_a_workspace_plugin() {
     assert!(err.contains("blocked") && err.contains("known-bad"), "unexpected refusal message: {err}");
 }
 
+/// Claude Code's own plugin ecosystem is a SECOND structurally different
+/// case: it's user-scope only, resolved relative to `dirs::home_dir()`
+/// (`~/.claude/plugins/marketplaces/<mp>/plugins/<name>/`), which — unlike
+/// Antigravity's project-scoped plugins above — this test can't just point
+/// at a scratch `--project` dir. `dirs::home_dir()` on Windows queries the
+/// Shell API directly and ignores `HOME`/`USERPROFILE` (confirmed
+/// empirically), so until now this scenario was unit-level only (calling
+/// `claude_code_plugins::discover_plugins` directly with a fake `home`,
+/// bypassing `dirs::home_dir()` entirely rather than proving it through
+/// the real binary). `claude_code.rs` now has a `TALYX_TEST_HOME`
+/// test-only escape hatch (falls through to the real `dirs::home_dir()`
+/// whenever the var is unset, so production behaviour is untouched) —
+/// this test is the first to exercise it, through the actual `talyx`
+/// binary rather than a direct function call.
+///
+/// **`--project` and `TALYX_TEST_HOME` point at the SAME scratch dir, on
+/// purpose, and `--include-user-config` is never passed.** An earlier
+/// version of this test used two separate scratch dirs and passed
+/// `--include-user-config` to bring the plugin (outside `--project`) into
+/// scope for rewriting — and that flag has no way to scope itself to just
+/// Claude Code. `TALYX_TEST_HOME` only redirects Claude Code's own home
+/// resolution; every OTHER adapter still calls the real `dirs::home_dir()`
+/// on whatever machine runs this suite. With `--include-user-config` set,
+/// `init`'s scope check (`include_user_config || cs.path.starts_with(&
+/// project_root)`) became true unconditionally, and it rewrote every real,
+/// live MCP config on the dev machine this was first run on — Cursor,
+/// Codex, Gemini CLI, Windsurf, Antigravity, Amazon Q, Cline, Roo Code, all
+/// of it, for real, before being caught and restored from the
+/// `.talyx-backup` files `init` itself wrote. Making `--project` and
+/// `TALYX_TEST_HOME` the same directory means the plugin's config
+/// genuinely starts_with `project_root`, so it's in scope on that basis
+/// alone — no global flag, no way for this test to ever reach outside its
+/// own scratch directory again, regardless of what any other adapter
+/// discovers on the real machine running it.
+#[test]
+fn init_blocks_a_known_bad_server_sourced_from_a_claude_code_marketplace_plugin() {
+    let shim = shim_bin();
+    let scratch = Scratch::new("cc-plugin");
+    let root = scratch.path();
+    let store = root.join("store.json");
+
+    let plugin_dir = root
+        .join(".claude")
+        .join("plugins")
+        .join("marketplaces")
+        .join("official")
+        .join("plugins")
+        .join("evil-helper");
+    fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    fs::write(
+        plugin_dir.join(".claude-plugin").join("plugin.json"),
+        r#"{"name":"evil-helper"}"#,
+    )
+    .unwrap();
+    let plugin_config = serde_json::json!({
+        "mcpServers": {
+            "known-bad": { "command": "npx", "args": ["-y", "postmark-mcp@1.0.17"] },
+        }
+    });
+    fs::write(
+        plugin_dir.join(".mcp.json"),
+        serde_json::to_string_pretty(&plugin_config).unwrap(),
+    )
+    .unwrap();
+
+    fs::create_dir_all(root.join(".claude")).unwrap();
+    fs::write(
+        root.join(".claude").join("settings.json"),
+        r#"{"enabledPlugins":{"evil-helper@official":true}}"#,
+    )
+    .unwrap();
+
+    let out = run(Command::new(TALYX)
+        .args(["init", "--project"])
+        .arg(root)
+        .arg("--store")
+        .arg(&store)
+        .env("TALYX_DEV", "1")
+        .env("TALYX_TEST_HOME", root));
+    assert!(out.status.success(), "`talyx init` failed");
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("1 critical") && report.contains("1 blocked"),
+        "init should report the marketplace-plugin known-bad server as critical/blocked:\n{report}"
+    );
+
+    // ── the plugin's own .mcp.json was rewritten to route through the
+    // shim ────────────────────────────────────────────────────────────────
+    let rewritten: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(plugin_dir.join(".mcp.json")).unwrap()).unwrap();
+    let entry = &rewritten["mcpServers"]["known-bad"];
+    let shim_str = shim.display().to_string();
+    assert_eq!(
+        entry["command"].as_str().unwrap(),
+        shim_str,
+        "marketplace plugin server not routed through the shim"
+    );
+    let args: Vec<String> = entry["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let bad_id = args[0].clone();
+    assert_eq!(args[1], "--");
+    assert_eq!(&args[2..], &["npx", "-y", "postmark-mcp@1.0.17"]);
+
+    let backup = plugin_dir.join(".mcp.json.talyx-backup");
+    assert!(backup.exists(), "no .talyx-backup written for the marketplace plugin's own config");
+
+    // ── the shim REFUSES it ───────────────────────────────────────────────
+    let out = run(Command::new(&shim)
+        .arg(&bad_id)
+        .arg("--")
+        .args(["npx", "-y", "postmark-mcp@1.0.17"])
+        .env("TALYX_STORE", &store));
+    assert_eq!(out.status.code(), Some(1), "shim should refuse a marketplace-plugin-sourced BLOCK with exit 1");
+    let err = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    assert!(err.contains("blocked") && err.contains("known-bad"), "unexpected refusal message: {err}");
+}
+
 /// The store file is `{ "records": { "<id>": { "name": ..., ... } } }`.
 /// Return the id of the record whose `name` matches.
 fn store_id_for(store_path: &Path, name: &str) -> String {
