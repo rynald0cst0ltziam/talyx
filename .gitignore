@@ -35,3 +35,5 @@ npm/.bin-native/
 /BUILD_PLAN.md
 /docs/REVIEW-2026-09-15.md
 /LAUNCH_RUNBOOK.md
+/LOCAL_TESTING.md
+/launch/
