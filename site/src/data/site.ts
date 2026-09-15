@@ -28,14 +28,12 @@ export const site = {
   // ── commerce ──────────────────────────────────────────────
   checkoutUrl: 'https://talyx.lemonsqueezy.com/buy/REPLACE-WITH-REAL-CHECKOUT-ID',
   storeSlug: 'talyx',
+  // One-time purchase, lifetime license — must match the Lemon Squeezy
+  // product (single payment, license keys never expire).
   price: {
-    amount: 149,
+    amount: 99,
     currency: 'USD',
-    unit: '/ developer / year',
-    launchAmount: 149,
-    regularAmount: 249,
-    // launch window copy — drives the urgency banner
-    launchEndsISO: '2026-10-15',
+    unit: 'one-time',
   },
 
   // ── product facts (keep in sync with repo STATUS.md) ──────

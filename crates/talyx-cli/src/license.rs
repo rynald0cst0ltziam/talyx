@@ -363,8 +363,8 @@ fn print_summary(lic: &LicenseFile, note: Option<&str>) {
     }
     println!("  Instance  {}", lic.instance_name);
     match &lic.expires_at {
-        Some(e) => println!("  Renews    {e}"),
-        None => println!("  Renews    perpetual (no expiry)"),
+        Some(e) => println!("  Expires   {e}"),
+        None => println!("  Expires   never (lifetime license)"),
     }
     if let Some(email) = &lic.customer_email {
         println!("  Licensed  {email}");

@@ -31,7 +31,7 @@ const sections = [
 curl -fsSL https://get.{site.domain} | sh
 
 # 2 · activate the license from your purchase email
-talyx activate TLX-XXXX-XXXX-XXXX
+talyx activate &lt;YOUR-LICENSE-KEY&gt;
 
 # 3 · scan this project + your user-level agent config
 talyx scan --project .</code></pre>
@@ -61,20 +61,22 @@ cargo build --release
 
     <h2 id="activate">Activate a license</h2>
     <p>
-      Talyx is a paid tool. After purchase you receive a key that looks like
-      <code>TLX-1A2B-3C4D-5E6F</code>. Activate it once per machine:
+      Talyx is a paid tool with a lifetime license. After purchase you receive a
+      key by email (it is also on your Lemon Squeezy order page) in the form
+      <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>. Activate it once per machine:
     </p>
-    <pre><code>talyx activate TLX-1A2B-3C4D-5E6F</code></pre>
+    <pre><code>talyx activate &lt;YOUR-LICENSE-KEY&gt;</code></pre>
     <p>
       This makes one HTTPS call to Lemon Squeezy to bind the key to this machine,
       then writes <code>~/.talyx/license.json</code>. You can activate on up
       to <strong>3 machines</strong>. To free a slot:
     </p>
     <pre><code>talyx license deactivate     # release this machine's slot
-talyx license status         # show seats used, renewal date, offline grace</code></pre>
+talyx license status         # show machines used, key status, offline grace</code></pre>
     <p>
       <code>scan</code> and <code>status</code> run without a license so you can
-      evaluate. <code>init</code> and the shim require an active license.
+      evaluate. <code>init</code> requires an active license. The enforcement
+      shim never checks one, so protection you have already set up keeps working.
     </p>
 
     <h2 id="commands">Commands</h2>

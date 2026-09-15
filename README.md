@@ -66,7 +66,7 @@ user-scope config lives) is immediately routed through enforcement. Pass
 `--no-init` (shell installers) or set `TALYX_SKIP_INIT=1` (npm) to
 install without activating.
 
-Talyx is a paid tool (per developer, per year, via Lemon Squeezy).
+Talyx is a paid tool (one-time purchase, lifetime license per developer, via Lemon Squeezy).
 `scan` and `status` run unlicensed for evaluation; `init` requires
 `talyx activate <key>` first (or `TALYX_LICENSE_KEY` in CI). The
 enforcement shim itself is never license-gated, so a lapsed license can't

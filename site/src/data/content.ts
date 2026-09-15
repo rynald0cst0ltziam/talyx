@@ -351,7 +351,7 @@ export const steps: Step[] = [
     n: '02',
     title: 'Activate your license',
     body: 'Paste the key from your purchase email. Works offline for 30 days at a time; activate on up to 3 machines.',
-    code: 'talyx activate TLX-XXXX-XXXX-XXXX',
+    code: 'talyx activate <YOUR-LICENSE-KEY>',
   },
   {
     n: '03',
@@ -431,11 +431,11 @@ export const faqs: Faq[] = [
   },
   {
     q: 'How does the license work?',
-    a: 'One key per developer, one year of updates and support. Activate on up to 3 machines. It checks in with Lemon Squeezy on activation and about once a month; offline, it keeps working for 30 days before asking you to reconnect. No hard kill switch. `scan` and `status` run unlicensed so you can evaluate; `init` needs a license.',
+    a: 'One lifetime key per developer — pay once, no subscription, no renewals. Activate on up to 3 machines. `init` checks the key with Lemon Squeezy on activation and at most once a week after; offline, it keeps working for 30 days before asking you to reconnect. The enforcement shim never checks a license, so protection you have already set up keeps working no matter what. `scan` and `status` run unlicensed so you can evaluate.',
   },
   {
     q: 'Do you offer team or volume pricing?',
-    a: 'Yes. The product is identical; teams get consolidated billing, a shared trust policy your whole team pins to, offline / air-gapped activation, and volume discounts above 5 seats. Email hello@talyx.dev.',
+    a: 'Yes — volume pricing for 5 or more developers. The product is identical: one lifetime key per developer, each good for 3 machines. Email hello@talyx.dev.',
   },
   {
     q: 'Is there a refund policy?',

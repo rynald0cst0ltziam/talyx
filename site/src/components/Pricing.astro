@@ -17,7 +17,8 @@ const included = [
   'SARIF output + GitHub Action for CI',
   'Registry (npm / PyPI) pre-resolution',
   'Activate on up to 3 machines',
-  '1 year of updates & email support',
+  'Lifetime license — pay once, no renewals',
+  'Updates & email support',
 ];
 ---
 
@@ -29,7 +30,7 @@ const included = [
         One price. Everything included.
       </h2>
       <p class="mt-4 text-lg text-fog">
-        No tiers to decode, no feature gates. Per developer, per year.
+        No tiers, no feature gates, no subscription. One developer, one payment.
       </p>
     </div>
 
@@ -39,18 +40,16 @@ const included = [
         <div class="bg-aurora absolute inset-0 -z-10 opacity-40"></div>
         <div class="flex items-center gap-2">
           <span class="rounded-full bg-safe/15 px-2.5 py-1 text-xs font-semibold text-safe">
-            Launch pricing
+            Lifetime license
           </span>
-          <span id="launch-countdown" class="text-xs text-mist"></span>
         </div>
 
         <div class="mt-5 flex items-end gap-2">
-          <span class="font-display text-5xl font-bold text-chalk tabular">${site.price.launchAmount}</span>
+          <span class="font-display text-5xl font-bold text-chalk tabular">${site.price.amount}</span>
           <span class="pb-1.5 text-mist">{site.price.unit}</span>
         </div>
         <p class="mt-1 text-sm text-mist">
-          <s class="text-mist/60">${site.price.regularAmount}</s>
-          after launch — your renewal stays at ${site.price.launchAmount} for life.
+          Pay once, per developer. Yours for life — no subscription, no renewals.
         </p>
 
         <div class="mt-6 flex flex-wrap gap-3">
@@ -81,20 +80,16 @@ const included = [
 
       <!-- team / enterprise -->
       <div class="panel flex flex-col p-8" data-reveal style="--reveal-delay: 80ms">
-        <h3 class="text-lg font-semibold text-chalk">Teams &amp; enterprise</h3>
+        <h3 class="text-lg font-semibold text-chalk">Buying for a team?</h3>
         <p class="mt-2 text-sm text-mist">
-          Same binary, same detections. Add consolidated billing, a shared trust
-          policy your whole team pins to, air-gapped activation, and a security
-          questionnaire on file.
+          Same binary, same detections — one lifetime key per developer, each
+          good for 3 machines.
         </p>
         <ul class="mt-5 grid gap-2.5">
           {
             [
-              'Volume discount above 5 seats',
-              'Shared, version-controlled trust policy',
-              'Offline / air-gapped license activation',
-              'Priority disclosure channel & SLA',
-              'Invoice / PO billing',
+              'Volume pricing for 5 or more developers',
+              'Keys delivered by email and on your Lemon Squeezy order page',
             ].map((x) => (
               <li class="flex items-start gap-2.5 text-sm text-fog">
                 <Icon name="check" class="mt-0.5 h-4 w-4 shrink-0 text-signal" />
@@ -112,17 +107,3 @@ const included = [
     </div>
   </div>
 </section>
-
-<script>
-  import { site } from '../data/site';
-  const el = document.getElementById('launch-countdown');
-  if (el) {
-    const end = new Date(site.price.launchEndsISO + 'T23:59:59Z').getTime();
-    const tick = () => {
-      const d = Math.ceil((end - Date.now()) / 86_400_000);
-      el.textContent = d > 0 ? `· ends in ${d} day${d === 1 ? '' : 's'}` : '· final days';
-    };
-    tick();
-    setInterval(tick, 60_000);
-  }
-</script>

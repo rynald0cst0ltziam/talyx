@@ -7,7 +7,7 @@ import Footer from '../components/Footer.astro';
 interface Props {
   title?: string;
   description?: string;
-  /** hide the sticky "launch pricing" banner on this page */
+  /** hide the sticky pricing banner on this page */
   hideBanner?: boolean;
 }
 
@@ -87,9 +87,8 @@ const ogImage = new URL('/og.svg', site.url).href;
           class="relative z-40 border-b border-line bg-[#0c0f17] px-4 py-2 text-center text-[13px] text-fog"
         >
           <span class="text-safe">●</span>{' '}
-          Launch pricing: <strong class="text-chalk">${site.price.launchAmount}/yr</strong>, locked for the life of your
-          license.{' '}
-          <span class="text-mist">Goes to ${site.price.regularAmount} after launch.</span>{' '}
+          Lifetime license: <strong class="text-chalk">${site.price.amount}</strong>, paid once.{' '}
+          <span class="text-mist">No subscription, no renewals.</span>{' '}
           <a href="/pricing" class="text-signal underline-offset-4 hover:underline">
             Get it &rarr;
           </a>

@@ -124,7 +124,7 @@ enum Command {
     },
     /// Activate a paid license on this machine (required for `init`).
     Activate {
-        /// The key from your purchase email (looks like TLX-XXXX-XXXX-XXXX).
+        /// The license key from your purchase email (a UUID, e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
         key: String,
     },
     /// Inspect or release this machine's license.
@@ -147,7 +147,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum LicenseAction {
-    /// Show license status, machines used, and renewal date.
+    /// Show license status, machines used, and expiry (lifetime keys never expire).
     Status,
     /// Release this machine's activation slot so it can be used elsewhere.
     Deactivate,
