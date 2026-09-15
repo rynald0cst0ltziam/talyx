@@ -28,7 +28,7 @@ const sections = [
     <h2 id="quickstart">Quickstart</h2>
     <p>Three commands from nothing to protected:</p>
     <pre><code># 1 · install (macOS / Linux)
-curl -fsSL https://get.{site.domain} | sh
+curl -fsSL https://{site.domain}/install.sh | sh
 
 # 2 · activate the license from your purchase email
 talyx activate &lt;YOUR-LICENSE-KEY&gt;
@@ -43,14 +43,14 @@ talyx scan --project .</code></pre>
 
     <h2 id="install">Install</h2>
     <h3>macOS / Linux</h3>
-    <pre><code>curl -fsSL https://get.{site.domain} | sh</code></pre>
+    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh</code></pre>
     <p>
       Installs <code>talyx</code> and <code>talyx-shim</code> to
       <code>~/.talyx/bin</code>. It does not touch your shell profile unless
       you pass <code>--modify-path</code>.
     </p>
     <h3>Windows (PowerShell)</h3>
-    <pre><code>irm https://get.{site.domain}/install.ps1 | iex</code></pre>
+    <pre><code>irm https://{site.domain}/install.ps1 | iex</code></pre>
     <h3>npm</h3>
     <pre><code>npm install -g talyx</code></pre>
     <h3>From source</h3>

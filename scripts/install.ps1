@@ -2,12 +2,12 @@
 #
 #   irm https://<install-url>/install.ps1 | iex
 #
-# Downloads the talyx + talyx-shim release binaries, installs
-# them to $HOME\.talyx\bin, and runs `talyx init` against $HOME
-# so every MCP server config it can find gets routed through the
-# enforcement shim. See install.sh's header comment for the full rationale
-# (this script mirrors it)  -- same "no shell-profile edits without asking"
-# rule applies here via -ModifyPath for the User PATH environment variable.
+# Downloads the talyx + talyx-shim release binaries and installs them to
+# $HOME\.talyx\bin. Does NOT run `talyx init` -- that requires a license,
+# which doesn't exist yet at install time (see install.sh's header comment
+# for the full rationale; this script mirrors it) -- same "no shell-profile
+# edits without asking" rule applies here via -ModifyPath for the User PATH
+# environment variable.
 #
 # $Repo points at the real repo, but no release has been tagged yet (see
 # .github/workflows/release.yml, which is what produces the archive this
@@ -21,14 +21,17 @@ param(
     [string]$Repo = $(if ($env:TALYX_REPO) { $env:TALYX_REPO } else { "rynald0cst0ltziam/talyx" }),
     [string]$Version = $(if ($env:TALYX_VERSION) { $env:TALYX_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:TALYX_INSTALL_DIR) { $env:TALYX_INSTALL_DIR } else { "$HOME\.talyx\bin" }),
-    [switch]$ModifyPath,
-    [switch]$NoInit
+    [switch]$ModifyPath
 )
 
 $ErrorActionPreference = "Stop"
 
 function Write-Info($msg) { Write-Host $msg }
-function Fail($msg) { Write-Error "talyx-install: $msg"; exit 1 }
+# `throw`, not `exit` -- this script is meant to run via `irm ... | iex`,
+# and `exit` inside an invoked expression terminates the HOST PowerShell
+# process, closing the user's whole terminal window on any failure. A
+# terminating error via `throw` only ends this script.
+function Fail($msg) { throw "talyx-install: $msg" }
 
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture
 if ($arch -ne "X64") {
@@ -89,14 +92,11 @@ try {
         }
     }
     Write-Info ""
-
-    if (-not $NoInit) {
-        Write-Info "Activating protection for every Claude Code MCP server config under `$HOME..."
-        & "$InstallDir\talyx.exe" init --project $HOME
-    } else {
-        Write-Info "Skipped activation (-NoInit passed). Run this yourself when ready:"
-        Write-Info "  $InstallDir\talyx.exe init --project `$HOME"
-    }
+    Write-Info "Next steps (PATH changes only take effect in a NEW terminal, so this"
+    Write-Info "session still needs the full path):"
+    Write-Info "  $InstallDir\talyx.exe activate <YOUR-LICENSE-KEY>   # from your purchase email"
+    Write-Info "  $InstallDir\talyx.exe scan --project .              # free, read-only, no license needed"
+    Write-Info "  $InstallDir\talyx.exe init --project .              # after activating, turns on enforcement"
 } finally {
     Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// postinstall — downloads the talyx + talyx-shim native binaries
-// matching this npm package's own version, and (unless
-// TALYX_SKIP_INIT is set) runs `talyx init` against the user's
-// home directory to activate protection immediately, mirroring
-// scripts/install.sh and install.ps1 in the main repo.
+// postinstall — downloads the talyx + talyx-shim native binaries matching
+// this npm package's own version. Does NOT run `talyx init` — that
+// requires a license, which doesn't exist yet at install time. See
+// scripts/install.sh's header comment for the full rationale; this
+// mirrors it (and install.ps1).
 //
 // Deliberately zero npm dependencies — no fetch/tar library — for a
 // postinstall script specifically, because "a package's postinstall
@@ -26,7 +26,7 @@ const https = require("https");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { execFileSync, spawnSync } = require("child_process");
+const { execFileSync } = require("child_process");
 
 const REPO = process.env.TALYX_REPO || "rynald0cst0ltziam/talyx";
 const PKG_VERSION = require("../package.json").version;
@@ -140,20 +140,11 @@ async function main() {
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
   console.log(`talyx: installed native binaries to ${NATIVE_DIR}`);
-
-  if (process.env.TALYX_SKIP_INIT) {
-    console.log("talyx: TALYX_SKIP_INIT set — skipping automatic activation.");
-    console.log(`Run \`talyx init --project "${os.homedir()}"\` yourself when ready.`);
-    return;
-  }
-
-  console.log("talyx: activating protection for every Claude Code MCP server config under your home directory...");
-  const talyxBin = path.join(NATIVE_DIR, `talyx${exeSuffix}`);
-  const result = spawnSync(talyxBin, ["init", "--project", os.homedir()], { stdio: "inherit" });
-  if (result.status !== 0) {
-    console.error("talyx: `talyx init` did not exit cleanly — binaries are installed, but activation may be incomplete.");
-    console.error(`Re-run manually: talyx init --project "${os.homedir()}"`);
-  }
+  console.log("");
+  console.log("Next steps:");
+  console.log("  talyx activate <YOUR-LICENSE-KEY>   # from your purchase email");
+  console.log("  talyx scan --project .              # free, read-only, no license needed");
+  console.log("  talyx init --project .              # after activating, turns on enforcement");
 }
 
 main().catch((err) => {

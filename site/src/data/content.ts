@@ -345,7 +345,7 @@ export const steps: Step[] = [
     n: '01',
     title: 'Install',
     body: 'One binary and its enforcement shim. No runtime, no dependencies, no shell-profile edits.',
-    code: 'curl -fsSL https://get.talyx.dev | sh',
+    code: 'curl -fsSL https://gettalyx.dev/install.sh | sh',
   },
   {
     n: '02',

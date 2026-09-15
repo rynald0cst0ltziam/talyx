@@ -39,6 +39,31 @@ const TRUST_CACHE_SECS: u64 = 7 * 24 * 60 * 60;
 const OFFLINE_GRACE_SECS: u64 = 30 * 24 * 60 * 60;
 const REQUEST_TIMEOUT_SECS: u64 = 20;
 
+// The Lemon Squeezy store/product/variant a license key must belong to.
+// Lemon Squeezy's License API is public and unauthenticated: `validate`
+// and `activate` will happily accept a key from ANY product in ANY store
+// on Lemon Squeezy, not just this one. Their own guide says exactly this:
+// "You should verify that the store_id, product_id and/or variant_id from
+// this response match the IDs of your Lemon Squeezy product. If you don't
+// do this, someone using a license key from another Lemon Squeezy product
+// could use it to get access to your product." Without this check, any
+// $1 purchase anywhere on Lemon Squeezy would unlock `talyx init`.
+// https://docs.lemonsqueezy.com/guides/tutorials/license-keys
+const ALLOWED_STORE_ID: u64 = 463533;
+const ALLOWED_PRODUCT_ID: u64 = 1364213;
+const ALLOWED_VARIANT_ID: u64 = 2130722;
+
+/// Does an activate/validate response's `meta` block identify a key
+/// bought for exactly this product? Checked on every response that
+/// carries a `meta` object — a missing/mismatched field fails closed
+/// (`unwrap_or_default()` on a `u64` compare against a real id never
+/// accidentally matches).
+fn identity_matches(body: &Value) -> bool {
+    field_u64(body, &["meta", "store_id"]) == Some(ALLOWED_STORE_ID)
+        && field_u64(body, &["meta", "product_id"]) == Some(ALLOWED_PRODUCT_ID)
+        && field_u64(body, &["meta", "variant_id"]) == Some(ALLOWED_VARIANT_ID)
+}
+
 /// Persisted at `~/.talyx/license.json` after a successful activation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseFile {
@@ -236,6 +261,32 @@ pub fn run_activate(key: &str) -> i32 {
         );
     }
 
+    // Pre-flight check: `validate` with no `instance_id` checks the key's
+    // identity WITHOUT creating an instance / consuming an activation
+    // slot (Lemon Squeezy's own docs: "If no instance_id is provided...
+    // instance will be null" — no activation happens). Reject a
+    // wrong-product key here so it never touches the real `activate`
+    // call and never spends a slot the customer would then have to
+    // manually free.
+    match post("validate", &[("license_key", key)]) {
+        Ok(body) => {
+            let valid = body.get("valid").and_then(Value::as_bool).unwrap_or(false);
+            if valid && !identity_matches(&body) {
+                eprintln!("talyx: this license key is valid, but it isn't for Talyx.");
+                eprintln!("  Buy one at https://gettalyx.dev/pricing.");
+                return 1;
+            }
+            // An invalid/unrecognized key at this stage is left to the
+            // real `activate` call below, which gives the more specific
+            // Lemon Squeezy error message for that case.
+        }
+        Err(LicenseError::Unreachable(m)) => {
+            eprintln!("talyx: {m}");
+            return 1;
+        }
+        Err(_) => {} // fall through to activate, which will surface the real error
+    }
+
     let instance_name = default_instance_name();
     println!("Activating with Lemon Squeezy as \"{instance_name}\"…");
 
@@ -257,6 +308,17 @@ pub fn run_activate(key: &str) -> i32 {
             .and_then(Value::as_str)
             .unwrap_or("Lemon Squeezy did not activate the key");
         eprintln!("talyx: {msg}");
+        return 1;
+    }
+
+    // Belt-and-suspenders: re-check identity on the activate response
+    // itself. The slot is already spent at this point (there's no way to
+    // avoid that for a key that races past the validate pre-check with
+    // a state change in between), but this still refuses to cache or
+    // use a foreign identity — see `require_licensed`'s decisive checks.
+    if !identity_matches(&body) {
+        eprintln!("talyx: this license key isn't for Talyx — activation refused.");
+        eprintln!("  Run `talyx license deactivate` if you want to free the slot this just used.");
         return 1;
     }
 
@@ -327,7 +389,10 @@ pub fn run_status() -> i32 {
         Ok(body) => {
             let valid = body.get("valid").and_then(Value::as_bool).unwrap_or(false);
             let status = field_str(&body, &["license_key", "status"]).unwrap_or_default();
-            if valid && status_ok(&status) {
+            if valid && status_ok(&status) && !identity_matches(&body) {
+                print_summary(&lic, Some("this key isn't for Talyx — rejecting it"));
+                return 1;
+            } else if valid && status_ok(&status) {
                 lic = cache_from_response(&lic.key, &body, Some(&lic));
                 let _ = write_license(&lic);
                 print_summary(&lic, Some("verified just now"));
@@ -414,7 +479,9 @@ pub fn require_licensed(feature: &str) -> Result<(), LicenseError> {
         Ok(body) => {
             let valid = body.get("valid").and_then(Value::as_bool).unwrap_or(false);
             let status = field_str(&body, &["license_key", "status"]).unwrap_or_default();
-            if valid && status_ok(&status) {
+            if valid && status_ok(&status) && !identity_matches(&body) {
+                Err(LicenseError::Rejected("this license key isn't for Talyx".to_string()))
+            } else if valid && status_ok(&status) {
                 let refreshed = cache_from_response(&lic.key, &body, Some(&lic));
                 let _ = write_license(&refreshed);
                 Ok(())
@@ -458,7 +525,9 @@ fn require_via_env_key(key: &str) -> Result<(), LicenseError> {
         Ok(body) => {
             let valid = body.get("valid").and_then(Value::as_bool).unwrap_or(false);
             let status = field_str(&body, &["license_key", "status"]).unwrap_or_default();
-            if valid && status_ok(&status) {
+            if valid && status_ok(&status) && !identity_matches(&body) {
+                Err(LicenseError::Rejected("TALYX_LICENSE_KEY isn't a Talyx license".to_string()))
+            } else if valid && status_ok(&status) {
                 Ok(())
             } else {
                 let msg = body
@@ -595,6 +664,38 @@ mod tests {
         assert_eq!(lic.status, "active");
         assert_eq!(lic.activation_limit, Some(3));
         assert_eq!(lic.customer_email.as_deref(), Some("buyer@example.com"));
+    }
+
+    #[test]
+    fn identity_matches_the_pinned_talyx_ids() {
+        let body = serde_json::json!({
+            "valid": true,
+            "meta": {
+                "store_id": 463533, "product_id": 1364213, "variant_id": 2130722,
+                "customer_email": "buyer@example.com"
+            }
+        });
+        assert!(identity_matches(&body));
+    }
+
+    #[test]
+    fn identity_rejects_a_key_from_a_different_lemon_squeezy_product() {
+        // The exact scenario the License API's public/unauthenticated
+        // design allows: a real, valid, active key -- just not for Talyx.
+        let body = serde_json::json!({
+            "valid": true,
+            "license_key": { "status": "active" },
+            "meta": {
+                "store_id": 999999, "product_id": 1364213, "variant_id": 2130722
+            }
+        });
+        assert!(!identity_matches(&body));
+    }
+
+    #[test]
+    fn identity_rejects_a_response_with_no_meta_at_all() {
+        let body = serde_json::json!({ "valid": true });
+        assert!(!identity_matches(&body));
     }
 
     #[test]

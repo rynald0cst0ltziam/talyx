@@ -4,9 +4,9 @@
     {
       "name": "site",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "3003"],
+      "runtimeArgs": ["run", "dev", "--", "--port", "3005"],
       "cwd": "site",
-      "port": 3003
+      "port": 3005
     }
   ]
 }

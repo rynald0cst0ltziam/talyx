@@ -5,3 +5,23 @@
 node_modules/
 npm/.bin-native/
 *.talyx-backup
+.release-test-scratch/
+
+# Unrelated to Talyx — written by a local `warden init` on this dev
+# machine, not something this project uses or wants committed. Ignored
+# rather than merely deleted once, so a future `warden init` run can't
+# silently reintroduce them.
+/.clinerules
+/.continuerules
+/.cursorrules
+/.devin/rules
+/.github/copilot-instructions.md
+/.goose/rules
+/.mcprules
+/.opencode/rules
+/.openhands/rules
+/.zedrules
+/AGENTS.md
+/CLAUDE.md
+/CONVENTIONS.md
+/GEMINI.md

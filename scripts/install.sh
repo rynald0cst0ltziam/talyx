@@ -3,14 +3,12 @@
 #
 #   curl -fsSL https://<install-url>/install.sh | sh
 #
-# Downloads the talyx + talyx-shim release binaries for this
-# machine, installs them to ~/.talyx/bin, and runs `talyx init`
-# against the user's home directory so every MCP server config it can find
-# (project-level ones aren't touched — only what's reachable from $HOME,
-# which is where Claude Code's own user-scope config lives) gets routed
-# through the enforcement shim. That last step is what "install once,
-# forget it exists" (BUILD_PLAN.md's product philosophy) actually requires
-# — a binary that's merely present but never activated protects nothing.
+# Downloads the talyx + talyx-shim release binaries for this machine and
+# installs them to ~/.talyx/bin. Does NOT run `talyx init` — that requires
+# a license, which doesn't exist yet at install time (see docs#activate).
+# Running init unlicensed here used to print a scary error as the very
+# last step of a fresh install; now the script just prints the next two
+# commands (activate, then init) and stops.
 #
 # TALYX_REPO points at the real repo, but no release has been tagged yet
 # (see .github/workflows/release.yml — this script downloads exactly what
@@ -18,24 +16,29 @@
 # download step with a clear error, on purpose,
 # rather than silently doing nothing.
 #
+# `sh` here is whatever /bin/sh is on this system — on Debian/Ubuntu
+# that's dash, which does NOT support `set -o pipefail` (confirmed live:
+# it aborts on the very first line with "Illegal option -o pipefail"
+# before printing anything). The script has no internal pipeline that
+# needs it, so it's simply not turned on — `set -eu` alone is POSIX and
+# portable to every /bin/sh this is documented to run under.
+#
 # Does NOT modify your shell profile (.bashrc/.zshrc/etc.) unless you pass
 # --modify-path — a standing edit to your shell config is a bigger, more
 # persistent change than installing a binary, and deserves to be something
 # you asked for explicitly, not a default side effect of piping a script
 # into your shell.
 
-set -euo pipefail
+set -eu
 
 TALYX_REPO="${TALYX_REPO:-rynald0cst0ltziam/talyx}"
 TALYX_VERSION="${TALYX_VERSION:-latest}"
 INSTALL_DIR="${TALYX_INSTALL_DIR:-$HOME/.talyx/bin}"
 MODIFY_PATH=0
-RUN_INIT=1
 
 for arg in "$@"; do
   case "$arg" in
     --modify-path) MODIFY_PATH=1 ;;
-    --no-init) RUN_INIT=0 ;;
     *)
       echo "talyx-install: unknown option '$arg'" >&2
       exit 1
@@ -70,7 +73,13 @@ main() {
   command -v curl >/dev/null 2>&1 || err "curl is required"
   command -v tar >/dev/null 2>&1 || err "tar is required"
 
-  local target url tmpdir
+  # tmpdir is deliberately NOT `local`: the `trap ... EXIT` below fires at
+  # the SCRIPT's exit, not when main() returns, and a `local` variable is
+  # already out of scope by then — under `set -u` that's a hard error
+  # ("tmpdir: parameter not set"), confirmed live: the script otherwise
+  # completed successfully (binaries installed, next-steps printed) and
+  # then failed anyway, on exit, for a customer who'd already succeeded.
+  local target url
   target="$(detect_target)"
   if [ "$TALYX_VERSION" = "latest" ]; then
     url="https://github.com/${TALYX_REPO}/releases/latest/download/talyx-${target}.tar.gz"
@@ -132,14 +141,11 @@ main() {
       ;;
   esac
   say ""
-
-  if [ "$RUN_INIT" = "1" ]; then
-    say "Activating protection for every Claude Code MCP server config under \$HOME..."
-    "$INSTALL_DIR/talyx" init --project "$HOME"
-  else
-    say "Skipped activation (--no-init passed). Run this yourself when ready:"
-    say "  $INSTALL_DIR/talyx init --project \"\$HOME\""
-  fi
+  say "Next steps (PATH changes only take effect in a NEW shell, so this"
+  say "session still needs the full path):"
+  say "  $INSTALL_DIR/talyx activate <YOUR-LICENSE-KEY>   # from your purchase email"
+  say "  $INSTALL_DIR/talyx scan --project .              # free, read-only, no license needed"
+  say "  $INSTALL_DIR/talyx init --project .              # after activating, turns on enforcement"
 }
 
 detect_profile() {

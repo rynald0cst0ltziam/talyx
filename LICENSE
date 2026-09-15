@@ -1,14 +1,16 @@
 Talyx License
 
-Copyright (c) 2026 Talyx. All rights reserved.
+Copyright (c) 2026 rynald0cst0ltziam. All rights reserved.
 
 This is a source-available commercial license. The source is published so
 you can read, build, and security-audit it. It is not open source, and
 using it in production requires a paid license.
 
-Fill in before first public release: replace "Talyx" in the copyright
-line above with the legal name of the entity that owns the software, and
-set the governing law in Section 9. Nothing else needs changing.
+Still open, tracked in STATUS.md: the copyright line above uses the
+project's GitHub identity as an interim, accurate placeholder — replace it
+with a formal legal entity name if/when one exists. Section 10's governing
+law is intentionally left unfilled rather than guessed; set it to wherever
+the owning entity is actually based.
 
 --------------------------------------------------------------------------
 

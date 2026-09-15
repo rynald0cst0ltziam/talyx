@@ -38,20 +38,20 @@ BUILD_PLAN.md §14 for the full picture.
 
 No published release exists yet — the install methods below (`curl`/`irm`,
 npm) are complete and tested as scripts, but will fail at the download step
-until a real GitHub repo + release exists (see `.github/workflows/release.yml`
-and each script's own TODO on the placeholder repo name). Build from source
-in the meantime — see below.
+until a real GitHub release is tagged (see `.github/workflows/release.yml`;
+the repo itself, `github.com/rynald0cst0ltziam/talyx`, already exists).
+Build from source in the meantime — see below.
 
 ## Install (once a release exists)
 
 ```bash
 # macOS / Linux
-curl -fsSL https://<install-url>/install.sh | sh
+curl -fsSL https://gettalyx.dev/install.sh | sh
 ```
 
 ```powershell
 # Windows
-irm https://<install-url>/install.ps1 | iex
+irm https://gettalyx.dev/install.ps1 | iex
 ```
 
 ```bash
@@ -59,12 +59,10 @@ irm https://<install-url>/install.ps1 | iex
 npm install -g talyx
 ```
 
-All three do the same thing: install `talyx` + `talyx-shim`, then
-run `talyx init --project "$HOME"` automatically so every MCP server
-config reachable from your home directory (which is where Claude Code's own
-user-scope config lives) is immediately routed through enforcement. Pass
-`--no-init` (shell installers) or set `TALYX_SKIP_INIT=1` (npm) to
-install without activating.
+All three install `talyx` + `talyx-shim` only — none of them run `init`
+automatically, since `init` requires a license that doesn't exist yet at
+install time. Each prints the next commands to run (`activate`, then
+`scan`/`init`) when it finishes.
 
 Talyx is a paid tool (one-time purchase, lifetime license per developer, via Lemon Squeezy).
 `scan` and `status` run unlicensed for evaluation; `init` requires
