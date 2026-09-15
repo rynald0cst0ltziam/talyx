@@ -25,3 +25,13 @@ npm/.bin-native/
 /CLAUDE.md
 /CONVENTIONS.md
 /GEMINI.md
+
+# Internal tracking/planning docs — kept locally, not published. STATUS.md
+# and BUILD_PLAN.md are working notes, not a public-facing changelog;
+# docs/REVIEW-2026-09-15.md specifically documents unpatched security
+# findings with reproduction steps and must never be public until every
+# finding in it is actually fixed; LAUNCH_RUNBOOK.md is internal ops.
+/STATUS.md
+/BUILD_PLAN.md
+/docs/REVIEW-2026-09-15.md
+/LAUNCH_RUNBOOK.md

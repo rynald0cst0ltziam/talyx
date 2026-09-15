@@ -17,8 +17,3 @@ node_modules/
 
 .vercel
 .env*
-
-# synced from ../scripts/ by scripts/sync-installers.mjs (predev/prebuild) —
-# /scripts/ is the single source of truth, this is a generated copy
-public/install.sh
-public/install.ps1

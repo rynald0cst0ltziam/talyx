@@ -5,13 +5,12 @@
   "type": "module",
   "description": "Marketing site for Talyx — the security layer for AI coding agents.",
   "scripts": {
-    "predev": "node scripts/sync-installers.mjs",
     "dev": "astro dev",
     "start": "astro dev",
-    "prebuild": "node scripts/sync-installers.mjs",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "sync-installers": "node scripts/sync-installers.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.3.0",
