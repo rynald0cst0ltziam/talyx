@@ -90,7 +90,7 @@ fn collect_enabled_plugins(project_root: &Path, home: Option<&Path>) -> BTreeSet
         let Ok(text) = fs::read_to_string(&path) else {
             return;
         };
-        let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        let Some(json) = crate::jsonc::parse_json_config(&path, &text) else {
             return;
         };
         if let Some(map) = json.get("enabledPlugins").and_then(|v| v.as_object()) {
@@ -218,7 +218,7 @@ fn scan_plugin_dir(plugin_root: &Path, name: &str) -> Vec<DiscoveredArtifact> {
     let mut out = Vec::new();
     let manifest = fs::read_to_string(plugin_root.join(".claude-plugin").join("plugin.json"))
         .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|t| crate::jsonc::parse_json_config(&plugin_root.join(".claude-plugin").join("plugin.json"), &t))
         .unwrap_or(Value::Null);
     let label = format!("Claude Code plugin \"{name}\"");
 
@@ -350,7 +350,7 @@ fn subagent_status_line(plugin_root: &Path, plugin: &str) -> Vec<DiscoveredArtif
     let path = plugin_root.join("settings.json");
     let Some(cmd) = fs::read_to_string(&path)
         .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|t| crate::jsonc::parse_json_config(&path, &t))
         .and_then(|j| {
             j.get("subagentStatusLine")
                 .and_then(|s| s.get("command"))
@@ -545,7 +545,7 @@ fn command_configs(
         let Ok(text) = fs::read_to_string(&f) else {
             continue;
         };
-        let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        let Some(json) = crate::jsonc::parse_json_config(&f, &text) else {
             continue;
         };
         // object keyed by name, or a bare array of entries

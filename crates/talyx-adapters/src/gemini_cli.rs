@@ -168,7 +168,7 @@ fn parse_gemini_extensions(extensions_dir: &Path) -> Vec<DiscoveredArtifact> {
         // GEMINI.md per the docs.
         let context_name = std::fs::read_to_string(&manifest)
             .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|t| crate::jsonc::parse_json_config(&manifest, &t))
             .and_then(|v| v.get("contextFileName").and_then(|c| c.as_str()).map(String::from))
             .unwrap_or_else(|| "GEMINI.md".to_string());
         let context_path = ext_dir.join(&context_name);

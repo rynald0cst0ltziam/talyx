@@ -157,7 +157,7 @@ pub(crate) fn parse_hooks_json(
     let Ok(text) = fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(json) = crate::jsonc::parse_json_config(path, &text) else {
         return Vec::new();
     };
     let Some(hooks_val) = json.get("hooks") else {

@@ -26,7 +26,6 @@
 use crate::hooks_config::{parse_hooks_json, parse_hooks_value};
 use crate::mcp_config::parse_mcp_servers_json;
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 pub struct DevinCliAdapter;
@@ -109,7 +108,7 @@ fn parse_project_hooks(path: &Path) -> Vec<DiscoveredArtifact> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(json) = crate::jsonc::parse_json_config(path, &text) else {
         return Vec::new();
     };
     if !json.is_object() {

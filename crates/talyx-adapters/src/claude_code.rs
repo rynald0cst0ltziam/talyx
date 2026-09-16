@@ -17,7 +17,6 @@ use crate::hooks_config::parse_hooks_json;
 use crate::mcp_config::{parse_mcp_servers_json, parse_server_map};
 use crate::{AgentAdapter, ConfigSourceKind, DiscoveredArtifact};
 use talyx_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity};
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -174,7 +173,7 @@ fn parse_local_scope_mcp_servers(claude_json_path: &Path, project_root: &Path) -
     let Ok(text) = fs::read_to_string(claude_json_path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(json) = crate::jsonc::parse_json_config(claude_json_path, &text) else {
         return Vec::new();
     };
     let Some(projects) = json.get("projects").and_then(|p| p.as_object()) else {

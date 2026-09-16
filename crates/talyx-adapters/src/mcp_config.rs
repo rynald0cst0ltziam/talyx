@@ -50,7 +50,7 @@ pub(crate) fn parse_mcp_servers_json(
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(json) = crate::jsonc::parse_json_config(path, &text) else {
         return Vec::new();
     };
     let Some(servers) = json.get(top_level_key).and_then(|v| v.as_object()) else {
@@ -104,7 +104,7 @@ pub(crate) fn parse_mcp_servers_json_root_or_wrapped(
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(json) = crate::jsonc::parse_json_config(path, &text) else {
         return Vec::new();
     };
     let servers = json

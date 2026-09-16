@@ -1015,6 +1015,23 @@ fn rewrite_config_json(
     store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
+
+    // Discovery reads JSONC (comments, trailing commas) so a commented
+    // config can't hide from scanning — see talyx_adapters::jsonc. This
+    // path cannot WRITE it back: it re-serializes through serde_json,
+    // which would silently delete every comment in the user's file.
+    // Refusing is the honest outcome; destroying a config to enforce on
+    // it is not a trade this tool gets to make on the user's behalf.
+    if talyx_adapters::jsonc::needs_jsonc(&original_text) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} contains comments or trailing commas (JSONC). Talyx scanned it, but will not rewrite it — doing so would delete your comments. Enforce it by removing the comments from this file, or gate the servers it declares from another config.",
+                config_path.display()
+            ),
+        ));
+    }
+
     let mut json: serde_json::Value = serde_json::from_str(&original_text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let shim_str = shim_path.map(|p| p.display().to_string());
@@ -2235,6 +2252,42 @@ mod tests {
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refuses_to_rewrite_a_jsonc_config_instead_of_destroying_its_comments() {
+        // Discovery now reads JSONC so a `//` can't hide servers from
+        // scanning. The other half of that: this path re-serializes with
+        // serde_json, so rewriting the file would delete every comment
+        // in it. It must refuse, loudly, and leave the file untouched.
+        let dir = unique_temp_dir("jsonc-refuse");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let original = r#"{
+  // my notes about this server
+  "mcpServers": {
+    "local": { "command": "node", "args": ["s.js"] }
+  }
+}"#;
+        std::fs::write(&config_path, original).unwrap();
+
+        let store = temp_store(&dir);
+        let shim = dir.join("talyx-shim");
+        let err = match rewrite_config_json(&config_path, &[], Some(&shim), false, &store) {
+            Err(e) => e,
+            Ok(_) => panic!("a JSONC file must not be rewritten"),
+        };
+        assert!(
+            err.to_string().contains("JSONC"),
+            "the refusal must say why: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            original,
+            "the user's file must be byte-identical after a refusal"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

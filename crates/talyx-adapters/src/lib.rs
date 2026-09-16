@@ -25,6 +25,7 @@ pub mod gemini_cli;
 pub mod github_copilot_cli;
 pub mod goose;
 mod hooks_config;
+pub mod jsonc;
 pub mod jetbrains;
 pub mod kiro;
 mod mcp_config;
