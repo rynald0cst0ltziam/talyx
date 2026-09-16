@@ -129,6 +129,65 @@ pub fn parse_toml_leniently(text: &str) -> Option<Value> {
     toml::from_str::<Value>(&repaired).ok()
 }
 
+/// True when the document contains a real TOML comment.
+///
+/// Enforcement rewrites this file by re-serializing a parsed `toml::Value`,
+/// which cannot carry comments — so rewriting a commented config silently
+/// deletes the user's own notes from their own file. The rewrite path
+/// checks this and refuses instead, the same call already made for JSONC
+/// configs: scanning still works, only the rewrite declines.
+///
+/// `#` inside a string is not a comment, and getting that wrong would be
+/// worse than not checking at all — it would block enforcement for
+/// perfectly ordinary configs (`args = ["--tag=#build"]`, a Windows path,
+/// a URL fragment). All four TOML string forms are tracked.
+pub fn toml_has_comments(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0usize;
+
+    while i < b.len() {
+        // Multi-line forms first — their delimiters start with the same
+        // byte as the single-line ones.
+        if b[i..].starts_with(b"\"\"\"") {
+            i += 3;
+            while i < b.len() && !b[i..].starts_with(b"\"\"\"") {
+                // A backslash escapes the next byte in a basic string.
+                i += if b[i] == b'\\' { 2 } else { 1 };
+            }
+            i += 3;
+            continue;
+        }
+        if b[i..].starts_with(b"'''") {
+            i += 3;
+            while i < b.len() && !b[i..].starts_with(b"'''") {
+                i += 1;
+            }
+            i += 3;
+            continue;
+        }
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'\'' => {
+                // Literal string: no escapes at all, ends at the next quote.
+                i += 1;
+                while i < b.len() && b[i] != b'\'' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'#' => return true,
+            _ => i += 1,
+        }
+    }
+    false
+}
+
 /// True if `chars` contains a backslash that cannot begin any TOML escape
 /// sequence (`\U`/`\u` without the required hex digits, `\` before a letter
 /// that isn't an escape designator, `\` before a space or digit, a trailing
@@ -405,6 +464,30 @@ fn remote_codex_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toml_comments_are_detected() {
+        assert!(toml_has_comments("# leading note\n[mcp_servers.a]\n"));
+        assert!(toml_has_comments("[mcp_servers.a]\ncommand = \"node\" # trailing\n"));
+        assert!(!toml_has_comments("[mcp_servers.a]\ncommand = \"node\"\n"));
+        assert!(!toml_has_comments(""));
+    }
+
+    #[test]
+    fn a_hash_inside_a_string_is_not_a_comment() {
+        // Getting this wrong would block enforcement on ordinary configs
+        // that merely contain a `#` in an argument, a path or a URL.
+        assert!(!toml_has_comments(r#"args = ["--tag=#build"]"#));
+        assert!(!toml_has_comments(r#"url = "https://x.test/a#frag""#));
+        assert!(!toml_has_comments(r#"p = 'C:\lit#eral\path'"#));
+        assert!(!toml_has_comments("s = \"\"\"multi\n#not a comment\nline\"\"\""));
+        assert!(!toml_has_comments("s = '''lit\n#also not\n'''"));
+        // An escaped quote must not end the string early and expose the
+        // following `#` as a comment.
+        assert!(!toml_has_comments(r#"s = "he said \"hi\" #inside""#));
+        // ...but a real comment after a string still counts.
+        assert!(toml_has_comments(r#"s = "value" # real comment"#));
+    }
 
     #[test]
     fn repair_doubles_a_raw_unescaped_backslash() {

@@ -1238,6 +1238,22 @@ fn rewrite_config_toml(
     store: &DecisionStore,
 ) -> io::Result<RewriteOutcome> {
     let original_text = std::fs::read_to_string(config_path)?;
+
+    // This path re-serializes a parsed `toml::Value`, which carries no
+    // comments — rewriting a commented config would silently delete the
+    // user's own notes from their own file. Same call as the JSONC path
+    // in `rewrite_config_json`: scanning still works, only the rewrite
+    // declines, and it says why rather than quietly doing damage.
+    if talyx_adapters::codex::toml_has_comments(&original_text) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} contains comments. Talyx scanned it, but will not rewrite it — re-serializing TOML drops every comment in the file. Remove the comments to enforce on this config, or gate the servers it declares from another one.",
+                config_path.display()
+            ),
+        ));
+    }
+
     let mut doc = talyx_adapters::codex::parse_toml_leniently(&original_text).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1997,6 +2013,25 @@ fn restore_remote_entry_toml(
     snapshot: &serde_json::Value,
 ) -> io::Result<bool> {
     let original_text = std::fs::read_to_string(config_path)?;
+
+    // Restoring by rewrite would drop the file's comments (see
+    // `rewrite_config_toml`). Refuse, but hand the user the exact TOML to
+    // paste back — an approval they can't act on is not an outcome to
+    // leave them with.
+    if talyx_adapters::codex::toml_has_comments(&original_text) {
+        let snippet = toml::to_string_pretty(&serde_json::json!({
+            "mcp_servers": { entry_key: snapshot }
+        }))
+        .unwrap_or_else(|_| format!("[mcp_servers.{entry_key}]\n(original entry)"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} contains comments, so Talyx will not rewrite it (that would delete them). Add this entry back by hand to restore it:\n\n{snippet}",
+                config_path.display()
+            ),
+        ));
+    }
+
     let mut doc = talyx_adapters::codex::parse_toml_leniently(&original_text).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -2252,6 +2287,56 @@ mod tests {
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refuses_to_rewrite_a_commented_toml_config() {
+        // Codex's config.toml goes through a parse/re-serialize cycle
+        // that cannot carry comments. Same decision as the JSONC case:
+        // decline, explain, and leave the file byte-identical.
+        let dir = unique_temp_dir("toml-comments");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        let original = "# my notes\n[mcp_servers.example]\ncommand = \"node\"\nargs = [\"server.js\"]\n";
+        std::fs::write(&config_path, original).unwrap();
+
+        let store = temp_store(&dir);
+        let shim = dir.join("talyx-shim");
+        let err = match rewrite_config_toml(&config_path, &[], Some(&shim), false, &store) {
+            Err(e) => e,
+            Ok(_) => panic!("a commented TOML config must not be rewritten"),
+        };
+        assert!(err.to_string().contains("comments"), "must say why: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            original,
+            "the user's file must be byte-identical after a refusal"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_toml_config_without_comments_still_rewrites() {
+        // The guard must not become a blanket refusal — an ordinary
+        // Codex config still gets enforced.
+        let dir = unique_temp_dir("toml-nocomments");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[mcp_servers.example]\ncommand = \"node\"\nargs = [\"server.js\"]\n",
+        )
+        .unwrap();
+
+        let store = temp_store(&dir);
+        let shim = dir.join("talyx-shim");
+        // No artifacts to route, so this is a no-op rewrite — the point
+        // is that it does NOT return the comment refusal.
+        let outcome = rewrite_config_toml(&config_path, &[], Some(&shim), false, &store);
+        assert!(outcome.is_ok(), "an uncommented TOML must be accepted");
 
         std::fs::remove_dir_all(&dir).ok();
     }
