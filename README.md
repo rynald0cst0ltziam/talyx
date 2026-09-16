@@ -69,6 +69,17 @@ talyx activate <YOUR-LICENSE-KEY>   # from your purchase email
 talyx init --project .              # turn on enforcement
 ```
 
+Both installers verify the download against the `SHA256SUMS` published
+with the release and refuse to install on a mismatch. Every release
+archive also carries a [build provenance
+attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations),
+so you can confirm a binary was built by this repo's release workflow and
+not substituted afterwards:
+
+```bash
+gh attestation verify talyx-x86_64-unknown-linux-gnu.tar.gz --repo rynald0cst0ltziam/talyx
+```
+
 `scan` and `status` run without a license so you can evaluate freely;
 `init` (the part that rewrites configs and enforces) needs a license —
 `talyx-shim` itself is never gated, so a lapsed license can't break a

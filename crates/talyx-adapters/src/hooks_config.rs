@@ -106,7 +106,7 @@ fn collect_command_strings(value: &Value, out: &mut Vec<String>) {
 /// same way on a teammate's Linux machine, or `talyx why` there silently
 /// fails to unwrap it. Found via real cross-platform test verification,
 /// not assumed.
-fn file_stem_either_separator(path: &str) -> Option<&str> {
+pub(crate) fn file_stem_either_separator(path: &str) -> Option<&str> {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     if name.is_empty() {
         return None;

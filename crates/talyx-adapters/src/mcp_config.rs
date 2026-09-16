@@ -411,9 +411,14 @@ fn host_registrable_domain(url: &str) -> Option<String> {
 /// the artifact it wraps — permanently blinding drift detection and
 /// re-scoring the moment protection is turned on.
 pub(crate) fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
-    let looks_like_shim = Path::new(command)
-        .file_stem()
-        .and_then(|s| s.to_str())
+    // Both `/` and `\` count as separators regardless of host OS: a
+    // Windows-produced shim path (`C:\tools\talyx-shim.exe`) in a config
+    // shared across a team must unwrap the same way on a teammate's Linux
+    // machine, or drift detection scans the shim binary instead of the
+    // real server. `Path::file_stem` only treats `\` as a separator when
+    // actually running on Windows — same bug already fixed in
+    // hooks_config.rs, whose helper this reuses.
+    let looks_like_shim = crate::hooks_config::file_stem_either_separator(command)
         .map(|s| s.eq_ignore_ascii_case("talyx-shim"))
         .unwrap_or(false);
     if !looks_like_shim {
@@ -970,6 +975,32 @@ mod tests {
         assert_eq!(
             unwrap_shim_invocation("/path/talyx-shim.exe", &args),
             None
+        );
+    }
+
+    #[test]
+    fn unwraps_a_windows_backslash_shim_path_regardless_of_the_host_os() {
+        // The MCP-config twin of hooks_config.rs's identical regression:
+        // `Path::new(..).file_stem()` only treats `\` as a separator when
+        // running on Windows, so a Windows-produced shim path in a config
+        // shared across a team was unrecognized on Linux/macOS — drift
+        // detection then hashed and scanned the SHIM binary instead of the
+        // real server it wraps.
+        let args = vec![
+            "mcp-server:foo:local:abc".to_string(),
+            "--".to_string(),
+            "node".to_string(),
+            "server.js".to_string(),
+        ];
+        assert_eq!(
+            unwrap_shim_invocation(r"C:\tools\talyx-shim.exe", &args),
+            Some(("node".to_string(), vec!["server.js".to_string()])),
+            "a Windows-style backslash shim path must unwrap on any host OS"
+        );
+        assert_eq!(
+            unwrap_shim_invocation("/usr/local/bin/talyx-shim", &args),
+            Some(("node".to_string(), vec!["server.js".to_string()])),
+            "a POSIX-style path (no .exe) must unwrap too"
         );
     }
 

@@ -458,6 +458,108 @@ struct ValueConfigFormat {
     shape: ServerContainer,
 }
 
+/// How many timestamped backups to keep per config file. The pristine
+/// `<name>.talyx-backup` is never counted or pruned — it is the only copy
+/// of what the file looked like before Talyx ever touched it.
+const MAX_TIMESTAMPED_BACKUPS: usize = 5;
+
+/// Backs up a config file before rewriting it, and returns the path of
+/// the pristine backup.
+///
+/// Two kinds, because one alone loses data either way:
+///
+///  - `<name>.talyx-backup` — written ONCE, the first time Talyx ever
+///    rewrites this file. The user's file as it was before any Talyx
+///    involvement at all.
+///  - `<name>.talyx-backup-<unix>` — written on EVERY run. Without these,
+///    restoring the pristine backup a month later silently discards every
+///    change the user (or their agent) made to that config in between,
+///    because the pristine copy is the only thing Talyx kept.
+///
+/// Older timestamped copies are pruned to `MAX_TIMESTAMPED_BACKUPS` so
+/// this doesn't litter a config directory indefinitely.
+fn backup_config(config_path: &Path, original_text: &str) -> io::Result<PathBuf> {
+    let pristine = PathBuf::from(format!("{}.talyx-backup", config_path.display()));
+    if !pristine.exists() {
+        std::fs::write(&pristine, original_text)?;
+    }
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dated = PathBuf::from(format!("{}.talyx-backup-{stamp}", config_path.display()));
+    // A second rewrite within the same second would collide; that's a
+    // no-op overwrite of an identical-vintage copy, not a problem.
+    std::fs::write(&dated, original_text)?;
+    prune_old_backups(config_path);
+
+    Ok(pristine)
+}
+
+/// Keeps only the newest `MAX_TIMESTAMPED_BACKUPS` dated backups for one
+/// config file. Best-effort: a directory we can't read, or a file we
+/// can't delete, must never fail the rewrite that just succeeded.
+fn prune_old_backups(config_path: &Path) {
+    let Some(dir) = config_path.parent() else {
+        return;
+    };
+    let Some(name) = config_path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let prefix = format!("{name}.talyx-backup-");
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut dated: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&prefix))
+        })
+        .collect();
+    if dated.len() <= MAX_TIMESTAMPED_BACKUPS {
+        return;
+    }
+    // Lexicographic order on a fixed-width unix stamp is chronological.
+    dated.sort();
+    let cutoff = dated.len() - MAX_TIMESTAMPED_BACKUPS;
+    for old in dated.into_iter().take(cutoff) {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+/// Writes a config file atomically: a temp file in the SAME directory
+/// (so the rename stays on one filesystem and is therefore atomic),
+/// then renamed over the target.
+///
+/// `std::fs::write` truncates in place, which leaves a window where the
+/// file on disk is empty or half-written. That matters here because the
+/// files being rewritten are things like `~/.claude.json` — large, and
+/// read (and written) by a coding agent that may well be running right
+/// now. A reader either sees the whole old file or the whole new one.
+fn write_config_atomically(config_path: &Path, contents: &str) -> io::Result<()> {
+    let dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let name = config_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config");
+    let tmp = dir.join(format!(".{name}.talyx-tmp-{}", std::process::id()));
+
+    std::fs::write(&tmp, contents)?;
+    // Rename replaces an existing destination on both Unix and Windows.
+    match std::fs::rename(&tmp, config_path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
 /// Rewrite path for a real-YAML config (Goose / Continue.dev / Aider) or
 /// OpenHands' array-of-tables TOML: parse the file into a
 /// `serde_json::Value` (via `serde_saphyr` for YAML, `toml` for TOML),
@@ -519,10 +621,7 @@ fn rewrite_config_value(
         });
     }
 
-    let backup_path = PathBuf::from(format!("{}.talyx-backup", config_path.display()));
-    if !backup_path.exists() {
-        std::fs::write(&backup_path, &original_text)?;
-    }
+    let backup_path = backup_config(config_path, &original_text)?;
 
     let serialized = match format.file {
         ValueFileFormat::Yaml => {
@@ -540,7 +639,7 @@ fn rewrite_config_value(
         ValueFileFormat::Toml => toml::to_string_pretty(&root)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
     };
-    std::fs::write(config_path, serialized)?;
+    write_config_atomically(config_path, &serialized)?;
 
     Ok(RewriteOutcome {
         newly_protected,
@@ -1058,14 +1157,11 @@ fn rewrite_config_json(
         });
     }
 
-    let backup_path = PathBuf::from(format!("{}.talyx-backup", config_path.display()));
-    if !backup_path.exists() {
-        std::fs::write(&backup_path, &original_text)?;
-    }
+    let backup_path = backup_config(config_path, &original_text)?;
 
     let pretty = serde_json::to_string_pretty(&json)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(config_path, pretty)?;
+    write_config_atomically(config_path, &pretty)?;
 
     Ok(RewriteOutcome {
         newly_protected,
@@ -1205,14 +1301,11 @@ fn rewrite_config_toml(
         });
     }
 
-    let backup_path = PathBuf::from(format!("{}.talyx-backup", config_path.display()));
-    if !backup_path.exists() {
-        std::fs::write(&backup_path, &original_text)?;
-    }
+    let backup_path = backup_config(config_path, &original_text)?;
 
     let pretty = toml::to_string_pretty(&doc)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(config_path, pretty)?;
+    write_config_atomically(config_path, &pretty)?;
 
     Ok(RewriteOutcome {
         newly_protected,
@@ -1828,7 +1921,7 @@ fn restore_remote_entry_yaml(
     opts.min_fold_chars = usize::MAX;
     let serialized = serde_saphyr::to_string_with_options(&root, opts)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    std::fs::write(config_path, serialized)?;
+    write_config_atomically(config_path, &serialized)?;
     Ok(true)
 }
 
@@ -1877,7 +1970,7 @@ fn restore_remote_entry_json(
 
     let pretty = serde_json::to_string_pretty(&json)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(config_path, pretty)?;
+    write_config_atomically(config_path, &pretty)?;
     Ok(true)
 }
 
@@ -1924,7 +2017,7 @@ fn restore_remote_entry_toml(
             arr.push(toml_value);
             let pretty = toml::to_string_pretty(&doc)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            std::fs::write(config_path, pretty)?;
+            write_config_atomically(config_path, &pretty)?;
             return Ok(true);
         }
     }
@@ -1951,7 +2044,7 @@ fn restore_remote_entry_toml(
 
     let pretty = toml::to_string_pretty(&doc)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(config_path, pretty)?;
+    write_config_atomically(config_path, &pretty)?;
     Ok(true)
 }
 
@@ -2142,6 +2235,101 @@ mod tests {
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn backup_config_keeps_the_pristine_copy_and_adds_a_dated_one() {
+        let dir = unique_temp_dir("backup-pristine");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("settings.json");
+        std::fs::write(&cfg, "ORIGINAL").unwrap();
+
+        let pristine = backup_config(&cfg, "ORIGINAL").unwrap();
+        assert_eq!(std::fs::read_to_string(&pristine).unwrap(), "ORIGINAL");
+
+        // A later run must NOT overwrite the pristine copy — that is the
+        // only record of what the file looked like before Talyx existed.
+        // It must still take a dated snapshot of the current contents, or
+        // restoring the pristine one later silently discards everything
+        // the user changed in between (the H-tier finding this closes).
+        std::fs::write(&cfg, "USER EDITED THIS LATER").unwrap();
+        backup_config(&cfg, "USER EDITED THIS LATER").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&pristine).unwrap(),
+            "ORIGINAL",
+            "the pristine backup must never be overwritten"
+        );
+        let dated: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".talyx-backup-"))
+            .collect();
+        assert!(!dated.is_empty(), "a dated backup must exist");
+        let dated_contents: Vec<String> = dated
+            .iter()
+            .map(|n| std::fs::read_to_string(dir.join(n)).unwrap())
+            .collect();
+        assert!(
+            dated_contents.iter().any(|c| c == "USER EDITED THIS LATER"),
+            "the dated backup must capture the CURRENT contents, got {dated_contents:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dated_backups_are_pruned_to_the_cap() {
+        let dir = unique_temp_dir("backup-prune");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("settings.json");
+        std::fs::write(&cfg, "x").unwrap();
+
+        // Hand-made stamps so this doesn't depend on wall-clock ticks.
+        for i in 0..(MAX_TIMESTAMPED_BACKUPS + 4) {
+            let p = dir.join(format!("settings.json.talyx-backup-{:010}", 1000 + i));
+            std::fs::write(&p, format!("v{i}")).unwrap();
+        }
+        prune_old_backups(&cfg);
+
+        let remaining: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".talyx-backup-"))
+            .collect();
+        assert_eq!(
+            remaining.len(),
+            MAX_TIMESTAMPED_BACKUPS,
+            "pruning must leave exactly the cap, got {remaining:?}"
+        );
+        // The newest must survive, the oldest must not.
+        assert!(remaining.iter().any(|n| n.ends_with("0000001008")));
+        assert!(!remaining.iter().any(|n| n.ends_with("0000001000")));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn writing_a_config_atomically_replaces_it_without_leaving_a_temp_file() {
+        let dir = unique_temp_dir("atomic-write");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("settings.json");
+        std::fs::write(&cfg, "{\"old\":true}").unwrap();
+
+        write_config_atomically(&cfg, "{\"new\":true}").unwrap();
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "{\"new\":true}");
+
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains("talyx-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

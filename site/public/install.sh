@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Talyx installer — macOS / Linux.
 #
 #   curl -fsSL https://<install-url>/install.sh | sh
@@ -69,6 +69,57 @@ detect_target() {
   printf '%s-%s\n' "$arch_part" "$os_part"
 }
 
+# Verifies the downloaded archive against the SHA256SUMS published with
+# the release. A security tool that can't prove its own download wasn't
+# tampered with in transit (a hostile proxy, a poisoned mirror, a
+# compromised CDN edge) is asking for trust it hasn't earned.
+#
+# Fails CLOSED on a mismatch. Fails closed, too, when SHA256SUMS exists
+# but no sha256 tool does — the one case where "carry on regardless"
+# would quietly defeat the whole check. A release that predates
+# SHA256SUMS (there is no such release today, but a user can pin an old
+# TALYX_VERSION) warns and continues, because refusing to install
+# something that was never published with a checksum is a worse outcome
+# than saying so out loud.
+verify_checksum() {
+  file="$1"
+  archive_name="$2"
+  workdir="$3"
+
+  if [ "$TALYX_VERSION" = "latest" ]; then
+    sums_url="https://github.com/${TALYX_REPO}/releases/latest/download/SHA256SUMS"
+  else
+    sums_url="https://github.com/${TALYX_REPO}/releases/download/${TALYX_VERSION}/SHA256SUMS"
+  fi
+
+  if ! curl -fsSL "$sums_url" -o "$workdir/SHA256SUMS" 2>/dev/null; then
+    say "  ! no SHA256SUMS published for this release — skipping checksum verification"
+    return 0
+  fi
+
+  expected="$(awk -v name="$archive_name" '$2 == name || $2 == "*" name { print $1 }' "$workdir/SHA256SUMS" | head -n 1)"
+  if [ -z "$expected" ]; then
+    say "  ! SHA256SUMS has no entry for $archive_name — skipping checksum verification"
+    return 0
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  else
+    err "a SHA256SUMS file was published for this release but neither sha256sum nor shasum is available to check it against — refusing to install unverified binaries"
+  fi
+
+  if [ "$actual" != "$expected" ]; then
+    err "checksum mismatch for $archive_name
+  expected: $expected
+  actual:   $actual
+  Refusing to install. This means the download did not match what the release published."
+  fi
+  say "  checksum verified (sha256)"
+}
+
 main() {
   command -v curl >/dev/null 2>&1 || err "curl is required"
   command -v tar >/dev/null 2>&1 || err "tar is required"
@@ -100,6 +151,8 @@ main() {
   if ! curl -fsSL "$url" -o "$tmpdir/talyx.tar.gz"; then
     err "download failed ($url) — is $TALYX_REPO a real repo with a published release yet? If you're testing this script before any release exists, that's expected."
   fi
+
+  verify_checksum "$tmpdir/talyx.tar.gz" "talyx-${target}.tar.gz" "$tmpdir"
 
   mkdir -p "$INSTALL_DIR"
   tar xzf "$tmpdir/talyx.tar.gz" -C "$tmpdir"

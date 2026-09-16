@@ -111,7 +111,7 @@ impl SessionPolicy {
         project_dir: &Path,
     ) -> Self {
         let candidates = match guardrails_path {
-            Some(p) => vec![p],
+            Some(p) => vec![guardrails::explicit_path(p)],
             None => guardrails::default_paths(project_dir),
         };
         let guardrails = match Guardrails::load(&candidates) {

@@ -396,7 +396,7 @@ fn run_advisories_refresh(url: Option<String>) -> i32 {
 }
 
 fn run_guardrails(action: GuardrailsAction) -> i32 {
-    use talyx_mcp_proxy::guardrails::{default_paths, Guardrails};
+    use talyx_mcp_proxy::guardrails::{default_paths, explicit_path, Guardrails};
 
     if let GuardrailsAction::Example = action {
         print!("{}", Guardrails::EXAMPLE);
@@ -411,7 +411,7 @@ fn run_guardrails(action: GuardrailsAction) -> i32 {
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let candidates = match explicit {
-        Some(p) => vec![p],
+        Some(p) => vec![explicit_path(p)],
         None => default_paths(&cwd),
     };
 
@@ -421,7 +421,7 @@ fn run_guardrails(action: GuardrailsAction) -> i32 {
                 "No guardrails file found. Looked at:\n{}\n\nRun `talyx guardrails example > ~/.talyx/guardrails.yaml` to start one.",
                 candidates
                     .iter()
-                    .map(|p| format!("  {}", p.display()))
+                    .map(|c| format!("  {}", c.path.display()))
                     .collect::<Vec<_>>()
                     .join("\n")
             );

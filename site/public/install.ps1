@@ -41,8 +41,10 @@ $target = "x86_64-pc-windows-msvc"
 
 if ($Version -eq "latest") {
     $url = "https://github.com/$Repo/releases/latest/download/talyx-$target.zip"
+    $sumsUrl = "https://github.com/$Repo/releases/latest/download/SHA256SUMS"
 } else {
     $url = "https://github.com/$Repo/releases/download/$Version/talyx-$target.zip"
+    $sumsUrl = "https://github.com/$Repo/releases/download/$Version/SHA256SUMS"
 }
 
 Write-Info "Talyx installer"
@@ -60,6 +62,40 @@ try {
         Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
     } catch {
         Fail "download failed ($url)  -- is $Repo a real repo with a published release yet? If you're testing this script before any release exists, that's expected. ($($_.Exception.Message))"
+    }
+
+    # Verify the download against the SHA256SUMS published with the
+    # release before unpacking or running anything out of it. Fails
+    # closed on a mismatch; a release published without a SHA256SUMS
+    # (only possible by pinning an old -Version) warns and continues
+    # rather than refusing something that never had a checksum to check.
+    $archiveName = "talyx-$target.zip"
+    $sumsPath = Join-Path $tmpDir "SHA256SUMS"
+    $haveSums = $true
+    try {
+        Invoke-WebRequest -Uri $sumsUrl -OutFile $sumsPath -UseBasicParsing
+    } catch {
+        $haveSums = $false
+        Write-Info "  ! no SHA256SUMS published for this release -- skipping checksum verification"
+    }
+    if ($haveSums) {
+        $expected = $null
+        foreach ($line in Get-Content $sumsPath) {
+            $parts = $line -split '\s+', 2
+            if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -eq $archiveName) {
+                $expected = $parts[0]
+                break
+            }
+        }
+        if (-not $expected) {
+            Write-Info "  ! SHA256SUMS has no entry for $archiveName -- skipping checksum verification"
+        } else {
+            $actual = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $expected.ToLower()) {
+                Fail "checksum mismatch for $archiveName`n  expected: $expected`n  actual:   $actual`n  Refusing to install. This means the download did not match what the release published."
+            }
+            Write-Info "  checksum verified (sha256)"
+        }
     }
 
     Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force

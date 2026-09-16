@@ -114,23 +114,85 @@ pub struct Guardrails {
     pub source: String,
 }
 
+/// Where a guardrails file came from. A file inside the project is
+/// attacker-controlled in the threat model this product exists for — it
+/// arrives with a `git clone` — so it is trusted strictly less than the
+/// one in the user's own home directory.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GuardrailScope {
+    /// `~/.talyx/guardrails.yaml`, or a path the user named explicitly
+    /// (`--guardrails`). Fully trusted: the user wrote it.
+    User,
+    /// `<project>/.talyx/guardrails.yaml` — ships with the repository.
+    Project,
+}
+
+/// A candidate guardrails file and the trust level of where it was found.
+#[derive(Clone, Debug)]
+pub struct GuardrailCandidate {
+    pub path: std::path::PathBuf,
+    pub scope: GuardrailScope,
+}
+
 impl Guardrails {
-    /// Load and validate the first guardrails file that exists among the
-    /// candidates. Returns `Ok(None)` when none exist.
-    pub fn load(candidates: &[std::path::PathBuf]) -> Result<Option<Guardrails>, String> {
-        for path in candidates {
-            if path.is_file() {
-                let text = std::fs::read_to_string(path)
-                    .map_err(|e| format!("{}: {e}", path.display()))?;
+    /// Loads and validates EVERY guardrails file that exists among the
+    /// candidates and merges them, user rules first.
+    ///
+    /// Two deliberate trust decisions, both closing the same hole: a
+    /// cloned repository's `<project>/.talyx/guardrails.yaml` used to be
+    /// checked before the user's own file and the first hit won outright,
+    /// so a repo could **replace** the user's rules wholesale. Worse, an
+    /// `allow` rule short-circuits the built-in detectors entirely, so a
+    /// single project-scoped `allow` switched off the live proxy's
+    /// detection for the whole session.
+    ///
+    /// Now: rules from both scopes are merged rather than one shadowing
+    /// the other, the user's rules are evaluated first, and an `allow`
+    /// rule found in PROJECT scope is dropped with a warning — a repo can
+    /// make the proxy stricter (`warn`, `redact`, `block`), never laxer.
+    pub fn load(candidates: &[GuardrailCandidate]) -> Result<Option<Guardrails>, String> {
+        let mut merged: Vec<Rule> = Vec::new();
+        let mut sources: Vec<String> = Vec::new();
+
+        // User scope first so its rules are evaluated before any
+        // project-scoped rule that would otherwise match the same message.
+        for scope in [GuardrailScope::User, GuardrailScope::Project] {
+            for candidate in candidates.iter().filter(|c| c.scope == scope) {
+                if !candidate.path.is_file() {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&candidate.path)
+                    .map_err(|e| format!("{}: {e}", candidate.path.display()))?;
                 let g = Guardrails::parse(&text)
-                    .map_err(|e| format!("{}: {e}", path.display()))?;
-                return Ok(Some(Guardrails {
-                    source: path.display().to_string(),
-                    ..g
-                }));
+                    .map_err(|e| format!("{}: {e}", candidate.path.display()))?;
+
+                let mut rules = g.rules;
+                if scope == GuardrailScope::Project {
+                    let before = rules.len();
+                    rules.retain(|r| r.action != RuleAction::Allow);
+                    let dropped = before - rules.len();
+                    if dropped > 0 {
+                        eprintln!(
+                            "Talyx: ignoring {dropped} `allow` rule(s) from {} — a guardrails file inside the project can add checks but cannot switch detection off.",
+                            candidate.path.display()
+                        );
+                    }
+                }
+                if rules.is_empty() {
+                    continue;
+                }
+                sources.push(candidate.path.display().to_string());
+                merged.extend(rules);
             }
         }
-        Ok(None)
+
+        if merged.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Guardrails {
+            rules: merged,
+            source: sources.join(", "),
+        }))
     }
 
     /// Parse + validate from YAML text.
@@ -564,17 +626,37 @@ fn str_val(v: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("`{key}` must be a string"))
 }
 
-/// Default candidate paths for the guardrails file.
-pub fn default_paths(cwd: &Path) -> Vec<std::path::PathBuf> {
+/// Default candidate guardrails files, each tagged with the trust level
+/// of where it was found — see `Guardrails::load`, which merges them
+/// user-first and refuses `allow` rules from project scope.
+pub fn default_paths(cwd: &Path) -> Vec<GuardrailCandidate> {
     let mut out = Vec::new();
+    // Debug/test builds only (see `debug_only_env`). Treated as User
+    // scope because in those builds it's the test harness naming the
+    // file, not a repository.
     if let Some(p) = crate::debug_only_env("TALYX_GUARDRAILS") {
-        out.push(std::path::PathBuf::from(p));
+        out.push(GuardrailCandidate {
+            path: std::path::PathBuf::from(p),
+            scope: GuardrailScope::User,
+        });
     }
-    out.push(cwd.join(".talyx").join("guardrails.yaml"));
     if let Some(h) = dirs::home_dir() {
-        out.push(h.join(".talyx").join("guardrails.yaml"));
+        out.push(GuardrailCandidate {
+            path: h.join(".talyx").join("guardrails.yaml"),
+            scope: GuardrailScope::User,
+        });
     }
+    out.push(GuardrailCandidate {
+        path: cwd.join(".talyx").join("guardrails.yaml"),
+        scope: GuardrailScope::Project,
+    });
     out
+}
+
+/// An explicitly-named guardrails file (`--guardrails <path>`): the user
+/// typed it, so it carries user scope regardless of where it sits.
+pub fn explicit_path(path: std::path::PathBuf) -> GuardrailCandidate {
+    GuardrailCandidate { path, scope: GuardrailScope::User }
 }
 
 #[cfg(test)]
@@ -584,6 +666,163 @@ mod tests {
 
     fn g(yaml: &str) -> Guardrails {
         Guardrails::parse(yaml).unwrap()
+    }
+
+    fn write_temp_guardrails(tag: &str, yaml: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "talyx-guardrails-test-{}-{}-{tag}",
+            std::process::id(),
+            n
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("guardrails.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        path
+    }
+
+    const USER_RULES: &str = r#"
+version: 1
+rules:
+  - name: user-blocks-ssh
+    direction: client-to-server
+    all:
+      - path: params.arguments.path
+        contains: "/.ssh/"
+    action: block
+"#;
+
+    const PROJECT_RULES_WITH_ALLOW: &str = r#"
+version: 1
+rules:
+  - name: project-turns-detection-off
+    direction: any
+    all:
+      - path: params
+        exists: true
+    action: allow
+  - name: project-adds-a-warn
+    direction: any
+    all:
+      - path: params.arguments.token
+        exists: true
+    action: warn
+"#;
+
+    #[test]
+    fn a_project_file_no_longer_shadows_the_users_own_rules() {
+        // The H-tier finding this closes: the project file was checked
+        // FIRST and the first hit won outright, so a cloned repo replaced
+        // the user's rules wholesale.
+        let user = write_temp_guardrails("user", USER_RULES);
+        let project = write_temp_guardrails("project", PROJECT_RULES_WITH_ALLOW);
+        let candidates = vec![
+            GuardrailCandidate { path: project.clone(), scope: GuardrailScope::Project },
+            GuardrailCandidate { path: user.clone(), scope: GuardrailScope::User },
+        ];
+
+        let loaded = Guardrails::load(&candidates).unwrap().expect("rules must load");
+        // user's 1 block + project's 1 warn; the project's `allow` is gone.
+        assert_eq!(loaded.rule_count(), 2, "both files' rules must be merged");
+        assert!(
+            loaded.source.contains("user"),
+            "the user's file must contribute: {}",
+            loaded.source
+        );
+
+        std::fs::remove_dir_all(user.parent().unwrap()).ok();
+        std::fs::remove_dir_all(project.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn an_allow_rule_from_project_scope_is_dropped() {
+        // An `allow` short-circuits every built-in detector, so a repo
+        // shipping one could switch the live proxy's detection off for a
+        // whole session. A repo may make the proxy stricter, never laxer.
+        let project = write_temp_guardrails("project-allow", PROJECT_RULES_WITH_ALLOW);
+        let candidates = vec![GuardrailCandidate {
+            path: project.clone(),
+            scope: GuardrailScope::Project,
+        }];
+
+        let loaded = Guardrails::load(&candidates).unwrap().expect("the warn rule survives");
+        assert_eq!(loaded.rule_count(), 1, "only the non-allow rule may survive");
+
+        let msg = json!({
+            "jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"arguments":{"path":"/home/u/.ssh/id_rsa"}}
+        });
+        let outcome = loaded.evaluate(Direction::ClientToServer, Some("tools/call"), &msg);
+        assert!(
+            !matches!(outcome, GuardrailOutcome::Allow { .. }),
+            "a project-scoped allow must never produce an Allow outcome"
+        );
+
+        std::fs::remove_dir_all(project.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn an_allow_rule_from_user_scope_is_still_honored() {
+        // The user's own machine, the user's own file — their `allow`
+        // must keep working; only project scope is restricted.
+        let user = write_temp_guardrails("user-allow", PROJECT_RULES_WITH_ALLOW);
+        let candidates = vec![GuardrailCandidate {
+            path: user.clone(),
+            scope: GuardrailScope::User,
+        }];
+
+        let loaded = Guardrails::load(&candidates).unwrap().unwrap();
+        assert_eq!(loaded.rule_count(), 2, "a user file keeps all its rules");
+
+        std::fs::remove_dir_all(user.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn user_rules_are_evaluated_before_project_rules() {
+        let user = write_temp_guardrails("user-order", USER_RULES);
+        let project = write_temp_guardrails(
+            "project-order",
+            r#"
+version: 1
+rules:
+  - name: project-warn-on-ssh
+    direction: client-to-server
+    all:
+      - path: params.arguments.path
+        contains: "/.ssh/"
+    action: warn
+"#,
+        );
+        let candidates = vec![
+            GuardrailCandidate { path: project.clone(), scope: GuardrailScope::Project },
+            GuardrailCandidate { path: user.clone(), scope: GuardrailScope::User },
+        ];
+        let loaded = Guardrails::load(&candidates).unwrap().unwrap();
+
+        let msg = json!({
+            "jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"arguments":{"path":"/home/u/.ssh/id_rsa"}}
+        });
+        // Both rules match the same message; the user's BLOCK must win
+        // over the project's softer WARN.
+        match loaded.evaluate(Direction::ClientToServer, Some("tools/call"), &msg) {
+            GuardrailOutcome::Block { rule, .. } => assert_eq!(rule, "user-blocks-ssh"),
+            other => panic!(
+                "expected the user's block rule to win, got {}",
+                match other {
+                    GuardrailOutcome::Warn { rule, .. } => format!("warn from {rule}"),
+                    GuardrailOutcome::Allow { rule } => format!("allow from {rule}"),
+                    GuardrailOutcome::Redact { rule, .. } => format!("redact from {rule}"),
+                    GuardrailOutcome::None => "no match".to_string(),
+                    GuardrailOutcome::Block { .. } => unreachable!(),
+                }
+            ),
+        }
+
+        std::fs::remove_dir_all(user.parent().unwrap()).ok();
+        std::fs::remove_dir_all(project.parent().unwrap()).ok();
     }
 
     #[test]

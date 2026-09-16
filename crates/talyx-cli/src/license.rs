@@ -31,7 +31,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const API_BASE: &str = "https://api.lemonsqueezy.com/v1/licenses";
@@ -123,6 +123,27 @@ fn now_epoch() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Small tolerance for a clock that moved backwards between the write and
+/// the read (an NTP correction, a VM resuming from a snapshot) — within
+/// this window a "future" timestamp is ordinary skew, not tampering.
+const CLOCK_SKEW_TOLERANCE_SECS: u64 = 5 * 60;
+
+/// How old the cached verification is, in seconds. A timestamp further in
+/// the FUTURE than ordinary clock skew is treated as maximally stale
+/// rather than maximally fresh: `now.saturating_sub(future)` is 0, which
+/// read as "verified just now" and made a hand-edited cache
+/// (`last_verified_epoch: 9999999999`) trusted forever, never re-checked.
+/// Perfect DRM isn't achievable for a local, source-available binary and
+/// this doesn't pretend otherwise — it just removes the one-field edit
+/// that silently disables re-validation entirely.
+fn cache_age_secs(last_verified_epoch: u64) -> u64 {
+    let now = now_epoch();
+    if last_verified_epoch > now.saturating_add(CLOCK_SKEW_TOLERANCE_SECS) {
+        return u64::MAX;
+    }
+    now.saturating_sub(last_verified_epoch)
+}
+
 /// `~/.talyx/license.json`, or `$TALYX_LICENSE_FILE` if set
 /// (tests, and unusual home-directory layouts).
 pub fn license_path() -> Result<PathBuf, LicenseError> {
@@ -150,7 +171,28 @@ fn write_license(lic: &LicenseFile) -> Result<(), LicenseError> {
         .map_err(|e| LicenseError::Io(format!("serializing license: {e}")))?;
     std::fs::write(&path, json)
         .map_err(|e| LicenseError::Io(format!("writing {}: {e}", path.display())))?;
+    restrict_to_owner(&path);
     Ok(())
+}
+
+/// Tightens `license.json` to owner-read/write only (`0600`) on Unix.
+/// It holds the purchase key and the buyer's email; the default
+/// `std::fs::write` mode is `0644`, i.e. world-readable, which on a
+/// shared or multi-user machine hands the key to every other account.
+/// Best-effort by design: a filesystem that can't represent Unix modes
+/// (a mounted FAT/exFAT volume, WSL interop paths) must not turn a
+/// successful activation into a hard failure. No-op on Windows, where
+/// the file inherits the user profile directory's ACL.
+fn restrict_to_owner(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
 }
 
 fn default_instance_name() -> String {
@@ -404,7 +446,7 @@ pub fn run_status() -> i32 {
             }
         }
         Err(LicenseError::Unreachable(_)) => {
-            let age = now_epoch().saturating_sub(lic.last_verified_epoch);
+            let age = cache_age_secs(lic.last_verified_epoch);
             let remaining = OFFLINE_GRACE_SECS.saturating_sub(age) / 86_400;
             print_summary(
                 &lic,
@@ -464,7 +506,7 @@ pub fn require_licensed(feature: &str) -> Result<(), LicenseError> {
         return Err(LicenseError::NotActivated);
     };
 
-    let age = now_epoch().saturating_sub(lic.last_verified_epoch);
+    let age = cache_age_secs(lic.last_verified_epoch);
 
     // Fresh enough — trust the cache, no network call.
     if age <= TRUST_CACHE_SECS {
@@ -664,6 +706,33 @@ mod tests {
         assert_eq!(lic.status, "active");
         assert_eq!(lic.activation_limit, Some(3));
         assert_eq!(lic.customer_email.as_deref(), Some("buyer@example.com"));
+    }
+
+    #[test]
+    fn a_future_verification_timestamp_is_maximally_stale_not_maximally_fresh() {
+        // The M-tier finding this closes: `now.saturating_sub(future)` is
+        // 0, so hand-editing `last_verified_epoch` to a far-future value
+        // made the cache read as "verified just now" forever and no live
+        // re-validation ever ran again.
+        let far_future = now_epoch() + 10 * 365 * 24 * 60 * 60;
+        assert_eq!(cache_age_secs(far_future), u64::MAX);
+        assert!(cache_age_secs(far_future) > TRUST_CACHE_SECS);
+        assert!(cache_age_secs(far_future) > OFFLINE_GRACE_SECS);
+    }
+
+    #[test]
+    fn ordinary_clock_skew_does_not_invalidate_a_fresh_cache() {
+        // A clock that jumped back a minute (NTP correction, VM resume)
+        // is normal, not tampering — it must stay inside the trust window.
+        let slightly_ahead = now_epoch() + 60;
+        assert!(cache_age_secs(slightly_ahead) <= TRUST_CACHE_SECS);
+    }
+
+    #[test]
+    fn a_normal_past_timestamp_still_ages_normally() {
+        let an_hour_ago = now_epoch() - 3600;
+        let age = cache_age_secs(an_hour_ago);
+        assert!((3590..=3610).contains(&age), "age was {age}");
     }
 
     #[test]

@@ -21,10 +21,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14 # Apple Silicon
+          # Runner labels verified against actions/runner-images: macos-13
+          # no longer exists (retired) and macos-14 is deprecated, so both
+          # of the original entries here would have failed the first time
+          # a tag was ever pushed. macos-15 is Apple Silicon, and
+          # macos-15-intel is the x86_64 image.
+          - os: macos-15 # Apple Silicon
             target: aarch64-apple-darwin
             archive_ext: tar.gz
-          - os: macos-13 # Intel
+          - os: macos-15-intel # Intel
             target: x86_64-apple-darwin
             archive_ext: tar.gz
           - os: ubuntu-latest
@@ -98,11 +103,39 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # required by attest-build-provenance
+      attestations: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # `talyx advisories refresh` fetches this file over HTTPS from the
+      # latest release. It was never uploaded, so that command could only
+      # ever fail — the feed shipped inside the binary was the only one a
+      # user could have, with no way to get a newer one between releases.
+      - name: Stage the advisory feed as a release asset
+        run: cp data/advisories.json dist/advisories.json
+
+      # A security tool whose own downloads can't be verified is asking
+      # for trust it hasn't earned. The installers check these (see
+      # scripts/install.sh + install.ps1).
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

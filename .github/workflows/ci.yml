@@ -23,8 +23,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Ubuntu / Windows / macOS, because this codebase's real bugs have lived
+  # precisely in the differences between them: a `Path::file_stem()` that
+  # only treats `\` as a separator on Windows, an installer that only
+  # breaks under Debian's dash. A Linux-only gate could not have caught
+  # either one.
   rust:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,11 +51,26 @@ jobs:
           key: ${{ runner.os }}-cargo-ci-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-ci-
 
+      # `--locked` so a dependency that silently resolves to a newer
+      # version than Cargo.lock pins fails the build instead of being
+      # picked up unnoticed — the lockfile is part of what gets audited.
       - name: Clippy (warnings are errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
+
+  # The MSRV in Cargo.toml (`rust-version`) is a promise to anyone
+  # building from source. Without a job pinned to exactly that version,
+  # using a newer toolchain's API breaks them and nothing here notices —
+  # `stable` above always has more available than 1.89 does.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - name: Build at the declared MSRV
+        run: cargo build --workspace --locked
 
   site:
     runs-on: ubuntu-latest
