@@ -37,7 +37,7 @@ const grouped = order.map((s) => ({ s, rows: detections.filter((d) => d.severity
               <span class="h-px flex-1 bg-line" />
               <span class="text-xs text-mist">{rows.length}</span>
             </div>
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {rows.map((d) => (
                 <article class={`panel p-5 ring-1 ring-inset ${sev[s].ring}`}>
                   <h4 class="text-sm font-semibold text-chalk">{d.name}</h4>

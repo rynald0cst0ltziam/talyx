@@ -1,16 +1,6 @@
 /**
  * Single source of truth for cross-page site config.
  *
- * LEMON SQUEEZY WIRING — before launch, replace the three placeholder
- * values below with the real ones from your Lemon Squeezy dashboard:
- *
- *   1. `checkoutUrl`   — Store → Products → your product → "Share" → copy the
- *                        checkout URL. Looks like
- *                        https://talyx.lemonsqueezy.com/buy/xxxxxxxx-xxxx-...
- *   2. `storeSlug`     — your store subdomain (the "talyx" in the URL above).
- *                        Used by the lemon.js overlay script.
- *   3. price fields    — keep in sync with the Lemon Squeezy variant price.
- *
  * The overlay checkout (lemon.js) is loaded in Base.astro. Any link with
  * `class="lemonsqueezy-button"` pointing at a *.lemonsqueezy.com URL opens
  * in the overlay instead of a full navigation.
@@ -22,14 +12,14 @@ export const site = {
   url: 'https://gettalyx.dev',
   description:
     'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. Talyx scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully local, no telemetry, source-available.',
-  email: 'hello@gettalyx.dev',
+  email: 'rynald0cst0ltziam@gmail.com',
   // Update if the repo moves to an org later — see LAUNCH_RUNBOOK.md §2 for
   // the private/public decision this also depends on.
   github: 'https://github.com/rynald0cst0ltziam/talyx',
 
   // ── commerce ──────────────────────────────────────────────
-  checkoutUrl: 'https://talyx.lemonsqueezy.com/buy/REPLACE-WITH-REAL-CHECKOUT-ID',
-  storeSlug: 'talyx',
+  checkoutUrl: 'https://agenify.lemonsqueezy.com/checkout/buy/ea5892a0-d32f-4a75-9398-c177bd28a69d',
+  storeSlug: 'agenify',
   // One-time purchase, lifetime license — must match the Lemon Squeezy
   // product (single payment, license keys never expire).
   price: {

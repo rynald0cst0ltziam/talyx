@@ -9,6 +9,11 @@ agent auto-loads, scans each one with a real tree-sitter AST and
 source-to-sink taint pass, and physically blocks what's malicious before
 it launches. Fully local. No telemetry. No cloud.
 
+[![CI](https://github.com/rynald0cst0ltziam/talyx/actions/workflows/ci.yml/badge.svg)](https://github.com/rynald0cst0ltziam/talyx/actions/workflows/ci.yml)
+[![License: source-available](https://img.shields.io/badge/license-source--available-blue)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://gettalyx.dev/docs)
+[![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](Cargo.toml)
+
 [gettalyx.dev](https://gettalyx.dev) · [Documentation](https://gettalyx.dev/docs) · [Pricing](https://gettalyx.dev/pricing)
 
 </div>
@@ -54,11 +59,6 @@ curl -fsSL https://gettalyx.dev/install.sh | sh
 ```powershell
 # Windows
 irm https://gettalyx.dev/install.ps1 | iex
-```
-
-```bash
-# npm (any platform)
-npm install -g talyx
 ```
 
 Then:

@@ -435,7 +435,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Do you offer team or volume pricing?',
-    a: 'Yes — volume pricing for 5 or more developers. The product is identical: one lifetime key per developer, each good for 3 machines. Email hello@talyx.dev.',
+    a: 'Yes — volume pricing for 5 or more developers. The product is identical: one lifetime key per developer, each good for 3 machines. Email rynald0cst0ltziam@gmail.com.',
   },
   {
     q: 'Is there a refund policy?',
