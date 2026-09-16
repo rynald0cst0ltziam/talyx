@@ -242,6 +242,27 @@ pub enum ArtifactSource {
     RemoteUrl(String),
 }
 
+/// What KIND of namespace a publisher name belongs to.
+///
+/// Without this, the trust seed is a flat list of strings mixing npm
+/// scopes (`modelcontextprotocol`) with registrable domains
+/// (`stripe.com`), and a name from one namespace matches an entry meant
+/// for the other. npm allows dots in package names, so `stripe.com` is a
+/// publishable npm package name, and a scoped package `@stripe.com/x`
+/// yields the scope `stripe.com` — either would have collected the real
+/// vendor's reputation discount. Matching requires the kinds to agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublisherKind {
+    /// An npm scope: the `foo` in `@foo/bar`. Never a bare package name —
+    /// an unscoped name identifies a package, not who published it.
+    NpmScope,
+    /// A registrable domain, for a remote server addressed by URL.
+    Domain,
+    /// The owner/org segment of a git host URL.
+    GitOwner,
+}
+
 /// Publisher/repo identity used by the reputation discount in the risk
 /// engine (BUILD_PLAN.md §4, §7). `verified` is only ever set by an explicit
 /// verification step (org verification, signed release, npm provenance) —
@@ -249,6 +270,11 @@ pub enum ArtifactSource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublisherIdentity {
     pub name: Option<String>,
+    /// The namespace `name` lives in. `None` means "not trust-matchable"
+    /// — the reputation discount refuses to match an identity whose kind
+    /// is unknown rather than guessing which namespace it meant.
+    #[serde(default)]
+    pub kind: Option<PublisherKind>,
     pub repo_url: Option<String>,
     pub verified: bool,
 }

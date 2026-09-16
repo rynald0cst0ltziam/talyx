@@ -4,77 +4,92 @@
     {
       "match": "modelcontextprotocol",
       "discount": 30,
-      "note": "npm scope @modelcontextprotocol/* -- Anthropic / MCP steering group's official reference servers. Verified 2026-09-04 via GitHub API (github.com/modelcontextprotocol org exists, 'servers' repo present) and the npm registry (@modelcontextprotocol/server-filesystem actively maintained, latest release 2026.8.31). CAVEAT, found during verification: @modelcontextprotocol/server-github specifically is DEPRECATED -- its npm listing states 'Package no longer supported' and development moved to github.com/github/github-mcp-server, a DIFFERENT publisher not covered by this entry. An abandoned package is a higher-risk signal, not a lower one -- do not assume every historical @modelcontextprotocol/* package is still trustworthy just because the scope is."
+      "note": "npm scope @modelcontextprotocol/* -- Anthropic / MCP steering group's official reference servers. Verified 2026-09-04 via GitHub API (github.com/modelcontextprotocol org exists, 'servers' repo present) and the npm registry (@modelcontextprotocol/server-filesystem actively maintained, latest release 2026.8.31). CAVEAT, found during verification: @modelcontextprotocol/server-github specifically is DEPRECATED -- its npm listing states 'Package no longer supported' and development moved to github.com/github/github-mcp-server, a DIFFERENT publisher not covered by this entry. An abandoned package is a higher-risk signal, not a lower one -- do not assume every historical @modelcontextprotocol/* package is still trustworthy just because the scope is.",
+      "kind": "npm_scope"
     },
     {
       "match": "linear.app",
       "discount": 30,
-      "note": "Linear's official remote MCP server (https://mcp.linear.app/mcp). Verified 2026-09-04 directly against linear.app/docs/mcp."
+      "note": "Linear's official remote MCP server (https://mcp.linear.app/mcp). Verified 2026-09-04 directly against linear.app/docs/mcp.",
+      "kind": "domain"
     },
     {
       "match": "sentry.dev",
       "discount": 30,
-      "note": "Sentry's official remote MCP server (https://mcp.sentry.dev/mcp). Verified 2026-09-04 by fetching mcp.sentry.dev directly (docs.sentry.io/product/sentry-mcp/ redirects there). Note the domain is sentry.dev, not sentry.io -- worth calling out since guessing would very plausibly get this wrong."
+      "note": "Sentry's official remote MCP server (https://mcp.sentry.dev/mcp). Verified 2026-09-04 by fetching mcp.sentry.dev directly (docs.sentry.io/product/sentry-mcp/ redirects there). Note the domain is sentry.dev, not sentry.io -- worth calling out since guessing would very plausibly get this wrong.",
+      "kind": "domain"
     },
     {
       "match": "notion.com",
       "discount": 25,
-      "note": "Notion's official remote MCP server (https://mcp.notion.com/mcp). Verified 2026-09-04 via Claude Code's own documented example (`claude mcp add --transport http notion https://mcp.notion.com/mcp`), not Notion's own docs directly -- slightly weaker provenance than the other entries here, reflected in a lower discount."
+      "note": "Notion's official remote MCP server (https://mcp.notion.com/mcp). Verified 2026-09-04 via Claude Code's own documented example (`claude mcp add --transport http notion https://mcp.notion.com/mcp`), not Notion's own docs directly -- slightly weaker provenance than the other entries here, reflected in a lower discount.",
+      "kind": "domain"
     },
     {
       "match": "stripe.com",
       "discount": 30,
-      "note": "Stripe's official remote MCP server (https://mcp.stripe.com). Verified 2026-09-05 directly against docs.stripe.com/mcp -- includes explicit setup snippets for Cursor/Claude Code/Codex/VS Code all pointing at the same URL."
+      "note": "Stripe's official remote MCP server (https://mcp.stripe.com). Verified 2026-09-05 directly against docs.stripe.com/mcp -- includes explicit setup snippets for Cursor/Claude Code/Codex/VS Code all pointing at the same URL.",
+      "kind": "domain"
     },
     {
       "match": "vercel.com",
       "discount": 30,
-      "note": "Vercel's official remote MCP server (https://mcp.vercel.com). Verified 2026-09-05 directly against vercel.com/docs/agent-resources/vercel-mcp, which also explicitly tells users to 'verify the official endpoint' before trusting a connector -- a good sign this vendor takes the same kind of impersonation risk seriously that this trust seed exists to catch."
+      "note": "Vercel's official remote MCP server (https://mcp.vercel.com). Verified 2026-09-05 directly against vercel.com/docs/agent-resources/vercel-mcp, which also explicitly tells users to 'verify the official endpoint' before trusting a connector -- a good sign this vendor takes the same kind of impersonation risk seriously that this trust seed exists to catch.",
+      "kind": "domain"
     },
     {
       "match": "atlassian.com",
       "discount": 30,
-      "note": "Atlassian's official remote MCP server (https://mcp.atlassian.com/v2/mcp) for Jira/Confluence/Jira Service Management/Bitbucket/Compass. Verified 2026-09-05 via support.atlassian.com's own Rovo MCP Server documentation, cross-checked against the github.com/atlassian/atlassian-mcp-server repo description ('Official remote MCP server for Atlassian')."
+      "note": "Atlassian's official remote MCP server (https://mcp.atlassian.com/v2/mcp) for Jira/Confluence/Jira Service Management/Bitbucket/Compass. Verified 2026-09-05 via support.atlassian.com's own Rovo MCP Server documentation, cross-checked against the github.com/atlassian/atlassian-mcp-server repo description ('Official remote MCP server for Atlassian').",
+      "kind": "domain"
     },
     {
       "match": "figma.com",
       "discount": 25,
-      "note": "Figma's official remote MCP server (https://mcp.figma.com/mcp). Verified 2026-09-05 directly against help.figma.com's own documentation. Slightly lower discount than the single-source-of-truth entries above: also corroborated by (not solely sourced from) OpenAI's Codex MCP docs example, similar provenance strength to the notion.com entry."
+      "note": "Figma's official remote MCP server (https://mcp.figma.com/mcp). Verified 2026-09-05 directly against help.figma.com's own documentation. Slightly lower discount than the single-source-of-truth entries above: also corroborated by (not solely sourced from) OpenAI's Codex MCP docs example, similar provenance strength to the notion.com entry.",
+      "kind": "domain"
     },
     {
       "match": "githubcopilot.com",
       "discount": 30,
-      "note": "GitHub's official REMOTE MCP server is https://api.githubcopilot.com/mcp/ -- verified 2026-09-05 via github.com/github/github-mcp-server's own remote-server.md and GitHub's own docs.github.com setup guide. Deliberately NOT 'github.com' as the matcher: worth calling out explicitly since guessing 'github.com' (the obvious assumption) would have been wrong -- the hosted endpoint lives under githubcopilot.com, a different registrable domain entirely. Distinct from the modelcontextprotocol entry above's caveat about the deprecated @modelcontextprotocol/server-github package, and distinct from the locally-run github/github-mcp-server binary (github.com/github/github-mcp-server) -- that one isn't npm/registry-distributed and isn't matchable by the current publisher-guessing logic (talyx-adapters' classify_command never produces a GitUrl-sourced artifact today), so it's intentionally not seeded here; would need that gap closed first to be worth adding."
+      "note": "GitHub's official REMOTE MCP server is https://api.githubcopilot.com/mcp/ -- verified 2026-09-05 via github.com/github/github-mcp-server's own remote-server.md and GitHub's own docs.github.com setup guide. Deliberately NOT 'github.com' as the matcher: worth calling out explicitly since guessing 'github.com' (the obvious assumption) would have been wrong -- the hosted endpoint lives under githubcopilot.com, a different registrable domain entirely. Distinct from the modelcontextprotocol entry above's caveat about the deprecated @modelcontextprotocol/server-github package, and distinct from the locally-run github/github-mcp-server binary (github.com/github/github-mcp-server) -- that one isn't npm/registry-distributed and isn't matchable by the current publisher-guessing logic (talyx-adapters' classify_command never produces a GitUrl-sourced artifact today), so it's intentionally not seeded here; would need that gap closed first to be worth adding.",
+      "kind": "domain"
     },
     {
       "match": "slack.com",
       "discount": 30,
-      "note": "Slack's official remote MCP server (https://mcp.slack.com/mcp), GA since 2026-02-17. Verified 2026-09-05 directly against docs.slack.dev/ai/slack-mcp-server/ (Slack's own developer docs site), which states the endpoint explicitly and describes confidential OAuth 2.0 (RFC 8414 discovery) as the auth model -- cross-checked against slack.com/help's own MCP guide, which corroborates GA status without restating the URL."
+      "note": "Slack's official remote MCP server (https://mcp.slack.com/mcp), GA since 2026-02-17. Verified 2026-09-05 directly against docs.slack.dev/ai/slack-mcp-server/ (Slack's own developer docs site), which states the endpoint explicitly and describes confidential OAuth 2.0 (RFC 8414 discovery) as the auth model -- cross-checked against slack.com/help's own MCP guide, which corroborates GA status without restating the URL.",
+      "kind": "domain"
     },
     {
       "match": "hubspot.com",
       "discount": 30,
-      "note": "HubSpot's official remote MCP server (https://mcp.hubspot.com), GA since 2026-04-13 (graduated from beta). Verified 2026-09-05 directly against developers.hubspot.com's own integration guide, which states the endpoint explicitly and describes OAuth 2.0 with PKCE as the auth model."
+      "note": "HubSpot's official remote MCP server (https://mcp.hubspot.com), GA since 2026-04-13 (graduated from beta). Verified 2026-09-05 directly against developers.hubspot.com's own integration guide, which states the endpoint explicitly and describes OAuth 2.0 with PKCE as the auth model.",
+      "kind": "domain"
     },
     {
       "match": "supabase.com",
       "discount": 30,
-      "note": "Supabase's official hosted remote MCP server (https://mcp.supabase.com/mcp). Verified 2026-09-05 directly against supabase.com/docs/guides/ai-tools/mcp, which states the endpoint explicitly and describes dynamic client registration (browser OAuth by default, optional PAT via Authorization: Bearer for CI) as the auth model. Distinct from the local, npm-distributed @supabase/mcp-server-supabase CLI server, which is a different launch mechanism (LocalPath, not RemoteUrl) not covered by this entry."
+      "note": "Supabase's official hosted remote MCP server (https://mcp.supabase.com/mcp). Verified 2026-09-05 directly against supabase.com/docs/guides/ai-tools/mcp, which states the endpoint explicitly and describes dynamic client registration (browser OAuth by default, optional PAT via Authorization: Bearer for CI) as the auth model. Distinct from the local, npm-distributed @supabase/mcp-server-supabase CLI server, which is a different launch mechanism (LocalPath, not RemoteUrl) not covered by this entry.",
+      "kind": "domain"
     },
     {
       "match": "neon.tech",
       "discount": 30,
-      "note": "Neon's official hosted remote MCP server (https://mcp.neon.tech/mcp), Streamable HTTP -- the older /sse endpoint is deprecated (stops working on/after 2026-10-01, per the same source). Verified 2026-09-05 directly against neon.com/docs/ai/neon-mcp-server (Neon's own docs site; note the docs are served from neon.com while the MCP host itself is neon.tech -- both confirmed Neon-controlled, cross-checked against neondatabase's own GitHub org, not assumed to be the same domain by guesswork)."
+      "note": "Neon's official hosted remote MCP server (https://mcp.neon.tech/mcp), Streamable HTTP -- the older /sse endpoint is deprecated (stops working on/after 2026-10-01, per the same source). Verified 2026-09-05 directly against neon.com/docs/ai/neon-mcp-server (Neon's own docs site; note the docs are served from neon.com while the MCP host itself is neon.tech -- both confirmed Neon-controlled, cross-checked against neondatabase's own GitHub org, not assumed to be the same domain by guesswork).",
+      "kind": "domain"
     },
     {
       "match": "x.com",
       "discount": 30,
-      "note": "X's official hosted remote MCP servers: https://api.x.com/mcp (full API, requires either the xurl OAuth 2.0 PKCE bridge for write/user-context access, or an app-only Bearer token for read-only) and https://docs.x.com/mcp (docs lookup, no auth). Verified 2026-09-05 directly against docs.x.com/tools/mcp (X's own developer docs), which states both endpoints explicitly. Launched 2026-06-30."
+      "note": "X's official hosted remote MCP servers: https://api.x.com/mcp (full API, requires either the xurl OAuth 2.0 PKCE bridge for write/user-context access, or an app-only Bearer token for read-only) and https://docs.x.com/mcp (docs lookup, no auth). Verified 2026-09-05 directly against docs.x.com/tools/mcp (X's own developer docs), which states both endpoints explicitly. Launched 2026-06-30.",
+      "kind": "domain"
     },
     {
       "match": "api.aws",
       "discount": 30,
-      "note": "The managed AWS MCP Server, GA. Verified 2026-09-05 directly against docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html, which gives exact config snippets. NOT a single fixed hostname -- it's region-scoped: https://aws-mcp.us-east-1.api.aws/mcp and https://aws-mcp.eu-central-1.api.aws/mcp are the two confirmed regions as of verification. The matcher here is 'api.aws' (this codebase's host_registrable_domain takes the last two dot-labels of any host under it, e.g. aws-mcp.us-east-1.api.aws -> api.aws), which is deliberate and safe because .aws is a restricted top-level domain only Amazon itself can register domains under -- not a generic registrable domain the way stripe.com or vercel.com are, so this trust anchor is narrower and stronger than it looks at first glance, not weaker. Auth is OAuth (simple, browser-based) or SigV4 via a local proxy for cross-account workflows -- either way the connection target is always under api.aws."
+      "note": "The managed AWS MCP Server, GA. Verified 2026-09-05 directly against docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html, which gives exact config snippets. NOT a single fixed hostname -- it's region-scoped: https://aws-mcp.us-east-1.api.aws/mcp and https://aws-mcp.eu-central-1.api.aws/mcp are the two confirmed regions as of verification. The matcher here is 'api.aws' (this codebase's host_registrable_domain takes the last two dot-labels of any host under it, e.g. aws-mcp.us-east-1.api.aws -> api.aws), which is deliberate and safe because .aws is a restricted top-level domain only Amazon itself can register domains under -- not a generic registrable domain the way stripe.com or vercel.com are, so this trust anchor is narrower and stronger than it looks at first glance, not weaker. Auth is OAuth (simple, browser-based) or SigV4 via a local proxy for cross-account workflows -- either way the connection target is always under api.aws.",
+      "kind": "domain"
     }
   ]
 }

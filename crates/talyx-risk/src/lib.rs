@@ -13,7 +13,7 @@
 //! BUILD_PLAN.md §7. Do not treat the discounts here as tuned; they exist to
 //! prove the mechanism, not as a finished reputation dataset.
 
-use talyx_core::{Artifact, ArtifactKind, Capability, RiskBand, ScoreBreakdown};
+use talyx_core::{Artifact, ArtifactKind, Capability, PublisherKind, RiskBand, ScoreBreakdown};
 use serde::Deserialize;
 
 const TRUST_SEED_JSON: &str = include_str!("../../../data/trust_seed.json");
@@ -27,6 +27,10 @@ struct TrustSeedFile {
 struct TrustEntry {
     #[serde(rename = "match")]
     matcher: String,
+    /// Which namespace `matcher` names. Required: an entry without one
+    /// can never match, because matching an identity of unknown kind is
+    /// exactly the confusion this field exists to prevent.
+    kind: PublisherKind,
     discount: i32,
     #[allow(dead_code)]
     note: String,
@@ -230,9 +234,16 @@ impl RiskEngine {
                 vec!["publisher identity is verified (-30)".to_string()],
             );
         }
-        if let Some(name) = &artifact.publisher.name {
+        // Both a name AND its namespace are required. An identity whose
+        // kind is unknown is never trust-matchable: see PublisherKind for
+        // the confusion this prevents (an npm package named `stripe.com`
+        // collecting Stripe's discount).
+        if let (Some(name), Some(kind)) = (&artifact.publisher.name, artifact.publisher.kind) {
             let name_lower = name.to_lowercase();
             for entry in &self.trust {
+                if entry.kind != kind {
+                    continue;
+                }
                 // Exact match, not substring. A substring match here would
                 // be typosquat-exploitable: "linear" as a matcher would
                 // also match a publisher name like
@@ -307,6 +318,14 @@ mod tests {
     };
     use std::collections::BTreeSet;
 
+    fn kind_for_test(name: &str) -> PublisherKind {
+        if name.contains('.') {
+            PublisherKind::Domain
+        } else {
+            PublisherKind::NpmScope
+        }
+    }
+
     fn artifact_with(
         kind: ArtifactKind,
         publisher_name: Option<&str>,
@@ -319,7 +338,17 @@ mod tests {
             kind,
             name: "test-artifact".to_string(),
             version: Some("1.0.0".to_string()),
+            // These are SCORING tests, so the identity's kind is inferred
+            // here the same way the trust seed is organised (a dot means a
+            // registrable domain, otherwise an npm scope) rather than
+            // being spelled out at all 16 call sites. How a kind is
+            // actually DERIVED from a source is a separate concern with
+            // its own tests in talyx-adapters' `guess_publisher` — notably
+            // that an unscoped npm package yields no identity at all.
+            // `kind_for_test` below covers the cross-namespace case
+            // explicitly.
             publisher: PublisherIdentity {
+                kind: publisher_name.map(kind_for_test),
                 name: publisher_name.map(|s| s.to_string()),
                 repo_url: None,
                 verified,
@@ -337,6 +366,65 @@ mod tests {
                 .collect(),
             discovered_by: BTreeSet::new(),
         }
+    }
+
+    #[test]
+    fn an_npm_scope_cannot_claim_a_domain_trust_entry() {
+        // A scoped package `@stripe.com/anything` yields the scope
+        // "stripe.com", which exact-matched the trust-seed entry meant for
+        // Stripe's remote server at stripe.com and collected its -30.
+        // Cross-namespace matches are now refused outright.
+        let engine = RiskEngine::new();
+        let mut artifact = artifact_with(
+            ArtifactKind::McpServer,
+            Some("stripe.com"),
+            false,
+            &[Capability::ExecuteShell, Capability::ApiKeys],
+        );
+        artifact.publisher.kind = Some(PublisherKind::NpmScope);
+
+        let breakdown = engine.score(&artifact);
+        assert_eq!(
+            breakdown.reputation_discount, 0,
+            "an npm scope must not inherit a domain entry's reputation"
+        );
+    }
+
+    #[test]
+    fn a_domain_cannot_claim_an_npm_scope_trust_entry() {
+        // The mirror image: a remote server at a host that resolves to
+        // the registrable domain "modelcontextprotocol" must not collect
+        // the npm scope's discount.
+        let engine = RiskEngine::new();
+        let mut artifact = artifact_with(
+            ArtifactKind::McpServer,
+            Some("modelcontextprotocol"),
+            false,
+            &[Capability::ExecuteShell],
+        );
+        artifact.publisher.kind = Some(PublisherKind::Domain);
+
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.reputation_discount, 0);
+    }
+
+    #[test]
+    fn an_identity_with_no_kind_is_never_trust_matchable() {
+        // Fail closed: an identity whose namespace is unknown (an
+        // unscoped npm package, a git URL with no extractable owner)
+        // cannot match anything, rather than matching whichever entry
+        // happens to share its string.
+        let engine = RiskEngine::new();
+        let mut artifact = artifact_with(
+            ArtifactKind::McpServer,
+            Some("modelcontextprotocol"),
+            false,
+            &[Capability::ExecuteShell],
+        );
+        artifact.publisher.kind = None;
+
+        let breakdown = engine.score(&artifact);
+        assert_eq!(breakdown.reputation_discount, 0);
     }
 
     #[test]

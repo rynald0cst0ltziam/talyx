@@ -10,7 +10,7 @@
 use crate::{ConfigSource, ConfigSourceKind, DiscoveredArtifact, LaunchCommand};
 use talyx_core::{
     Artifact, ArtifactKind, ArtifactSource, Capability, CapabilityFinding, EvidenceBasis,
-    PublisherIdentity,
+    PublisherIdentity, PublisherKind,
 };
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -608,19 +608,25 @@ pub(crate) fn classify_command(
 pub(crate) fn guess_publisher(source: &ArtifactSource) -> PublisherIdentity {
     match source {
         ArtifactSource::Registry { name, .. } => {
-            // Scoped npm packages (@org/pkg) name the org explicitly; use
-            // that as the publisher guess. Never set `verified` here —
-            // verification is an explicit step (BUILD_PLAN.md §7), not an
-            // inference from a package name.
-            let guessed = if let Some(stripped) = name.strip_prefix('@') {
-                stripped.split('/').next().unwrap_or(name).to_string()
-            } else {
-                name.clone()
-            };
-            PublisherIdentity {
-                name: Some(guessed),
-                repo_url: None,
-                verified: false,
+            // ONLY a scope (@org/pkg) identifies a publisher. An unscoped
+            // name identifies a package, and anyone can publish one: with
+            // the whole name used as the "publisher", publishing a package
+            // literally called `modelcontextprotocol` — or `stripe.com`,
+            // since npm permits dots — collected the real vendor's
+            // reputation discount. All seven trust-seed names were
+            // unclaimed on npm when this was found. Unscoped therefore
+            // yields no trust-matchable identity at all.
+            //
+            // Never set `verified` here — verification is an explicit step
+            // (BUILD_PLAN.md §7), not an inference from a package name.
+            match name.strip_prefix('@').and_then(|s| s.split('/').next()) {
+                Some(scope) if !scope.is_empty() => PublisherIdentity {
+                    name: Some(scope.to_string()),
+                    kind: Some(PublisherKind::NpmScope),
+                    repo_url: None,
+                    verified: false,
+                },
+                _ => PublisherIdentity::default(),
             }
         }
         ArtifactSource::GitUrl(url) => {
@@ -629,21 +635,35 @@ pub(crate) fn guess_publisher(source: &ArtifactSource) -> PublisherIdentity {
             // case above — extract it so this is exact-matchable against
             // a trust-seed entry, instead of leaving the whole URL as the
             // "name" (which would never exact-match a short org name).
-            let guessed = extract_git_host_owner(url);
-            PublisherIdentity {
-                name: guessed.or_else(|| Some(url.clone())),
-                repo_url: Some(url.clone()),
-                verified: false,
+            // A URL we can't extract an owner from keeps the full URL for
+            // display but carries no kind, so it can never trust-match.
+            match extract_git_host_owner(url) {
+                Some(owner) => PublisherIdentity {
+                    name: Some(owner),
+                    kind: Some(PublisherKind::GitOwner),
+                    repo_url: Some(url.clone()),
+                    verified: false,
+                },
+                None => PublisherIdentity {
+                    name: Some(url.clone()),
+                    kind: None,
+                    repo_url: Some(url.clone()),
+                    verified: false,
+                },
             }
         }
-        ArtifactSource::RemoteUrl(url) => PublisherIdentity {
+        ArtifactSource::RemoteUrl(url) => {
             // The registrable domain is the reputation-relevant identity
             // for a remote MCP server — see host_registrable_domain's doc
             // comment for the (deliberately simple) extraction logic.
-            name: host_registrable_domain(url),
-            repo_url: None,
-            verified: false,
-        },
+            let domain = host_registrable_domain(url);
+            PublisherIdentity {
+                kind: domain.as_ref().map(|_| PublisherKind::Domain),
+                name: domain,
+                repo_url: None,
+                verified: false,
+            }
+        }
         ArtifactSource::LocalPath(_) => PublisherIdentity::default(),
     }
 }
@@ -959,6 +979,46 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unscoped_npm_package_yields_no_trust_matchable_publisher() {
+        // The H-tier finding this closes: the whole package name was used
+        // as the "publisher", so publishing an unscoped package literally
+        // named `modelcontextprotocol` (or `stripe.com` — npm allows dots)
+        // collected the real vendor's -30 reputation discount. Every one
+        // of the trust-seed names was unclaimed on npm at the time.
+        for name in ["modelcontextprotocol", "stripe.com", "some-random-server"] {
+            let source = ArtifactSource::Registry {
+                registry: "npm".to_string(),
+                name: name.to_string(),
+            };
+            let p = guess_publisher(&source);
+            assert!(
+                p.name.is_none() && p.kind.is_none(),
+                "unscoped `{name}` must yield no publisher identity, got {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_scoped_npm_package_yields_the_scope_typed_as_a_scope() {
+        let source = ArtifactSource::Registry {
+            registry: "npm".to_string(),
+            name: "@modelcontextprotocol/server-filesystem".to_string(),
+        };
+        let p = guess_publisher(&source);
+        assert_eq!(p.name.as_deref(), Some("modelcontextprotocol"));
+        assert_eq!(p.kind, Some(PublisherKind::NpmScope));
+        assert!(!p.verified, "verification is never inferred from a name");
+    }
+
+    #[test]
+    fn a_remote_url_yields_a_domain_typed_identity() {
+        let source = ArtifactSource::RemoteUrl("https://mcp.stripe.com".to_string());
+        let p = guess_publisher(&source);
+        assert_eq!(p.name.as_deref(), Some("stripe.com"));
+        assert_eq!(p.kind, Some(PublisherKind::Domain));
     }
 
     #[test]
