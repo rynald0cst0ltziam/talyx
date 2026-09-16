@@ -69,6 +69,69 @@ enum LaunchMode {
     Shell,
 }
 
+/// Reads an env var only in debug/test builds; a RELEASE build always
+/// gets `None`, as if the var were never set. An MCP config's `env`
+/// block sets environment variables for the process the agent launches
+/// — and that process *is the shim* — so honoring a security-relevant
+/// var from the environment in a real (release) build would let a
+/// config edit weaken enforcement for that one launch (disable the live
+/// proxy, downgrade its inspection level, ...) without touching the
+/// decision store at all. Kept for debug/test builds because the test
+/// suite and local demo fixtures rely on these to control a single
+/// launch without a full `talyx init` re-run (2026-09-15 review, C2).
+fn debug_only_env(key: &str) -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        env::var(key).ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = key;
+        None
+    }
+}
+
+/// Known code-execution-via-environment injection points (`LD_PRELOAD`
+/// and its platform equivalents, plus per-interpreter startup-file/
+/// options vars) — stripped from THIS process's environment before it
+/// execs the real command, so a config edit that adds one of these to
+/// the `env` block the agent sets for the shim can't smuggle arbitrary
+/// code into an otherwise-unmodified, approved binary purely via
+/// environment (2026-09-15 review, C2's "env keys" fix note). This is a
+/// denylist, not a pinned allowlist of declared keys, deliberately: the
+/// shim's child inherits the FULL ambient environment (PATH, HOME, ...)
+/// by default, and the vast majority of that is normal OS/user
+/// environment the real command needs, not something the MCP config's
+/// small `env: {...}` override ever sets.
+const DANGEROUS_ENV_VARS: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "NODE_OPTIONS",
+    "PYTHONSTARTUP",
+    "PERL5OPT",
+    "RUBYOPT",
+    "BASH_ENV",
+    "ENV",
+    "GCONV_PATH",
+];
+
+fn strip_dangerous_env_vars() {
+    for key in DANGEROUS_ENV_VARS {
+        env::remove_var(key);
+    }
+}
+
+/// Whether `command`/`args` — what the shim is actually about to launch
+/// in argv mode — is exactly what was approved at scan time. `false`
+/// whenever there's no `approved_launch` at all (an older record from
+/// before this field existed, or a record type that never set it) —
+/// fail closed rather than treat "we don't know" as "fine".
+fn launch_matches_approved(approved: Option<&talyx_store::ApprovedLaunch>, command: &str, args: &[String]) -> bool {
+    approved.is_some_and(|a| a.command == command && a.args == args)
+}
+
 fn usage_error(msg: &str) -> ! {
     eprintln!("talyx-shim: {msg}");
     eprintln!("usage: talyx-shim <artifact-id> [--proxy] -- <real-command> [real-args...]");
@@ -143,16 +206,18 @@ fn launch(
             args,
             proxy,
         } => {
-            let kill_switch = env::var("TALYX_NO_PROXY").as_deref() == Ok("1");
+            let kill_switch = debug_only_env("TALYX_NO_PROXY").as_deref() == Some("1");
             if *proxy && !kill_switch {
                 let mut cfg = ProxyConfig::new(artifact_id);
                 cfg.log_path = env::var_os("TALYX_PROXY_LOG").map(Into::into);
                 // The proxy's inspection level. Defaults to `balanced`
                 // (ADR 0001); `TALYX_PROXY_LEVEL` overrides it for a
-                // single launch without re-running `init`.
-                cfg.level = Some(match env::var("TALYX_PROXY_LEVEL").as_deref() {
-                    Ok("quiet") => PolicyLevel::Quiet,
-                    Ok("strict") => PolicyLevel::Strict,
+                // single launch without re-running `init` — debug/test
+                // builds only, same as `TALYX_NO_PROXY` above (see
+                // `debug_only_env`'s doc comment).
+                cfg.level = Some(match debug_only_env("TALYX_PROXY_LEVEL").as_deref() {
+                    Some("quiet") => PolicyLevel::Quiet,
+                    Some("strict") => PolicyLevel::Strict,
                     _ => PolicyLevel::Balanced,
                 });
                 cfg.sessions_dir = env::var_os("TALYX_SESSIONS_DIR").map(Into::into);
@@ -224,6 +289,24 @@ fn main() {
         std::process::exit(EXIT_REFUSED);
     }
 
+    // The shim used to authorize purely by artifact id, then exec
+    // whatever argv followed `--` — nothing tied the approval to what
+    // actually runs. A config edit that kept the same already-approved
+    // id but swapped in a different command (or different args) was
+    // silently executed. Now it must match exactly what was approved at
+    // scan time (2026-09-15 review, finding C2 — PoC'd live).
+    if let LaunchMode::Argv { command, args, .. } = &mode {
+        if !launch_matches_approved(record.approved_launch.as_ref(), command, args) {
+            eprintln!(
+                "talyx-shim: the launch command for '{artifact_id}' doesn't match what was approved — config changed since approval."
+            );
+            eprintln!("Run `talyx init` to re-evaluate it, then retry.");
+            std::process::exit(EXIT_REFUSED);
+        }
+    }
+
+    strip_dangerous_env_vars();
+
     match launch(&mode, artifact_id, record.shell_command.as_deref()) {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(e) => {
@@ -291,5 +374,67 @@ mod tests {
         let (id, mode) = parse_args(&args);
         assert_eq!(id, "id-2");
         assert!(matches!(mode, LaunchMode::Shell));
+    }
+
+    // --- C2 (2026-09-15 review): approval must be tied to the actual
+    // command that runs, not just the artifact id -------------------
+
+    #[test]
+    fn launch_matches_approved_accepts_the_exact_approved_argv() {
+        let approved = talyx_store::ApprovedLaunch {
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+        };
+        assert!(launch_matches_approved(
+            Some(&approved),
+            "node",
+            &["server.js".to_string()]
+        ));
+    }
+
+    #[test]
+    fn launch_matches_approved_rejects_a_swapped_command() {
+        // The exact PoC from the review: same already-approved artifact
+        // id, but the config now points it at a different real command.
+        let approved = talyx_store::ApprovedLaunch {
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+        };
+        assert!(!launch_matches_approved(
+            Some(&approved),
+            "cmd",
+            &["/c".to_string(), "echo".to_string(), "ARBITRARY-COMMAND-EXECUTED".to_string()]
+        ));
+    }
+
+    #[test]
+    fn launch_matches_approved_rejects_a_swapped_arg() {
+        let approved = talyx_store::ApprovedLaunch {
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+        };
+        assert!(!launch_matches_approved(
+            Some(&approved),
+            "node",
+            &["server.js".to_string(), "--extra-flag".to_string()]
+        ));
+    }
+
+    #[test]
+    fn launch_matches_approved_rejects_when_nothing_was_ever_approved() {
+        // An older record from before `approved_launch` existed, or any
+        // record type that never sets it — fail closed, not "assume ok".
+        assert!(!launch_matches_approved(None, "node", &["server.js".to_string()]));
+    }
+
+    #[test]
+    fn strip_dangerous_env_vars_removes_every_listed_var() {
+        for key in DANGEROUS_ENV_VARS {
+            env::set_var(key, "poisoned");
+        }
+        strip_dangerous_env_vars();
+        for key in DANGEROUS_ENV_VARS {
+            assert!(env::var(key).is_err(), "{key} was not stripped");
+        }
     }
 }

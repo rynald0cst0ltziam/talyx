@@ -567,7 +567,7 @@ fn str_val(v: &Value, key: &str) -> Result<String, String> {
 /// Default candidate paths for the guardrails file.
 pub fn default_paths(cwd: &Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
-    if let Ok(p) = std::env::var("TALYX_GUARDRAILS") {
+    if let Some(p) = crate::debug_only_env("TALYX_GUARDRAILS") {
         out.push(std::path::PathBuf::from(p));
     }
     out.push(cwd.join(".talyx").join("guardrails.yaml"));

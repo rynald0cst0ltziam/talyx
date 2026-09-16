@@ -554,7 +554,7 @@ fn save_baseline(path: Option<&Path>, artifact_id: &str, tools: &BTreeMap<String
 }
 
 fn baseline_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("TALYX_STORE") {
+    if let Some(p) = crate::debug_only_env("TALYX_STORE") {
         return Some(PathBuf::from(p).with_file_name("tool_baselines.json"));
     }
     Some(

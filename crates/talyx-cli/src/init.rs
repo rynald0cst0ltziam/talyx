@@ -248,6 +248,20 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         None
     };
 
+    // The argv the shim is approving right now — everything with a
+    // `launch` EXCEPT shell-mode hooks, whose real command instead
+    // travels via `shell_command` (see its doc comment). The shim
+    // refuses to launch anything that doesn't match this exactly —
+    // see `ApprovedLaunch`'s doc comment for the C2 gap this closes.
+    let approved_launch = if is_hook_shell_command {
+        None
+    } else {
+        s.launch.as_ref().map(|l| talyx_store::ApprovedLaunch {
+            command: l.command.clone(),
+            args: l.args.clone(),
+        })
+    };
+
     // Remote MCP servers (no `launch` — no local process to wrap) are the
     // only artifacts with anything to snapshot here: see DecisionRecord's
     // `remote_entry_snapshot` doc comment for why `talyx allow` needs
@@ -314,6 +328,7 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         config_entry_is_list_element,
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
+        approved_launch,
     }
 }
 
@@ -2981,6 +2996,7 @@ mod tests {
                 config_entry_is_list_element: false,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
+                approved_launch: None,
             })
             .unwrap();
 
@@ -3350,6 +3366,7 @@ mod tests {
                 config_entry_is_list_element: false,
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
+                approved_launch: None,
             })
             .unwrap();
 

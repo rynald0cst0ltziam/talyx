@@ -349,6 +349,7 @@ mod tests {
                 config_entry_is_list_element: false,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
+                approved_launch: None,
             })
             .unwrap();
         store

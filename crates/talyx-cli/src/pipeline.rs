@@ -117,23 +117,26 @@ pub fn collect(
                 artifact.content_hash = talyx_scanner::hash_path(root);
             }
 
-            // Hooks have no scan_root (their "content" is a config value,
-            // not a file) but their command is still inspectable text —
-            // scan it the same way a script's contents get scanned, so
-            // hook risk scoring reflects what the hook actually does
-            // instead of always landing on the flat declared baseline
-            // (Hook + ExecuteShell) regardless of content. Also hashed
-            // here for the same reason a script file is hashed: without
-            // it, drift detection (init.rs) has no baseline to compare a
-            // changed hook command against.
-            if artifact.kind == ArtifactKind::Hook {
-                if let Some(l) = &launch {
-                    artifact.capabilities.extend(talyx_scanner::scan_shell_command(
-                        &l.command,
-                        &display_location,
-                    ));
-                    artifact.content_hash = Some(talyx_scanner::hash_text(&l.command));
-                }
+            // Any artifact with a fixed launch command (MCP server, hook,
+            // ...) has its actual payload inspectable as text even when
+            // it has no scan_root at all (an unresolved MCP server —
+            // previously scored as if empty; 2026-09-15 review, C1) or in
+            // addition to one (inline code alongside a referenced script).
+            // Folded into content_hash too, so a launch command or ARGS
+            // change registers as drift (init.rs's check_drift) the same
+            // way a changed file does — previously only a hook's bare
+            // `command` was hashed at all, never its `args`.
+            if let Some(l) = &launch {
+                artifact.capabilities.extend(talyx_scanner::scan_launch_command(
+                    &l.command,
+                    &l.args,
+                    &display_location,
+                ));
+                let launch_hash = talyx_scanner::hash_launch(&l.command, &l.args);
+                artifact.content_hash = Some(match artifact.content_hash.take() {
+                    Some(root_hash) => talyx_scanner::hash_text(&format!("{root_hash}:{launch_hash}")),
+                    None => launch_hash,
+                });
             }
 
             // Known-bad advisory feed — matched by identity (package

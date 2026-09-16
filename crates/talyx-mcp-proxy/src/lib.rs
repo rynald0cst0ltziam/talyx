@@ -34,6 +34,28 @@ use message::{Direction, Rpc};
 pub use policy::PolicyLevel;
 use policy::{Action, SessionPolicy};
 
+/// Reads an env var only in debug/test builds; a RELEASE build always
+/// gets `None`. `TALYX_STORE`/`TALYX_GUARDRAILS` are honored from the
+/// environment in debug/test builds only (test suite, local demo
+/// fixtures) — see `talyx_store::DecisionStore::resolve`'s doc comment
+/// for the full reasoning: an MCP config's `env` block sets environment
+/// variables for the process the agent launches, and that process is
+/// this proxy's caller (the shim), so a real (release) build honoring
+/// either var from the environment would let a config edit point the
+/// live proxy at an attacker-authored guardrails file or tool-baseline
+/// location (2026-09-15 review, finding C2).
+pub(crate) fn debug_only_env(key: &str) -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var(key).ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = key;
+        None
+    }
+}
+
 /// Messages larger than this are forwarded but not parsed/inspected — a
 /// single JSON-RPC message this big is anomalous, and buffering an
 /// unbounded amount to inspect it would be its own denial of service.

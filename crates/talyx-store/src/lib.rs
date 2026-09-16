@@ -163,6 +163,25 @@ pub struct DecisionRecord {
     /// this field.
     #[serde(default)]
     pub quarantine_current_path: Option<PathBuf>,
+    /// The exact argv the shim is allowed to launch for this artifact —
+    /// `None` for a shell-mode artifact (see `shell_command`, which plays
+    /// the equivalent role there) or a non-launchable one (a Skill, a
+    /// remote MCP server). Set from the discovered launch command at scan
+    /// time; the shim compares it verbatim against what it's actually
+    /// asked to launch before every gated process start (2026-09-15
+    /// review, finding C2): the shim used to authorize purely by artifact
+    /// id and then exec whatever argv followed `--`, so a config edit that
+    /// kept the same already-approved id but swapped in a different
+    /// command was silently executed — PoC'd live, not hypothetically.
+    #[serde(default)]
+    pub approved_launch: Option<ApprovedLaunch>,
+}
+
+/// See `DecisionRecord::approved_launch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovedLaunch {
+    pub command: String,
+    pub args: Vec<String>,
 }
 
 impl DecisionRecord {
@@ -189,7 +208,13 @@ struct StoreFile {
 }
 
 pub struct DecisionStore {
-    path: PathBuf,
+    /// `None` means "no usable location" — every read behaves as an
+    /// empty store (fail closed: nothing is ever found, so the shim
+    /// refuses to launch) and every write returns an error rather than
+    /// silently picking somewhere surprising to put it. Set only by
+    /// `resolve()` when no home directory can be found; `open_at`/
+    /// `open_default` always carry a real path.
+    path: Option<PathBuf>,
 }
 
 impl DecisionStore {
@@ -199,30 +224,45 @@ impl DecisionStore {
         let home = dirs::home_dir()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory found"))?;
         Ok(Self {
-            path: home.join(".talyx").join("decisions.json"),
+            path: Some(home.join(".talyx").join("decisions.json")),
         })
     }
 
     /// For tests and for pointing the shim/CLI at an isolated store (e.g.
-    /// `TALYX_STORE` env var during demo/fixture runs) instead of the
-    /// real machine-wide one.
+    /// the CLI's explicit `--store` flag, or `TALYX_STORE` in debug/test
+    /// builds — see `resolve()`) instead of the real machine-wide one.
     pub fn open_at(path: PathBuf) -> Self {
-        Self { path }
+        Self { path: Some(path) }
     }
 
-    /// `$TALYX_STORE` env var if set, else `open_default()`, falling
-    /// back to a store in the current directory on the (very rare) case
-    /// `open_default()` can't determine a home directory — resolving a
-    /// store location should never itself be a hard failure for a
-    /// read-only lookup. This is the single shared resolution policy
-    /// every caller that just wants "the store" (as opposed to explicit
-    /// control, like the CLI's `--store` flag) should use, rather than
-    /// each reimplementing the same env-var-then-default logic.
+    /// `$TALYX_STORE` if set, else `~/.talyx/decisions.json`.
+    ///
+    /// `TALYX_STORE` is honored only in debug/test builds. A RELEASE
+    /// build ignores it entirely — an MCP config's `env` block sets
+    /// environment variables for the process the agent launches, and
+    /// that process *is the shim*, so a config entry that sets
+    /// `TALYX_STORE` could point the shim at an attacker-authored store
+    /// marking anything `Allow` (2026-09-15 review, finding C2; PoC'd
+    /// live: a hand-written store pointed at via this env var made the
+    /// shim exec an arbitrary command and exit 0). Kept for debug/test
+    /// builds because the test suite and local demo fixtures rely on it
+    /// to point at an isolated store without a `--store` flag.
+    ///
+    /// A missing home directory now fails closed (`path: None`, an
+    /// always-empty store) instead of falling back to a file in the
+    /// current directory — the previous fallback meant a cloned
+    /// repository could ship its own `.talyx-decisions.json` and have it
+    /// silently trusted on a machine where `dirs::home_dir()` happened to
+    /// return `None`.
     pub fn resolve() -> Self {
+        #[cfg(debug_assertions)]
         if let Ok(path) = std::env::var("TALYX_STORE") {
             return Self::open_at(PathBuf::from(path));
         }
-        Self::open_default().unwrap_or_else(|_| Self::open_at(PathBuf::from(".talyx-decisions.json")))
+        match dirs::home_dir() {
+            Some(home) => Self::open_at(home.join(".talyx").join("decisions.json")),
+            None => Self { path: None },
+        }
     }
 
     /// Opens the store file read-only and holds a shared lock (`fs4`) for
@@ -231,7 +271,10 @@ impl DecisionStore {
     /// silent "no records yet" — not an error — since `open_default`
     /// deliberately never creates the file just by being opened.
     fn read_locked(&self) -> io::Result<StoreFile> {
-        let mut f = match File::open(&self.path) {
+        let Some(path) = &self.path else {
+            return Ok(StoreFile::default());
+        };
+        let mut f = match File::open(path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(StoreFile::default()),
             Err(e) => return Err(e),
@@ -262,7 +305,13 @@ impl DecisionStore {
     /// acquire the lock always mutates the FIRST one's already-persisted
     /// state, never a stale in-memory copy.
     fn with_exclusive_lock<T>(&self, f: impl FnOnce(&mut StoreFile) -> T) -> io::Result<T> {
-        if let Some(parent) = self.path.parent() {
+        let Some(path) = &self.path else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "no usable decision store location (no home directory found) — pass --store explicitly",
+            ));
+        };
+        if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let mut handle = OpenOptions::new()
@@ -270,7 +319,7 @@ impl DecisionStore {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&self.path)?;
+            .open(path)?;
         handle.lock()?;
 
         let mut text = String::new();
@@ -379,6 +428,7 @@ mod tests {
             config_entry_is_list_element: false,
             quarantine_original_path: None,
             quarantine_current_path: None,
+            approved_launch: None,
         };
         store.upsert(record.clone()).unwrap();
 
@@ -412,6 +462,7 @@ mod tests {
             config_entry_is_list_element: false,
                 quarantine_original_path: None,
                 quarantine_current_path: None,
+                approved_launch: None,
             })
             .unwrap();
 
@@ -450,6 +501,7 @@ mod tests {
             config_entry_is_list_element: false,
             quarantine_original_path: None,
             quarantine_current_path: None,
+            approved_launch: None,
         }
     }
 
