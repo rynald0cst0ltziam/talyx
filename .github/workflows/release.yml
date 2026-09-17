@@ -195,6 +195,13 @@ jobs:
   npm:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required by `npm publish --provenance`: npm verifies the package
+      # was built by this workflow using a short-lived OIDC token from
+      # GitHub. Without this the publish fails outright rather than
+      # quietly publishing without provenance.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
