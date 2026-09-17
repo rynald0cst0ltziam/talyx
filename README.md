@@ -61,19 +61,6 @@ curl -fsSL https://gettalyx.dev/install.sh | sh
 irm https://gettalyx.dev/install.ps1 | iex
 ```
 
-```bash
-# npm (any platform)
-npm install -g talyx
-```
-
-The npm package has **no install scripts**. The native binaries ship in
-per-platform packages (`@talyx/linux-x64` and friends) declared as
-`optionalDependencies`, so npm fetches exactly the one your machine needs
-and the bytes it verified are the bytes that run. `npm install
---ignore-scripts` works normally — a postinstall that downloads and
-executes a binary is the pattern Talyx itself flags, and shipping one
-from a supply-chain security tool would be indefensible.
-
 Then:
 
 ```bash

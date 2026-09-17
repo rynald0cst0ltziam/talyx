@@ -51,17 +51,6 @@ talyx scan --project .</code></pre>
     </p>
     <h3>Windows (PowerShell)</h3>
     <pre><code>irm https://{site.domain}/install.ps1 | iex</code></pre>
-    <h3>npm</h3>
-    <pre><code>npm install -g talyx</code></pre>
-    <p>
-      No install scripts. The native binaries ship in per-platform packages
-      (<code>@talyx/linux-x64</code> and friends) declared as
-      <code>optionalDependencies</code>, so npm fetches exactly the one your
-      machine needs and the bytes it verified are the bytes that run.
-      <code>npm install --ignore-scripts</code> works normally — a
-      postinstall that downloads and executes a binary is the pattern Talyx
-      itself flags.
-    </p>
     <h3>From source</h3>
     <pre><code>git clone {site.github}
 cd talyx
