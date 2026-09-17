@@ -220,7 +220,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22, not 20: npm's trusted publishing (OIDC) needs npm
+          # >= 11.5.1 / Node >= 22.14.0, and staged publishing needs npm
+          # >= 11.15.0. Direct publishing with a granular token is being
+          # removed in January 2027, so both of the paths that outlive it
+          # require this floor. Node 20 is also already deprecated on the
+          # runners and was warning on every run.
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Stage the publish tree
