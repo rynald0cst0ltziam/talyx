@@ -1,0 +1,28 @@
+# Line-ending policy.
+#
+# This repo is developed on Windows (`core.autocrlf=true`) and built on
+# Linux and macOS, so without explicit rules git silently rewrites line
+# endings on the way in and out of the object store. Two concrete
+# consequences, both hit for real:
+#
+#  - THIRD-PARTY-LICENSES.txt is generated verbatim from the bundled
+#    crates' own licence files, and some of those ship CRLF. Normalising
+#    them to LF on commit meant the committed copy could never match a
+#    regeneration on Linux or macOS, which blocked four consecutive
+#    release attempts with an unreadable "stale" error. `-text` keeps the
+#    generator's exact bytes.
+#
+#  - A shell script committed with CRLF fails on Linux with
+#    `bad interpreter: /bin/sh^M`. install.sh is downloaded and piped
+#    straight into `sh` by every macOS and Linux customer, so pinning it
+#    to LF prevents a broken install that would never reproduce on the
+#    machine it was authored on.
+
+# Never touch the generated notices — byte-for-byte as cargo-about emits.
+THIRD-PARTY-LICENSES.txt -text
+
+# Anything executed by a POSIX shell must be LF, always.
+*.sh text eol=lf
+
+# PowerShell is happiest with CRLF on the platform that runs it.
+*.ps1 text eol=crlf
