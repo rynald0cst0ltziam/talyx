@@ -243,12 +243,30 @@ jobs:
       # two likely failures — a token generated with no package
       # permissions, and a missing @talyx org — are both invisible in a
       # bare "exit code 1".
+      # Emitted as ANNOTATIONS, not plain log lines. Raw job logs need
+      # repository admin rights; annotations do not. Three tags failed on
+      # an unreadable 404 while the one fact that explains it — who the
+      # token actually is — sat in a log nobody could open.
+      #
+      # This matters because an unauthenticated or unauthorised publish
+      # to a scoped name returns 404, not 403: npm will not confirm that
+      # a scope exists to someone who cannot write to it. A bad token and
+      # a missing organisation are therefore indistinguishable at the
+      # publish step, and only `whoami` tells them apart.
       - name: Check npm identity and scope access
         if: ${{ env.NODE_AUTH_TOKEN != '' }}
         run: |
-          echo "npm whoami: $(npm whoami 2>&1 || echo '<failed — token invalid or has no permissions>')"
-          echo "org access:"
-          npm org ls talyx 2>&1 | head -5 || echo "  <cannot read the @talyx org — it may not exist yet>"
+          flatten() { head -4 | paste -sd' ' - | cut -c1-300; }
+          if who=$(npm whoami 2>&1); then
+            echo "::notice::npm authenticated as ${who}"
+          else
+            echo "::error::npm whoami FAILED — NPM_TOKEN is invalid, revoked, or not the token you think it is: $(printf '%s' "$who" | flatten)"
+          fi
+          if org=$(npm org ls talyx 2>&1); then
+            echo "::notice::@talyx org readable: $(printf '%s' "$org" | flatten)"
+          else
+            echo "::error::cannot read the @talyx org: $(printf '%s' "$org" | flatten)"
+          fi
 
       - name: Publish to npm
         if: ${{ env.NODE_AUTH_TOKEN != '' }}
