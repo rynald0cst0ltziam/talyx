@@ -56,7 +56,9 @@ detect_target() {
 
   case "$os" in
     Darwin) os_part="apple-darwin" ;;
-    Linux) os_part="unknown-linux-gnu" ;;
+    # Static musl builds: they run on any Linux regardless of its glibc
+    # version (see .github/workflows/release.yml for why).
+    Linux) os_part="unknown-linux-musl" ;;
     *) err "unsupported OS: $os (Talyx v0 supports macOS and Linux via this script; Windows via install.ps1)" ;;
   esac
 

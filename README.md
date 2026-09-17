@@ -77,7 +77,7 @@ so you can confirm a binary was built by this repo's release workflow and
 not substituted afterwards:
 
 ```bash
-gh attestation verify talyx-x86_64-unknown-linux-gnu.tar.gz --repo rynald0cst0ltziam/talyx
+gh attestation verify talyx-x86_64-unknown-linux-musl.tar.gz --repo rynald0cst0ltziam/talyx
 ```
 
 `scan` and `status` run without a license so you can evaluate freely;

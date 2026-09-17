@@ -4,13 +4,7 @@ Copyright (c) 2026 rynald0cst0ltziam. All rights reserved.
 
 This is a source-available commercial license. The source is published so
 you can read, build, and security-audit it. It is not open source, and
-using it in production requires a paid license.
-
-Still open, tracked in STATUS.md: the copyright line above uses the
-project's GitHub identity as an interim, accurate placeholder — replace it
-with a formal legal entity name if/when one exists. Section 10's governing
-law is intentionally left unfilled rather than guessed; set it to wherever
-the owning entity is actually based.
+using the enforcement features requires a paid license.
 
 --------------------------------------------------------------------------
 
@@ -111,12 +105,6 @@ the owning entity is actually based.
    breach within 30 days of notice. On termination you must stop using the
    Software and destroy your copies, except that the Section 2(a)-(b)
    rights survive for genuine security-review purposes.
-
-10. Governing law
-
-   This license is governed by the laws of [STATE / COUNTRY — set this to
-   where the owning entity is based], without regard to its conflict-of-
-   laws rules.
 
 --------------------------------------------------------------------------
 

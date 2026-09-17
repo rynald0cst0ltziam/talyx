@@ -32,12 +32,23 @@ jobs:
           - os: macos-15-intel # Intel
             target: x86_64-apple-darwin
             archive_ext: tar.gz
+          # Linux ships STATIC musl binaries, not glibc-linked ones.
+          # A binary built against ubuntu-latest's glibc requires that
+          # version or newer at runtime, so it simply refuses to start on
+          # Debian 12, RHEL 9, Amazon Linux 2 and Ubuntu 22.04 — a
+          # download that installs fine and then can't run is worse than
+          # no download at all. Nothing here needs glibc: TLS is rustls
+          # over `ring` (no OpenSSL) and compression is pure-Rust
+          # miniz_oxide (no libz-sys), so the only C is tree-sitter,
+          # which builds against musl.
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             archive_ext: tar.gz
+            needs_musl: true
           - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
             archive_ext: tar.gz
+            needs_musl: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive_ext: zip
@@ -49,9 +60,35 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # musl-gcc, for the one C dependency (tree-sitter). Without it the
+      # build fails at link time rather than producing a bad binary.
+      - name: Install musl toolchain
+        if: matrix.needs_musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Build talyx + talyx-shim
         run: |
-          cargo build --release --target ${{ matrix.target }} -p talyx-cli -p talyx-shim
+          cargo build --release --locked --target ${{ matrix.target }} -p talyx-cli -p talyx-shim
+
+      # Proves the portability claim rather than assuming it: a musl
+      # build that silently linked against glibc would pass every test
+      # here and still fail to start on the distros this targets.
+      - name: Verify the Linux binaries are static
+        if: matrix.needs_musl
+        run: |
+          set -euo pipefail
+          for b in talyx talyx-shim; do
+            path="target/${{ matrix.target }}/release/$b"
+            file "$path"
+            if ldd "$path" 2>&1 | grep -qv "not a dynamic executable"; then
+              if ldd "$path" 2>&1 | grep -q "=>"; then
+                echo "::error::$b is dynamically linked — it will not run on older distros"
+                ldd "$path"
+                exit 1
+              fi
+            fi
+            "$path" --version
+          done
 
       # The MIT / BSD / Apache-2.0 / ISC licenses of the bundled crates
       # require their notices to travel with the binary. Regenerate and fail

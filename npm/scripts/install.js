@@ -43,7 +43,7 @@ function targetTriple() {
     osPart = "apple-darwin";
     archiveExt = "tar.gz";
   } else if (platform === "linux") {
-    osPart = "unknown-linux-gnu";
+    osPart = "unknown-linux-musl";
     archiveExt = "tar.gz";
   } else if (platform === "win32") {
     osPart = "pc-windows-msvc";
