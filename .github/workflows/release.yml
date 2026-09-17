@@ -268,10 +268,16 @@ jobs:
           else
             echo "::error::npm whoami FAILED — NPM_TOKEN is invalid, revoked, or not the token you think it is: $(printf '%s' "$who" | flatten)"
           fi
+          # NOT treated as a failure. `npm org ls` requires the token's
+          # Organizations:read permission, which a token scoped purely
+          # for publishing does not have — verified locally, where
+          # `whoami` succeeds and publishing works while this 403s. A
+          # publish token SHOULD fail here, so an error would send the
+          # next person after the wrong thing entirely.
           if org=$(npm org ls talyx 2>&1); then
             echo "::notice::@talyx org readable: $(printf '%s' "$org" | flatten)"
           else
-            echo "::error::cannot read the @talyx org: $(printf '%s' "$org" | flatten)"
+            echo "::notice::@talyx org not readable by this token (expected for a publish-only token, not a fault): $(printf '%s' "$org" | flatten)"
           fi
 
       - name: Publish to npm

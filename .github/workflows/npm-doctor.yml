@@ -67,7 +67,11 @@ jobs:
           # scoped to a package list that excludes a newly created
           # organisation, which is indistinguishable from the org not
           # existing when you only have the publish error to go on.
-          probe "org ls talyx" npm org ls talyx
+          # Expected to fail for a publish-only token: `npm org ls`
+          # needs Organizations:read, which publishing does not. Kept
+          # because a SUCCESS here is informative, but a failure is not
+          # a fault.
+          probe "org ls talyx (failure here is normal)" npm org ls talyx
 
           # Write permission, stated rather than inferred. This is the
           # thing a token created with the default "no access to
