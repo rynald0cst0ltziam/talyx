@@ -2227,19 +2227,16 @@ limitations under the License.
 License: Apache License 2.0 (Apache-2.0)
 
 Used by:
-  - autocfg 1.5.1  (https://github.com/cuviper/autocfg)
   - base64 0.22.1  (https://github.com/marshallpierce/rust-base64)
   - base64 0.23.1  (https://github.com/marshallpierce/rust-base64)
   - bitflags 2.13.1  (https://github.com/bitflags/bitflags)
   - bumpalo 3.20.3  (https://github.com/fitzgen/bumpalo)
-  - cc 1.4.5  (https://github.com/rust-lang/cc-rs)
   - cfg-if 1.0.4  (https://github.com/rust-lang/cfg-if)
   - displaydoc 0.2.7  (https://github.com/yaahc/displaydoc)
   - encoding_rs_io 0.1.8  (https://github.com/BurntSushi/encoding_rs_io)
   - equivalent 1.0.2  (https://github.com/indexmap-rs/equivalent)
   - errno 0.3.14  (https://github.com/lambda-fairy/rust-errno)
   - filetime 0.2.29  (https://github.com/alexcrichton/filetime)
-  - find-msvc-tools 0.1.12  (https://github.com/rust-lang/cc-rs)
   - flate2 1.1.10  (https://github.com/rust-lang/flate2-rs)
   - hashbrown 0.17.1  (https://github.com/rust-lang/hashbrown)
   - heck 0.5.0  (https://github.com/withoutboats/heck)
@@ -2260,7 +2257,6 @@ Used by:
   - smallvec 1.16.0  (https://github.com/servo/rust-smallvec)
   - tar 0.4.46  (https://github.com/composefs/tar-rs)
   - unicode-width 0.2.2  (https://github.com/unicode-rs/unicode-width)
-  - version_check 0.9.5  (https://github.com/SergioBenitez/version_check)
   - xattr 1.6.1  (https://github.com/Stebalien/xattr)
 
                               Apache License
@@ -3117,7 +3113,6 @@ Used by:
   - serde_core 1.0.229  (https://github.com/serde-rs/serde)
   - serde_derive 1.0.229  (https://github.com/serde-rs/serde)
   - serde_json 1.0.151  (https://github.com/serde-rs/json)
-  - shlex 2.0.1  (https://github.com/comex/rust-shlex)
   - syn 2.0.119  (https://github.com/dtolnay/syn)
   - syn 3.0.4  (https://github.com/dtolnay/syn)
   - thiserror-impl 1.0.69  (https://github.com/dtolnay/thiserror)

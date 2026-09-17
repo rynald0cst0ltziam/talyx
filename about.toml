@@ -17,6 +17,16 @@ targets = [
     "x86_64-pc-windows-msvc",
 ]
 
+# Build- and dev-dependencies resolve for the HOST machine, not for the
+# targets above, so leaving them in made the output differ depending on
+# which OS generated it — the release check passed on Windows and failed
+# on Linux and macOS for the same commit. They are also genuinely out of
+# scope: a build script's or test harness's dependencies are not linked
+# into the shipped binaries, so their notices do not need to travel with
+# them. Excluding both is what makes this file reproducible anywhere.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
 # `accepted` lists every SPDX license that actually appears in the
 # dependency tree (verified with `cargo license`). All are permissive or
 # file-level weak-copyleft (MPL-2.0) — none impose a copyleft obligation on
