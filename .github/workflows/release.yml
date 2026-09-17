@@ -239,18 +239,59 @@ jobs:
             fi
           done
 
+      # Reports WHO the token is before attempting anything, because the
+      # two likely failures — a token generated with no package
+      # permissions, and a missing @talyx org — are both invisible in a
+      # bare "exit code 1".
+      - name: Check npm identity and scope access
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: |
+          echo "npm whoami: $(npm whoami 2>&1 || echo '<failed — token invalid or has no permissions>')"
+          echo "org access:"
+          npm org ls talyx 2>&1 | head -5 || echo "  <cannot read the @talyx org — it may not exist yet>"
+
       - name: Publish to npm
         if: ${{ env.NODE_AUTH_TOKEN != '' }}
         run: |
-          set -euo pipefail
+          # Deliberately NOT `set -e`: each publish is attempted and its
+          # error surfaced as an annotation, because the raw logs need
+          # admin rights that the release process cannot assume. A
+          # failure that cannot be read is a failure that cannot be fixed.
+          rc=0
+          publish() {
+            local dir="$1"
+            local name
+            name=$(node -p "require('./$dir/package.json').name")
+            echo "::group::publishing $name"
+            if ! out=$( (cd "$dir" && npm publish --access public --provenance) 2>&1 ); then
+              echo "$out"
+              echo "::error::$name failed to publish"
+              # npm's diagnosis is usually one specific line; surface the
+              # whole thing, trimmed, rather than guessing which matters.
+              echo "$out" | grep -E "npm (error|ERR!)" | head -12 | while IFS= read -r line; do
+                echo "::error::${line}"
+              done
+              rc=1
+            else
+              echo "$out" | tail -3
+              echo "published $name"
+            fi
+            echo "::endgroup::"
+          }
+
           # Platform packages first: the launcher lists them as
           # optionalDependencies, and publishing it before they exist
           # would leave a window where `npm i -g talyx` resolves nothing
           # to run.
           for d in npm-dist/talyx-*/; do
-            (cd "$d" && npm publish --access public --provenance)
+            publish "${d%/}"
           done
-          (cd npm-dist/talyx && npm publish --access public --provenance)
+          if [ "$rc" -eq 0 ]; then
+            publish "npm-dist/talyx"
+          else
+            echo "::error::skipping the launcher package — a platform package failed, and a launcher whose optionalDependencies do not exist is worse than none."
+          fi
+          exit "$rc"
 
       # Fails the job rather than passing quietly. A silent skip is how
       # v0.3.0 and v0.3.1 both reported success while publishing nothing;
