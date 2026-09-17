@@ -76,17 +76,18 @@ jobs:
       - name: Verify the Linux binaries are static
         if: matrix.needs_musl
         run: |
-          set -euo pipefail
+          set -eu
           for b in talyx talyx-shim; do
             path="target/${{ matrix.target }}/release/$b"
-            file "$path"
-            if ldd "$path" 2>&1 | grep -qv "not a dynamic executable"; then
-              if ldd "$path" 2>&1 | grep -q "=>"; then
-                echo "::error::$b is dynamically linked — it will not run on older distros"
-                ldd "$path"
+            info="$(file -b "$path")"
+            echo "$b: $info"
+            case "$info" in
+              *"statically linked"*|*"static-pie linked"*) ;;
+              *)
+                echo "::error::$b is not statically linked ($info) — it would fail to start on distros with an older glibc"
                 exit 1
-              fi
-            fi
+                ;;
+            esac
             "$path" --version
           done
 
@@ -98,7 +99,12 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          cargo install cargo-about --features cli --locked
+          # Pinned: `cargo install cargo-about` without a version installs
+          # whatever is newest, so a change in ITS output formatting would
+          # fail this check on an unrelated release with no dependency
+          # change at all. Bump deliberately, regenerating the committed
+          # file in the same commit.
+          cargo install cargo-about --version 0.9.2 --features cli --locked
           cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt
           git diff --exit-code THIRD-PARTY-LICENSES.txt || {
             echo "::error::THIRD-PARTY-LICENSES.txt is stale — run 'cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt' and commit the result."
