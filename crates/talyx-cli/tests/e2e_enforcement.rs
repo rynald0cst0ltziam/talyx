@@ -117,7 +117,8 @@ fn init_blocks_a_known_bad_server_and_runs_a_benign_one() {
         .arg(proj)
         .arg("--store")
         .arg(&store)
-        .env("TALYX_DEV", "1"));
+        .env("TALYX_DEV", "1")
+        .env("TALYX_SHIM_DIR", scratch.path()));
     assert!(out.status.success(), "`talyx init` failed");
     let report = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -130,7 +131,11 @@ fn init_blocks_a_known_bad_server_and_runs_a_benign_one() {
         serde_json::from_str(&fs::read_to_string(&mcp_json).unwrap()).unwrap();
     let servers = rewritten["mcpServers"].as_object().unwrap();
 
-    let shim_str = shim.display().to_string();
+    let shim_str = scratch
+        .path()
+        .join(format!("talyx-shim{}", std::env::consts::EXE_SUFFIX))
+        .display()
+        .to_string();
     let invocation = |name: &str| -> (String, Vec<String>) {
         let e = &servers[name];
         let cmd = e["command"].as_str().unwrap().to_string();
@@ -279,7 +284,8 @@ fn init_blocks_a_known_bad_server_sourced_from_a_workspace_plugin() {
         .arg(proj)
         .arg("--store")
         .arg(&store)
-        .env("TALYX_DEV", "1"));
+        .env("TALYX_DEV", "1")
+        .env("TALYX_SHIM_DIR", scratch.path()));
     assert!(out.status.success(), "`talyx init` failed");
     let report = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -294,7 +300,11 @@ fn init_blocks_a_known_bad_server_sourced_from_a_workspace_plugin() {
     )
     .unwrap();
     let entry = &rewritten["mcpServers"]["known-bad"];
-    let shim_str = shim.display().to_string();
+    let shim_str = scratch
+        .path()
+        .join(format!("talyx-shim{}", std::env::consts::EXE_SUFFIX))
+        .display()
+        .to_string();
     assert_eq!(entry["command"].as_str().unwrap(), shim_str, "plugin server not routed through the shim");
     let args: Vec<String> = entry["args"]
         .as_array()
@@ -398,7 +408,8 @@ fn init_blocks_a_known_bad_server_sourced_from_a_claude_code_marketplace_plugin(
         .arg("--store")
         .arg(&store)
         .env("TALYX_DEV", "1")
-        .env("TALYX_TEST_HOME", root));
+        .env("TALYX_TEST_HOME", root)
+        .env("TALYX_SHIM_DIR", scratch.path()));
     assert!(out.status.success(), "`talyx init` failed");
     let report = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -411,7 +422,11 @@ fn init_blocks_a_known_bad_server_sourced_from_a_claude_code_marketplace_plugin(
     let rewritten: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(plugin_dir.join(".mcp.json")).unwrap()).unwrap();
     let entry = &rewritten["mcpServers"]["known-bad"];
-    let shim_str = shim.display().to_string();
+    let shim_str = scratch
+        .path()
+        .join(format!("talyx-shim{}", std::env::consts::EXE_SUFFIX))
+        .display()
+        .to_string();
     assert_eq!(
         entry["command"].as_str().unwrap(),
         shim_str,

@@ -183,3 +183,64 @@ jobs:
           # moves the failure somewhere less visible.
           draft: false
           generate_release_notes: true
+
+  # npm publishing runs only after the GitHub release succeeded, and only
+  # when NPM_TOKEN is configured — so the release is never blocked by npm
+  # credentials that may not exist yet.
+  #
+  # Six packages: five per-platform ones carrying the binaries, and the
+  # `talyx` launcher that lists them as optionalDependencies. No
+  # postinstall anywhere — see npm/talyx/bin/talyx.js for why that matters
+  # for this product in particular.
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Stage the publish tree
+        run: node npm/build-packages.mjs --artifacts dist --out npm-dist
+
+      - name: Verify every package carries a binary
+        run: |
+          set -euo pipefail
+          for d in npm-dist/talyx-*/; do
+            name=$(node -p "require('./$d/package.json').name")
+            count=$(find "$d/bin" -type f | wc -l)
+            echo "$name: $count binary file(s)"
+            if [ "$count" -lt 2 ]; then
+              echo "::error::$name is missing binaries — refusing to publish"
+              exit 1
+            fi
+          done
+
+      - name: Publish to npm
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Platform packages first: the launcher lists them as
+          # optionalDependencies, and publishing it before they exist
+          # would leave a window where `npm i -g talyx` resolves nothing
+          # to run.
+          for d in npm-dist/talyx-*/; do
+            (cd "$d" && npm publish --access public --provenance)
+          done
+          (cd npm-dist/talyx && npm publish --access public --provenance)
+
+      - name: Note when npm publishing was skipped
+        if: ${{ env.NODE_AUTH_TOKEN == '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: echo "::warning::NPM_TOKEN is not set — the GitHub release published, but npm did not."

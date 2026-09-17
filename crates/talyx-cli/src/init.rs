@@ -344,6 +344,101 @@ fn locate_shim() -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
+/// `TALYX_SHIM_DIR`, honoured only in debug/test builds. See
+/// `stable_shim_path` for why a release build must not be redirectable.
+fn debug_only_shim_dir() -> Option<PathBuf> {
+    if cfg!(debug_assertions) {
+        std::env::var_os("TALYX_SHIM_DIR").map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// The shim path that gets written into agent configs.
+///
+/// This must stay valid for as long as those configs do, which is longer
+/// than any particular installation of Talyx. The shim path is embedded
+/// in the user's own config files and resolved by the AGENT at every
+/// gated launch — so if it points somewhere a package manager owns, an
+/// ordinary upgrade breaks every MCP server the user gated, silently and
+/// all at once.
+///
+/// That is not hypothetical for an npm install: the binaries live under
+/// `node_modules`, so `npm uninstall -g`, a reinstall, or switching Node
+/// versions with nvm moves or deletes them. Same story for `cargo
+/// install` (`~/.cargo/bin` survives, but a `cargo build` run from a
+/// checkout does not) and for anyone running Talyx straight out of a
+/// build directory.
+///
+/// So the shim is copied to `~/.talyx/bin/`, which nothing but Talyx
+/// owns, and that stable path is what goes into the configs. The copy is
+/// refreshed whenever the bytes differ, so an upgraded Talyx upgrades the
+/// shim its configs point at.
+fn stable_shim_path() -> Option<PathBuf> {
+    let source = locate_shim()?;
+
+    // Debug/test builds only: lets the end-to-end tests point this at a
+    // temp directory instead of copying a debug shim over whatever the
+    // developer has actually installed in their own home. A RELEASE
+    // binary ignores it, for the same reason it ignores TALYX_STORE —
+    // an MCP config's `env` block is attacker-reachable, and a
+    // redirectable shim location would be a way to swap the gate itself.
+    let stable_dir = match debug_only_shim_dir() {
+        Some(dir) => dir,
+        None => dirs::home_dir()?.join(".talyx").join("bin"),
+    };
+    let stable = stable_dir.join(format!("talyx-shim{}", std::env::consts::EXE_SUFFIX));
+
+    // Already running from the stable location (the curl/irm installers
+    // put it there) — nothing to copy.
+    if source == stable {
+        return Some(source);
+    }
+
+    let same_bytes = match (std::fs::read(&source), std::fs::read(&stable)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same_bytes {
+        return Some(stable);
+    }
+
+    if let Err(e) = std::fs::create_dir_all(&stable_dir) {
+        eprintln!(
+            "talyx: could not create {} ({e}) — falling back to the shim at {}, which may not survive an upgrade.",
+            stable_dir.display(),
+            source.display()
+        );
+        return Some(source);
+    }
+
+    match std::fs::copy(&source, &stable) {
+        Ok(_) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&stable, std::fs::Permissions::from_mode(0o755));
+            }
+            Some(stable)
+        }
+        Err(e) => {
+            // A previously-copied shim that is currently executing can't
+            // be replaced on Windows. An existing copy is still correct
+            // to point at; only a missing one is a real problem.
+            if stable.is_file() {
+                Some(stable)
+            } else {
+                eprintln!(
+                    "talyx: could not copy the shim to {} ({e}) — falling back to {}, which may not survive an upgrade.",
+                    stable.display(),
+                    source.display()
+                );
+                Some(source)
+            }
+        }
+    }
+}
+
 struct RewriteOutcome {
     newly_protected: usize,
     already_protected: usize,
@@ -1719,7 +1814,10 @@ pub fn run_init(
     // MCP entries have no local process for it to wrap in the first
     // place, so removing a blocked/unapproved one from the config still
     // goes ahead below.
-    let shim_path = locate_shim();
+    // Deliberately the STABLE path, not wherever this binary happens to
+    // be running from — see `stable_shim_path`. What goes into a user's
+    // config has to outlive this installation of Talyx.
+    let shim_path = stable_shim_path();
     if shim_path.is_none() {
         eprintln!(
             "\ntalyx: could not find talyx-shim next to this executable — local MCP servers and hooks were NOT routed through enforcement."
@@ -2550,6 +2648,32 @@ mod tests {
         assert_eq!(again.already_protected, 1);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_shim_path_written_into_configs_is_the_stable_one() {
+        // What goes into a user's config outlives this installation of
+        // Talyx. If it pointed at the running binary's directory, an
+        // `npm uninstall -g`, an nvm switch or a `cargo clean` would
+        // leave every gated MCP server pointing at a deleted file and
+        // nothing would launch — silently, and all at once.
+        let Some(stable) = stable_shim_path() else {
+            // No shim next to the test binary; nothing to assert.
+            return;
+        };
+        let home = dirs::home_dir().expect("a home directory");
+        let expected_dir = home.join(".talyx").join("bin");
+        assert!(
+            stable.starts_with(&expected_dir),
+            "shim path {} must live under {}",
+            stable.display(),
+            expected_dir.display()
+        );
+        assert!(
+            stable.is_file(),
+            "the stable shim must actually exist at {}",
+            stable.display()
+        );
     }
 
     #[test]

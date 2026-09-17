@@ -1,0 +1,41 @@
+{
+  "name": "talyx",
+  "version": "0.2.1",
+  "description": "Supply-chain security for AI coding agents — scans and blocks malicious MCP servers, skills, plugins and hooks before they launch. Local, no telemetry.",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://gettalyx.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rynald0cst0ltziam/talyx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rynald0cst0ltziam/talyx/issues"
+  },
+  "keywords": [
+    "mcp",
+    "security",
+    "supply-chain",
+    "ai-agents",
+    "claude-code",
+    "cursor",
+    "static-analysis"
+  ],
+  "bin": {
+    "talyx": "bin/talyx.js"
+  },
+  "optionalDependencies": {
+    "@talyx/linux-x64": "0.2.1",
+    "@talyx/linux-arm64": "0.2.1",
+    "@talyx/darwin-x64": "0.2.1",
+    "@talyx/darwin-arm64": "0.2.1",
+    "@talyx/win32-x64": "0.2.1"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin/",
+    "LICENSE",
+    "THIRD-PARTY-LICENSES.txt"
+  ]
+}
