@@ -383,7 +383,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Is it actually local? What leaves my machine?',
-    a: 'It is a single binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI registry lookups when you pass --fetch-registry, and a license check against Lemon Squeezy on activation and roughly monthly after. Discovery, analysis, scoring and enforcement all happen on your machine.',
+    a: 'It is a single binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI registry lookups when you pass --fetch-registry, and a license check against Lemon Squeezy on activation and at most once a week after. Discovery, analysis, scoring and enforcement all happen on your machine.',
   },
   {
     q: 'Windows, macOS or Linux?',
