@@ -1,6 +1,22 @@
 # cargo-about configuration for generating THIRD-PARTY-LICENSES.
 # Run:  cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt
 #
+# `targets` pins the platforms the notices are generated for. Without it,
+# cargo-about resolves only the HOST's dependency graph — macOS pulls in
+# Apple-specific crates that Windows and Linux never see — so the output
+# differed per machine and the release workflow's freshness check could
+# only ever pass on whichever OS last generated the file. Pinning every
+# shipped target makes generation deterministic AND makes the notices
+# legally complete for every binary actually published, not just the one
+# built on the generating machine.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
 # `accepted` lists every SPDX license that actually appears in the
 # dependency tree (verified with `cargo license`). All are permissive or
 # file-level weak-copyleft (MPL-2.0) — none impose a copyleft obligation on

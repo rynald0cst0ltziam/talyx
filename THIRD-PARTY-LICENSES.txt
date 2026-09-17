@@ -234,7 +234,6 @@ License: Apache License 2.0 (Apache-2.0)
 Used by:
   - linux-raw-sys 0.12.1  (https://github.com/sunfishcode/linux-raw-sys)
   - rustix 1.1.4  (https://github.com/bytecodealliance/rustix)
-  - wasi 0.11.1+wasi-snapshot-preview1  (https://github.com/bytecodealliance/wasi)
 
 
                                  Apache License
@@ -744,25 +743,9 @@ License: Apache License 2.0 (Apache-2.0)
 Used by:
   - windows-link 0.2.1  (https://github.com/microsoft/windows-rs)
   - windows-sys 0.48.0  (https://github.com/microsoft/windows-rs)
-  - windows-sys 0.52.0  (https://github.com/microsoft/windows-rs)
   - windows-sys 0.61.2  (https://github.com/microsoft/windows-rs)
   - windows-targets 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows-targets 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_aarch64_gnullvm 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_aarch64_gnullvm 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_aarch64_msvc 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_aarch64_msvc 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_i686_gnu 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_i686_gnu 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_i686_gnullvm 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_i686_msvc 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_i686_msvc 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_x86_64_gnu 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_x86_64_gnu 0.52.6  (https://github.com/microsoft/windows-rs)
-  - windows_x86_64_gnullvm 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_x86_64_gnullvm 0.52.6  (https://github.com/microsoft/windows-rs)
   - windows_x86_64_msvc 0.48.5  (https://github.com/microsoft/windows-rs)
-  - windows_x86_64_msvc 0.52.6  (https://github.com/microsoft/windows-rs)
 
                                  Apache License
                            Version 2.0, January 2004
@@ -2244,7 +2227,6 @@ limitations under the License.
 License: Apache License 2.0 (Apache-2.0)
 
 Used by:
-  - arbitrary 1.4.2  (https://github.com/rust-fuzz/arbitrary/)
   - autocfg 1.5.1  (https://github.com/cuviper/autocfg)
   - base64 0.22.1  (https://github.com/marshallpierce/rust-base64)
   - base64 0.23.1  (https://github.com/marshallpierce/rust-base64)
@@ -2252,8 +2234,6 @@ Used by:
   - bumpalo 3.20.3  (https://github.com/fitzgen/bumpalo)
   - cc 1.4.5  (https://github.com/rust-lang/cc-rs)
   - cfg-if 1.0.4  (https://github.com/rust-lang/cfg-if)
-  - crossbeam-utils 0.8.22  (https://github.com/crossbeam-rs/crossbeam)
-  - derive_arbitrary 1.4.2  (https://github.com/rust-fuzz/arbitrary)
   - displaydoc 0.2.7  (https://github.com/yaahc/displaydoc)
   - encoding_rs_io 0.1.8  (https://github.com/BurntSushi/encoding_rs_io)
   - equivalent 1.0.2  (https://github.com/indexmap-rs/equivalent)
@@ -2281,7 +2261,6 @@ Used by:
   - tar 0.4.46  (https://github.com/composefs/tar-rs)
   - unicode-width 0.2.2  (https://github.com/unicode-rs/unicode-width)
   - version_check 0.9.5  (https://github.com/SergioBenitez/version_check)
-  - wasi 0.11.1+wasi-snapshot-preview1  (https://github.com/bytecodealliance/wasi)
   - xattr 1.6.1  (https://github.com/Stebalien/xattr)
 
                               Apache License
@@ -4031,35 +4010,6 @@ DEALINGS IN THE SOFTWARE.
 License: MIT License (MIT)
 
 Used by:
-  - libredox 0.1.23  (https://gitlab.redox-os.org/redox-os/libredox.git)
-
-MIT License
-
-Copyright (c) 2023 4lDO2
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
--------------------------------------------------------------------------------
-
-License: MIT License (MIT)
-
-Used by:
   - tree-sitter-ruby 0.23.1  (https://github.com/tree-sitter/tree-sitter-ruby)
   - tree-sitter 0.25.10  (https://github.com/tree-sitter/tree-sitter)
 
@@ -4348,36 +4298,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
--------------------------------------------------------------------------------
-
-License: MIT License (MIT)
-
-Used by:
-  - redox_users 0.4.6  (https://gitlab.redox-os.org/redox-os/users)
-
-The MIT License (MIT)
-
-Copyright (c) 2017 Jose Narvaez
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 
 -------------------------------------------------------------------------------
 
