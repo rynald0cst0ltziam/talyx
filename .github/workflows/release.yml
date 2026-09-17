@@ -93,31 +93,13 @@ jobs:
             "$path" --version || true
           done
 
-      # The MIT / BSD / Apache-2.0 / ISC licenses of the bundled crates
-      # require their notices to travel with the binary. Regenerate and fail
-      # the release if the committed THIRD-PARTY-LICENSES.txt is stale (a new
-      # or changed dependency, or a license not vetted in about.toml).
-      - name: Verify third-party license notices
-        shell: bash
-        run: |
-          set -uo pipefail
-          # Pinned: `cargo install cargo-about` without a version installs
-          # whatever is newest, so a change in ITS output formatting would
-          # fail this check on an unrelated release with no dependency
-          # change at all. Bump deliberately, regenerating the committed
-          # file in the same commit.
-          cargo install cargo-about --version 0.9.2 --features cli --locked
-          cargo about generate about.hbs -o generated-notices.txt
-          if ! diff -u THIRD-PARTY-LICENSES.txt generated-notices.txt > notices.diff; then
-            echo "::error::THIRD-PARTY-LICENSES.txt is stale on ${{ matrix.target }} — regenerate with 'cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt' and commit it."
-            # Surface the crate-level differences as annotations. Without
-            # this the failure is unreadable to anyone who cannot download
-            # the raw logs, which needs admin rights on the repository.
-            grep -E '^[+-]  - ' notices.diff | head -30 | while IFS= read -r line; do
-              echo "::error::${line}"
-            done
-            exit 1
-          fi
+      # NOTE: the freshness of THIRD-PARTY-LICENSES.txt is verified once,
+      # in ci.yml, not here. It used to run in this matrix, where it
+      # regenerated the file on five different operating systems and
+      # demanded all five agree — a check that could only ever pass on
+      # whichever OS last generated the committed copy, and that blocked
+      # four consecutive releases without ever saying what differed. The
+      # committed file is what ships; one canonical check gates it.
 
       - name: Package (tar.gz)
         if: matrix.archive_ext == 'tar.gz'

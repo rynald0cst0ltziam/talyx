@@ -72,6 +72,41 @@ jobs:
       - name: Build at the declared MSRV
         run: cargo build --workspace --locked
 
+  # The MIT / BSD / Apache-2.0 / ISC licenses of the bundled crates require
+  # their notices to travel with the binaries, so the committed
+  # THIRD-PARTY-LICENSES.txt has to stay in step with the dependency tree.
+  # Checked HERE, once, on one OS — it previously ran inside the release
+  # matrix on all five platforms at once, which made it unpassable, since
+  # the file can only match the machine that generated it unless
+  # generation is host-independent (see about.toml).
+  notices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-about
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
+      - name: Verify third-party license notices
+        run: |
+          set -uo pipefail
+          cargo about generate about.hbs -o generated-notices.txt
+          if diff -u THIRD-PARTY-LICENSES.txt generated-notices.txt > notices.diff; then
+            echo "notices are current"
+            exit 0
+          fi
+          echo "::error::THIRD-PARTY-LICENSES.txt is stale — regenerate with 'cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt' and commit it."
+          # Is the difference only line endings? Worth knowing outright,
+          # because that answer changes the fix completely.
+          if diff -q --strip-trailing-cr THIRD-PARTY-LICENSES.txt generated-notices.txt >/dev/null 2>&1; then
+            echo "::error::The ONLY difference is line endings (CRLF vs LF)."
+          fi
+          echo "::error::$(grep -c '^[+-]' notices.diff) changed lines; first 20 follow."
+          # Annotations, because the raw logs need admin rights to read.
+          head -24 notices.diff | tail -20 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          exit 1
+
   site:
     runs-on: ubuntu-latest
     defaults:
