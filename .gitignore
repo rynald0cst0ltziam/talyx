@@ -37,3 +37,5 @@ npm/.bin-native/
 /LAUNCH_RUNBOOK.md
 /LOCAL_TESTING.md
 /launch/
+generated-notices.txt
+notices.diff
