@@ -67,6 +67,7 @@ Then:
 talyx scan --project .              # free, read-only, evaluate anything
 talyx activate <YOUR-LICENSE-KEY>   # from your purchase email
 talyx init --project .              # turn on enforcement
+talyx uninstall --project .         # undo it all, whenever you want
 ```
 
 Both installers verify the download against the `SHA256SUMS` published

@@ -195,6 +195,37 @@ fn restrict_to_owner(path: &Path) {
     }
 }
 
+/// Whether this process is running inside a recognized CI system.
+///
+/// `CI` alone covers GitHub Actions, GitLab, CircleCI, Travis, Buildkite,
+/// Netlify, Vercel and most others, which all set it. The named vars are
+/// there for the ones that historically did not, so a legitimate
+/// pipeline is never told to run `talyx activate` on an ephemeral runner.
+fn looks_like_ci() -> bool {
+    // A bare `CI` set to something falsy is not CI — some shells export
+    // `CI=` or `CI=false`, and treating that as CI would reopen the hole.
+    if let Ok(v) = std::env::var("CI") {
+        let v = v.trim().to_ascii_lowercase();
+        if !v.is_empty() && v != "0" && v != "false" {
+            return true;
+        }
+    }
+    [
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "CIRCLECI",
+        "BUILDKITE",
+        "JENKINS_URL",
+        "TEAMCITY_VERSION",
+        "TF_BUILD",          // Azure Pipelines
+        "BITBUCKET_BUILD_NUMBER",
+        "CODEBUILD_BUILD_ID", // AWS CodeBuild
+        "DRONE",
+    ]
+    .iter()
+    .any(|k| std::env::var_os(k).is_some())
+}
+
 fn default_instance_name() -> String {
     let host = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -495,9 +526,30 @@ pub fn require_licensed(feature: &str) -> Result<(), LicenseError> {
     }
 
     // CI path: a key in the environment → validate-only, no activation slot.
+    //
+    // Restricted to actual CI, because validate-only consumes no slot and
+    // therefore works on unlimited machines: exporting TALYX_LICENSE_KEY
+    // made the per-seat activation limit decorative, since a whole team
+    // could share one key by putting it in their shells. CI genuinely
+    // needs the unmetered path (runners are ephemeral and would burn
+    // through activations), a developer's laptop does not — it has
+    // `talyx activate`, which takes a seat as intended.
+    //
+    // This is not unbreakable and does not pretend to be: anyone can set
+    // CI=1. It removes the accidental, frictionless bypass, which is the
+    // achievable goal for a local, source-available binary (see the
+    // license cache's own note on the same trade-off).
     if let Ok(env_key) = std::env::var("TALYX_LICENSE_KEY") {
         let env_key = env_key.trim();
         if !env_key.is_empty() {
+            if !looks_like_ci() {
+                return Err(LicenseError::Rejected(
+                    "TALYX_LICENSE_KEY is for CI, where it is validated without consuming an \
+                     activation. No CI environment was detected.\n  On a workstation run: \
+                     talyx activate <YOUR-KEY>"
+                        .to_string(),
+                ));
+            }
             return require_via_env_key(env_key);
         }
     }
@@ -706,6 +758,52 @@ mod tests {
         assert_eq!(lic.status, "active");
         assert_eq!(lic.activation_limit, Some(3));
         assert_eq!(lic.customer_email.as_deref(), Some("buyer@example.com"));
+    }
+
+    #[test]
+    fn ci_detection_accepts_real_ci_and_rejects_a_plain_workstation() {
+        // Guards the per-seat activation limit: the env-key path consumes
+        // no activation, so if it worked anywhere, one key would cover a
+        // whole team. These vars are the difference between "a CI runner"
+        // and "someone's shell profile".
+        //
+        // Serialized by construction — each case sets and clears its own
+        // var rather than relying on ambient environment.
+        let saved_ci = std::env::var("CI").ok();
+        let saved_gha = std::env::var("GITHUB_ACTIONS").ok();
+        for k in ["CI", "GITHUB_ACTIONS"] {
+            std::env::remove_var(k);
+        }
+
+        assert!(!looks_like_ci(), "a bare workstation must not look like CI");
+
+        std::env::set_var("CI", "true");
+        assert!(looks_like_ci(), "CI=true is CI");
+        std::env::set_var("CI", "1");
+        assert!(looks_like_ci(), "CI=1 is CI");
+
+        // A falsy or empty CI must NOT count — some shells export `CI=`
+        // or `CI=false`, and honouring those would reopen the bypass.
+        std::env::set_var("CI", "false");
+        assert!(!looks_like_ci(), "CI=false is not CI");
+        std::env::set_var("CI", "");
+        assert!(!looks_like_ci(), "an empty CI is not CI");
+        std::env::remove_var("CI");
+
+        // A provider variable alone is enough, for the systems that
+        // historically did not set CI.
+        std::env::set_var("GITHUB_ACTIONS", "true");
+        assert!(looks_like_ci(), "GITHUB_ACTIONS alone is CI");
+        std::env::remove_var("GITHUB_ACTIONS");
+
+        match saved_ci {
+            Some(v) => std::env::set_var("CI", v),
+            None => std::env::remove_var("CI"),
+        }
+        match saved_gha {
+            Some(v) => std::env::set_var("GITHUB_ACTIONS", v),
+            None => std::env::remove_var("GITHUB_ACTIONS"),
+        }
     }
 
     #[test]

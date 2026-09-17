@@ -419,7 +419,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'How is enforcement reversible?',
-    a: 'Every config Talyx rewrites is checksummed first and the original entry is stored. `talyx allow <id>` restores a blocked server exactly as it was, including a stripped remote entry. It never embeds your secrets or your real hook commands into a rewritten file — the shim reads them from a local store keyed by hash.',
+    a: '`talyx uninstall` puts every config back the way it was and stops enforcing — each entry is unwrapped in place, so anything you changed since stays. For a single artifact, `talyx allow <id>` restores it exactly as it was, including a stripped remote entry. Every rewrite is backed up first, and Talyx never embeds your secrets or your real hook commands into a rewritten file — the shim reads them from a local store keyed by hash.',
   },
   {
     q: 'Which agents are supported?',

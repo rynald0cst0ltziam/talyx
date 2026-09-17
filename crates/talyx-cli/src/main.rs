@@ -110,6 +110,28 @@ enum Command {
         #[arg(long)]
         live: bool,
     },
+    /// Undo enforcement: put every config Talyx rewrote back the way it was.
+    ///
+    /// Unwraps each gated MCP server and hook in place, restores anything
+    /// that was quarantined or removed, and stops enforcing. Entries are
+    /// unwrapped individually rather than by restoring the pre-Talyx
+    /// backup, so any change you made to those configs in the meantime
+    /// survives.
+    Uninstall {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Also undo configs OUTSIDE this project (e.g. a user-level
+        /// ~/.claude.json). Pass this if you ran `init --include-user-config`.
+        #[arg(long)]
+        include_user_config: bool,
+        /// Also delete ~/.talyx — the decision cache, license and
+        /// guardrails. Off by default: undoing enforcement and throwing
+        /// away your license are different decisions.
+        #[arg(long)]
+        purge: bool,
+    },
     /// Manually approve an artifact flagged ASK/BLOCK (by id, from `scan`/`why`).
     Allow {
         artifact_id: String,
@@ -252,6 +274,16 @@ fn main() {
                 live,
             )
         }
+        // Deliberately NOT licence-gated, unlike `init`. Taking your
+        // configs back is not a paid feature, and a lapsed licence must
+        // never be the reason someone is stuck with Talyx wired into
+        // every agent on their machine.
+        Command::Uninstall {
+            project,
+            store,
+            include_user_config,
+            purge,
+        } => init::run_uninstall(&project, store, include_user_config, purge),
         Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
         Command::Activate { key } => std::process::exit(license::run_activate(&key)),

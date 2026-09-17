@@ -102,6 +102,26 @@ talyx license status         # show machines used, key status, offline grace</co
       <li><code>--live</code> — also keep the shim between the agent and each approved MCP server for the session and inspect its JSON-RPC traffic. See <a href="#live-proxy">Live traffic inspection</a>.</li>
       <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
     </ul>
+    <h3><code>talyx uninstall</code></h3>
+    <p>
+      Undoes enforcement everywhere: every gated MCP server and hook is unwrapped
+      back to its original launch command, and anything quarantined or removed is
+      put back. Entries are unwrapped <em>in place</em> rather than by restoring
+      the pre-Talyx backup, so any change you made to those configs in the
+      meantime survives. Does not require a license — taking your configs back is
+      never a paid feature.
+    </p>
+    <ul>
+      <li><code>--project &lt;path&gt;</code> — project root (default <code>.</code>).</li>
+      <li><code>--include-user-config</code> — also undo configs outside the project. Pass this if you ran <code>init --include-user-config</code>.</li>
+      <li><code>--purge</code> — also delete <code>~/.talyx</code> (decision cache, license, guardrails). Off by default: undoing enforcement and discarding your license are separate decisions.</li>
+      <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
+    </ul>
+    <p>
+      The binaries themselves are left alone — remove <code>~/.talyx/bin</code> by
+      hand if you want them gone.
+    </p>
+
     <h3><code>talyx allow &lt;id&gt;</code></h3>
     <p>
       Approve an artifact flagged ASK/BLOCK — from now on the shim lets it run and
@@ -336,7 +356,7 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     <table>
       <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
       <tbody>
-        <tr><td><code>TALYX_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI. Set it in the job environment.</td></tr>
+        <tr><td><code>TALYX_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI, and only honoured when a CI environment is detected (<code>CI</code>, <code>GITHUB_ACTIONS</code>, <code>GITLAB_CI</code> and the like). On a workstation, run <code>talyx activate</code> instead.</td></tr>
         <tr><td><code>TALYX_STORE</code></td><td>Path to the decision store (default <code>~/.talyx/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
         <tr><td><code>TALYX_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.talyx/license.json</code>).</td></tr>
         <tr><td><code>TALYX_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.talyx/</code>).</td></tr>

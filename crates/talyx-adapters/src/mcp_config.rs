@@ -410,7 +410,7 @@ fn host_registrable_domain(url: &str) -> Option<String> {
 /// every later scan would classify/scan the shim BINARY itself instead of
 /// the artifact it wraps — permanently blinding drift detection and
 /// re-scoring the moment protection is turned on.
-pub(crate) fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
+pub fn unwrap_shim_invocation(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
     // Both `/` and `\` count as separators regardless of host OS: a
     // Windows-produced shim path (`C:\tools\talyx-shim.exe`) in a config
     // shared across a team must unwrap the same way on a teammate's Linux

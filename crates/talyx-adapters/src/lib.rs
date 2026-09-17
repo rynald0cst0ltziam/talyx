@@ -28,7 +28,7 @@ mod hooks_config;
 pub mod jsonc;
 pub mod jetbrains;
 pub mod kiro;
-mod mcp_config;
+pub mod mcp_config;
 pub mod opencode;
 pub mod openclaw;
 pub mod openhands;

@@ -549,7 +549,16 @@ fn write_config_atomically(config_path: &Path, contents: &str) -> io::Result<()>
         .unwrap_or("config");
     let tmp = dir.join(format!(".{name}.talyx-tmp-{}", std::process::id()));
 
-    std::fs::write(&tmp, contents)?;
+    // End with exactly one newline. Serializers do not add one, and a
+    // config left without it shows up as a spurious "\ No newline at end
+    // of file" in every diff of a version-controlled config — noise
+    // Talyx has no business introducing into someone's repository.
+    let mut contents = contents.to_string();
+    if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+
+    std::fs::write(&tmp, &contents)?;
     // Rename replaces an existing destination on both Unix and Windows.
     match std::fs::rename(&tmp, config_path) {
         Ok(()) => Ok(()),
@@ -1779,6 +1788,258 @@ fn level_name(level: ProtectionLevel) -> &'static str {
     }
 }
 
+/// Reverses a shim wrap for every entry in one already-parsed server map,
+/// putting back the real command each one wraps. Returns how many were
+/// unwrapped.
+///
+/// Uses discovery's own `unwrap_shim_invocation` rather than re-deriving
+/// the wrapped shape here — there is exactly one definition of what a
+/// wrapped entry looks like, and a second copy of it would be free to
+/// drift from the thing that writes it.
+fn unwrap_servers_in_map(servers: &mut serde_json::Map<String, serde_json::Value>) -> usize {
+    let mut unwrapped = 0;
+
+    for (_name, entry) in servers.iter_mut() {
+        let Some(obj) = entry.as_object_mut() else {
+            continue;
+        };
+
+        // Two shapes, matching the two the rewriter can produce: a string
+        // `command` plus an `args` array, or a single `command` array.
+        let (command, args, was_array) = match obj.get("command") {
+            Some(serde_json::Value::String(c)) => {
+                let args: Vec<String> = obj
+                    .get("args")
+                    .and_then(|a| a.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (c.clone(), args, false)
+            }
+            Some(serde_json::Value::Array(a)) => {
+                let mut it = a.iter().filter_map(|v| v.as_str().map(str::to_string));
+                let Some(first) = it.next() else { continue };
+                (first, it.collect(), true)
+            }
+            _ => continue,
+        };
+
+        let Some((real_command, real_args)) =
+            talyx_adapters::mcp_config::unwrap_shim_invocation(&command, &args)
+        else {
+            continue; // not wrapped — leave exactly as the user has it
+        };
+
+        if was_array {
+            let mut cmd = vec![serde_json::Value::String(real_command)];
+            cmd.extend(real_args.into_iter().map(serde_json::Value::String));
+            obj.insert("command".to_string(), serde_json::Value::Array(cmd));
+        } else {
+            obj.insert(
+                "command".to_string(),
+                serde_json::Value::String(real_command),
+            );
+            obj.insert(
+                "args".to_string(),
+                serde_json::Value::Array(
+                    real_args.into_iter().map(serde_json::Value::String).collect(),
+                ),
+            );
+        }
+        unwrapped += 1;
+    }
+
+    unwrapped
+}
+
+/// `talyx uninstall` — puts every config Talyx has touched back the way
+/// it was, and stops enforcing.
+///
+/// This exists because the product promises enforcement is "reversible
+/// with one command" and, until now, only a per-artifact `talyx allow`
+/// existed. Undoing a whole installation meant hand-editing every agent
+/// config on the machine.
+///
+/// It does NOT restore the `.talyx-backup` files wholesale. That would
+/// also discard every legitimate change made to those configs since
+/// Talyx first ran, which is a worse outcome than the problem it solves.
+/// Each entry is unwrapped in place instead, so anything the user or
+/// their agent changed in the meantime survives untouched.
+pub fn run_uninstall(
+    project: &Path,
+    store_override: Option<PathBuf>,
+    include_user_config: bool,
+    purge: bool,
+) {
+    let project_root = project
+        .canonicalize()
+        .unwrap_or_else(|_| project.to_path_buf());
+    let engine = RiskEngine::new();
+    // Protection level is irrelevant here — nothing is being scored, the
+    // scan is only how config files and their entries get located.
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+    let store = resolve_store(store_override);
+
+    println!("Talyx uninstall\n");
+
+    // 1. Unwrap shim-wrapped entries, per config file.
+    let mut configs: BTreeSet<PathBuf> = BTreeSet::new();
+    for s in &scanned {
+        if let Some(cs) = &s.config_source {
+            if include_user_config || cs.path.starts_with(&project_root) {
+                configs.insert(cs.path.clone());
+            }
+        }
+    }
+
+    let mut total_unwrapped = 0usize;
+    let mut files_changed = 0usize;
+    for config_path in &configs {
+        match unwrap_config_file(config_path) {
+            Ok(0) => {}
+            Ok(n) => {
+                total_unwrapped += n;
+                files_changed += 1;
+                println!("  unwrapped {n} entr(ies) in {}", config_path.display());
+            }
+            Err(e) => eprintln!(
+                "talyx: could not unwrap {} — {e}",
+                config_path.display()
+            ),
+        }
+    }
+
+    // 2. Put back anything that was removed or quarantined outright.
+    let mut restored = 0usize;
+    for record in store.all() {
+        if record.quarantine_current_path.is_some() {
+            restore_quarantined_artifact_if_needed(&store, &record.artifact_id);
+            restored += 1;
+        }
+        if record.remote_entry_snapshot.is_some() {
+            restore_remote_entry_if_needed(&store, &record.artifact_id);
+        }
+    }
+
+    println!();
+    if total_unwrapped == 0 && restored == 0 {
+        println!("Nothing to undo — no Talyx-modified config found under {}.", project_root.display());
+        if !include_user_config {
+            println!("If you ran `init --include-user-config`, re-run this with the same flag.");
+        }
+    } else {
+        println!(
+            "Restored {total_unwrapped} launch command(s) across {files_changed} config file(s); {restored} quarantined artifact(s) put back."
+        );
+        println!("Those MCP servers and hooks now launch directly again, with no Talyx gate.");
+    }
+
+    // 3. Optionally remove Talyx's own state.
+    if purge {
+        match talyx_state_dir() {
+            Some(dir) if dir.exists() => match std::fs::remove_dir_all(&dir) {
+                Ok(()) => println!("Removed {} (decision cache, license, guardrails).", dir.display()),
+                Err(e) => eprintln!("talyx: could not remove {}: {e}", dir.display()),
+            },
+            _ => println!("No Talyx state directory to remove."),
+        }
+    } else {
+        println!("\nThe decision cache and license were left in place — re-run with --purge to delete them too.");
+    }
+
+    println!("\nThe talyx binaries themselves were not deleted; remove ~/.talyx/bin (or wherever you installed them) by hand if you want them gone.");
+}
+
+fn talyx_state_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".talyx"))
+}
+
+/// Unwraps every shim-wrapped entry in one config file, in place.
+/// Backs the file up first and writes atomically, exactly as the rewrite
+/// path does — undoing enforcement must not be more dangerous than
+/// applying it was.
+fn unwrap_config_file(config_path: &Path) -> io::Result<usize> {
+    let original_text = std::fs::read_to_string(config_path)?;
+
+    // Same refusals the rewrite path makes: this re-serializes, so a file
+    // carrying comments would lose them.
+    let is_toml = config_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
+    if is_toml {
+        if talyx_adapters::codex::toml_has_comments(&original_text) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "file contains comments; unwrap it by hand to keep them",
+            ));
+        }
+    } else if talyx_adapters::jsonc::needs_jsonc(&original_text) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file contains comments or trailing commas; unwrap it by hand to keep them",
+        ));
+    }
+
+    if is_toml {
+        let Some(mut doc) = talyx_adapters::codex::parse_toml_leniently(&original_text) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "could not parse config.toml",
+            ));
+        };
+        let mut json = serde_json::to_value(&doc)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let unwrapped = json
+            .get_mut("mcp_servers")
+            .and_then(|v| v.as_object_mut())
+            .map(unwrap_servers_in_map)
+            .unwrap_or(0);
+        if unwrapped == 0 {
+            return Ok(0);
+        }
+        doc = serde_json::from_value(json)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        backup_config(config_path, &original_text)?;
+        let text = toml::to_string_pretty(&doc)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        write_config_atomically(config_path, &text)?;
+        return Ok(unwrapped);
+    }
+
+    let mut json: serde_json::Value = serde_json::from_str(&original_text)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    // Every nesting the rewriter knows how to write into, plus the root
+    // (Warp keeps servers at the top level with no wrapper key).
+    const CANDIDATE_PATHS: &[&[&str]] = &[
+        &["mcpServers"],
+        &["servers"],
+        &["mcp", "servers"],
+        &["mcp"],
+        &["mcp-server"],
+        &[],
+    ];
+    let mut unwrapped = 0;
+    for path in CANDIDATE_PATHS {
+        if let Some(map) = servers_map_mut(&mut json, path) {
+            unwrapped += unwrap_servers_in_map(map);
+        }
+    }
+    if unwrapped == 0 {
+        return Ok(0);
+    }
+
+    backup_config(config_path, &original_text)?;
+    let pretty = serde_json::to_string_pretty(&json)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    write_config_atomically(config_path, &pretty)?;
+    Ok(unwrapped)
+}
+
 pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
     let store = resolve_store(store_override);
     match store.approve(artifact_id) {
@@ -2287,6 +2548,138 @@ mod tests {
         let again = rewrite_config_json(&config_path, &[&art], Some(&shim), false, &store).unwrap();
         assert_eq!(again.newly_protected, 0);
         assert_eq!(again.already_protected, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unwrapping_restores_the_exact_original_launch_command() {
+        // The round trip the product promises: wrap an entry the way
+        // `init` does, then unwrap it and require the result to be
+        // byte-identical to what the user had before Talyx touched it.
+        let dir = unique_temp_dir("unwrap-roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let original = serde_json::json!({
+            "mcpServers": {
+                "local": { "command": "node", "args": ["server.js", "--port", "3000"] }
+            }
+        });
+        std::fs::write(&config_path, serde_json::to_string_pretty(&original).unwrap()).unwrap();
+
+        // Wrap it exactly as init does.
+        let shim = dir.join("talyx-shim");
+        let mut wrapped: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        {
+            let servers = wrapped
+                .get_mut("mcpServers")
+                .and_then(|v| v.as_object_mut())
+                .unwrap();
+            let entry = servers.get_mut("local").unwrap().as_object_mut().unwrap();
+            let mut args: Vec<serde_json::Value> = shim_lead("mcp-server:local:x", false)
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect();
+            args.push(serde_json::Value::String("node".into()));
+            args.push(serde_json::Value::String("server.js".into()));
+            args.push(serde_json::Value::String("--port".into()));
+            args.push(serde_json::Value::String("3000".into()));
+            entry.insert(
+                "command".into(),
+                serde_json::Value::String(shim.display().to_string()),
+            );
+            entry.insert("args".into(), serde_json::Value::Array(args));
+        }
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&wrapped).unwrap(),
+        )
+        .unwrap();
+
+        let n = unwrap_config_file(&config_path).unwrap();
+        assert_eq!(n, 1, "one entry should have been unwrapped");
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            after["mcpServers"]["local"]["command"], "node",
+            "the real command must be back"
+        );
+        assert_eq!(
+            after["mcpServers"]["local"]["args"],
+            serde_json::json!(["server.js", "--port", "3000"]),
+            "the real args must be back, in order"
+        );
+        assert_eq!(after, original, "the whole file must match the pre-Talyx original");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unwrapping_leaves_an_untouched_config_completely_alone() {
+        // A config Talyx never wrapped must not be rewritten at all —
+        // not even reformatted. Reporting 0 means the file is not opened
+        // for writing, so formatting and key order survive.
+        let dir = unique_temp_dir("unwrap-noop");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let original = "{\n  \"mcpServers\": {\n    \"plain\": { \"command\": \"node\", \"args\": [\"s.js\"] }\n  }\n}";
+        std::fs::write(&config_path, original).unwrap();
+
+        assert_eq!(unwrap_config_file(&config_path).unwrap(), 0);
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            original,
+            "an untouched config must be left byte-identical"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unwrapping_refuses_a_commented_config_rather_than_stripping_comments() {
+        let dir = unique_temp_dir("unwrap-jsonc");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        let original = "{\n  // keep me\n  \"mcpServers\": {}\n}";
+        std::fs::write(&config_path, original).unwrap();
+
+        assert!(
+            unwrap_config_file(&config_path).is_err(),
+            "must refuse rather than destroy comments"
+        );
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), original);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unwrapping_handles_the_array_command_shape() {
+        // Some agents express the launch as a single `command` array
+        // rather than command + args; the rewriter writes that shape too,
+        // so the inverse has to read it.
+        let dir = unique_temp_dir("unwrap-array");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("mcp.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": {
+                    "arr": { "command": ["/bin/talyx-shim", "id-1", "--", "python", "-m", "srv"] }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(unwrap_config_file(&config_path).unwrap(), 1);
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            after["mcpServers"]["arr"]["command"],
+            serde_json::json!(["python", "-m", "srv"])
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
