@@ -122,6 +122,7 @@ impl AgentAdapter for CodexAdapter {
 /// every backslash in it is doubled — including the otherwise-ambiguous
 /// ones. See `repair_unescaped_backslashes`.
 pub fn parse_toml_leniently(text: &str) -> Option<Value> {
+    let text = crate::jsonc::strip_bom(text);
     if let Ok(v) = toml::from_str::<Value>(text) {
         return Some(v);
     }

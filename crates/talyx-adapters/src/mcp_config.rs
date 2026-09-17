@@ -79,7 +79,7 @@ pub(crate) fn parse_mcp_servers_yaml(
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_saphyr::from_str::<Value>(&text) else {
+    let Ok(json) = serde_saphyr::from_str::<Value>(crate::jsonc::strip_bom(&text)) else {
         return Vec::new();
     };
     let Some(servers) = json.get(top_level_key).and_then(|v| v.as_object()) else {

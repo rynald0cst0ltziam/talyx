@@ -54,7 +54,7 @@ fn parse_aider_conf(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifact> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_saphyr::from_str::<Value>(&text) else {
+    let Ok(json) = serde_saphyr::from_str::<Value>(crate::jsonc::strip_bom(&text)) else {
         return Vec::new();
     };
     let Some(list) = json.get("mcp-server").and_then(|v| v.as_array()) else {

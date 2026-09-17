@@ -68,7 +68,7 @@ fn parse_config_yaml(path: &Path, base_dir: &Path) -> Vec<DiscoveredArtifact> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(json) = serde_saphyr::from_str::<Value>(&text) else {
+    let Ok(json) = serde_saphyr::from_str::<Value>(crate::jsonc::strip_bom(&text)) else {
         return Vec::new();
     };
     let Some(list) = json.get("mcpServers").and_then(|v| v.as_array()) else {
@@ -98,7 +98,7 @@ fn parse_mcp_servers_dir(dir: &Path, base_dir: &Path) -> Vec<DiscoveredArtifact>
             // name/version/schema metadata, but the list itself is
             // identical to config.yaml's -- reuse the same conversion.
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            let Ok(json) = serde_saphyr::from_str::<Value>(&text) else { continue };
+            let Ok(json) = serde_saphyr::from_str::<Value>(crate::jsonc::strip_bom(&text)) else { continue };
             let Some(list) = json.get("mcpServers").and_then(|v| v.as_array()) else { continue };
             let servers = list_to_server_map(list);
             out.extend(parse_server_map(

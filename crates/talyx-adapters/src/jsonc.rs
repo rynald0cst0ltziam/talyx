@@ -23,9 +23,27 @@
 use serde_json::Value;
 use std::path::Path;
 
+/// Strips a leading UTF-8 byte-order mark.
+///
+/// Windows writes these constantly — Notepad, `Set-Content -Encoding
+/// utf8` in Windows PowerShell, and VS Code's `files.encoding:
+/// utf8bom` all do — and a BOM makes `serde_json`, `serde_saphyr` and
+/// `toml` all fail at "line 1 column 1". The effect was that an agent
+/// config edited with an ordinary Windows tool became unparseable, and
+/// therefore invisible: every MCP server, hook and skill it declared went
+/// unscanned and unenforced. Found by writing a fixture with PowerShell
+/// and watching a knowingly-malicious server score clean.
+///
+/// Every mainstream JSON consumer tolerates a BOM; refusing one gains
+/// nothing and costs coverage on the platform most likely to produce it.
+pub fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// Parses a config that is JSON or JSONC. Returns `None` only when the
 /// text is not recoverable as either, after warning on stderr.
 pub(crate) fn parse_json_config(path: &Path, text: &str) -> Option<Value> {
+    let text = strip_bom(text);
     // Exact parse first: no rewriting of input in the overwhelmingly
     // common case, so a plain-JSON file can never be misread by the
     // stripper below.
@@ -51,6 +69,7 @@ pub(crate) fn parse_json_config(path: &Path, text: &str) -> Option<Value> {
 /// side, which re-serializes through `serde_json` and would silently
 /// delete every comment in the user's file if it rewrote one of these.
 pub fn needs_jsonc(text: &str) -> bool {
+    let text = strip_bom(text);
     serde_json::from_str::<Value>(text).is_err()
         && serde_json::from_str::<Value>(&strip_jsonc(text)).is_ok()
 }
@@ -228,6 +247,32 @@ mod tests {
         let v = parse_json_config(Path::new("t.json"), text).unwrap();
         assert_eq!(v["a"], r#"he said "hi" // not a comment"#);
         assert_eq!(v["b"], 2);
+    }
+
+    #[test]
+    fn a_utf8_bom_no_longer_hides_a_config() {
+        // Windows writes BOMs constantly (Notepad, `Set-Content -Encoding
+        // utf8`, VS Code's utf8bom). A BOM made serde_json fail at "line 1
+        // column 1", so the config was unparseable and every server in it
+        // went unscanned. Found by writing a fixture with PowerShell and
+        // watching a knowingly-malicious server score clean.
+        let text = "\u{feff}{\n  \"mcpServers\": {\n    \"evil\": { \"command\": \"node\" }\n  }\n}";
+        let v = parse_json_config(Path::new("mcp.json"), text).expect("a BOM must not hide a config");
+        assert_eq!(v["mcpServers"]["evil"]["command"], "node");
+    }
+
+    #[test]
+    fn a_bom_plus_jsonc_comments_together_still_parse() {
+        let text = "\u{feff}{\n  // both at once\n  \"servers\": { \"a\": { \"command\": \"x\" } },\n}";
+        let v = parse_json_config(Path::new("settings.json"), text).unwrap();
+        assert_eq!(v["servers"]["a"]["command"], "x");
+    }
+
+    #[test]
+    fn strip_bom_leaves_ordinary_text_untouched() {
+        assert_eq!(strip_bom("{\"a\":1}"), "{\"a\":1}");
+        // Only a LEADING bom is stripped — one mid-string is real content.
+        assert_eq!(strip_bom("{\"a\":\"\u{feff}\"}"), "{\"a\":\"\u{feff}\"}");
     }
 
     #[test]
