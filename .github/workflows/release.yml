@@ -202,6 +202,14 @@ jobs:
       # GitHub. Without this the publish fails outright rather than
       # quietly publishing without provenance.
       id-token: write
+    # Set at JOB level, not on the publish step. A step's own `env:` block
+    # is not in scope for that step's own `if:` condition, so testing
+    # `env.NODE_AUTH_TOKEN` there always saw an empty string and the
+    # publish was skipped no matter what — the job still went green,
+    # which is precisely how it went unnoticed for a release. Job-level
+    # env IS visible to step conditions.
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -233,8 +241,6 @@ jobs:
 
       - name: Publish to npm
         if: ${{ env.NODE_AUTH_TOKEN != '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           # Platform packages first: the launcher lists them as
@@ -246,8 +252,11 @@ jobs:
           done
           (cd npm-dist/talyx && npm publish --access public --provenance)
 
-      - name: Note when npm publishing was skipped
+      # Fails the job rather than passing quietly. A silent skip is how
+      # v0.3.0 and v0.3.1 both reported success while publishing nothing;
+      # if the token is missing the release should say so loudly.
+      - name: Fail if the token was missing
         if: ${{ env.NODE_AUTH_TOKEN == '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: echo "::warning::NPM_TOKEN is not set — the GitHub release published, but npm did not."
+        run: |
+          echo "::error::NPM_TOKEN is not set — the GitHub release published but npm did not."
+          exit 1
