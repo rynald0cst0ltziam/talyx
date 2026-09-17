@@ -1,0 +1,85 @@
+# Answers one question: what can NPM_TOKEN actually do?
+#
+# `npm publish` to a scoped name fails with a bare 404 both when the
+# scope is not yours AND when your token has no write access to it —
+# npm returns 404 rather than 403 on purpose, so that it never confirms
+# the existence of a scope you cannot publish to. That makes the publish
+# error alone useless for telling a missing organisation apart from an
+# under-permissioned token, and diagnosing it by cutting a release tag
+# costs a version number per guess.
+#
+# Everything below is printed twice: once normally, and once as a
+# `::error::` annotation. Annotations are readable on the run page
+# without repository admin rights; raw job logs are not. A diagnosis you
+# cannot read is not a diagnosis.
+#
+# Read-only — it never publishes anything. Run it from
+# Actions → npm doctor → Run workflow.
+name: npm doctor
+
+"on":
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    # Job level, not step level: a step's own `env:` block is not in
+    # scope for that step's own `if:` condition.
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Is the token present at all?
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN is not set as a repository secret."
+            exit 1
+          fi
+          echo "::error::NPM_TOKEN is set (${#NODE_AUTH_TOKEN} characters)."
+
+      - name: Who does npm think we are?
+        run: |
+          # No `set -e`: every probe below must run even when an earlier
+          # one fails, because the combination is what identifies the
+          # fault. Individually they are each just "something went wrong".
+          probe() {
+            local label="$1"; shift
+            local out
+            if out=$("$@" 2>&1); then
+              echo "::error::$label OK: $(echo "$out" | tr '\n' ' ' | cut -c1-400)"
+            else
+              echo "::error::$label FAILED: $(echo "$out" | grep -E 'npm (error|ERR!)|E[0-9]{3}' | head -4 | tr '\n' ' ' | cut -c1-400)"
+            fi
+          }
+
+          # Identity. If this fails, the token is invalid or revoked and
+          # nothing else below will mean anything.
+          probe "whoami" npm whoami
+
+          # Membership. A granular token can be valid and still be
+          # scoped to a package list that excludes a newly created
+          # organisation, which is indistinguishable from the org not
+          # existing when you only have the publish error to go on.
+          probe "org ls talyx" npm org ls talyx
+
+          # Write permission, stated rather than inferred. This is the
+          # thing a token created with the default "no access to
+          # packages and scopes" selection lacks.
+          probe "access list packages" npm access list packages
+
+          # Does the registry already hold anything under the scope?
+          # Distinguishes "never published" from "published and now
+          # failing", which change what the fix is.
+          for p in talyx @talyx/linux-x64 @talyx/linux-arm64 \
+                   @talyx/darwin-x64 @talyx/darwin-arm64 @talyx/win32-x64; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://registry.npmjs.org/$(printf '%s' "$p" | sed 's|/|%2f|')")
+            echo "::error::registry $p -> HTTP $code (404 = not published)"
+          done
