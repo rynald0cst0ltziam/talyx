@@ -2852,7 +2852,16 @@ mod tests {
         std::fs::write(&cfg, "{\"old\":true}").unwrap();
 
         write_config_atomically(&cfg, "{\"new\":true}").unwrap();
-        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "{\"new\":true}");
+        // Exactly one trailing newline: without it every Talyx-touched
+        // config shows "\ No newline at end of file" in a diff, and with
+        // more than one the file grows on each rewrite.
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "{\"new\":true}\n");
+        write_config_atomically(&cfg, "{\"new\":true}\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&cfg).unwrap(),
+            "{\"new\":true}\n",
+            "content that already ends in a newline must not gain another"
+        );
 
         let leftovers: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()

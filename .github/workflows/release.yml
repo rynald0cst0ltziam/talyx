@@ -174,5 +174,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          draft: true # review the draft before publishing — nothing goes live automatically
+          # Publishes immediately. This was a draft, which meant every
+          # release needed someone to click Publish before the download
+          # URLs stopped 404ing — and install.sh points at
+          # /releases/latest/download/, so a forgotten click is a broken
+          # install for every customer, with nothing failing to say so.
+          # The tag is the deliberate act; requiring a second one just
+          # moves the failure somewhere less visible.
+          draft: false
           generate_release_notes: true

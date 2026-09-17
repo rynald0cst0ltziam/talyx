@@ -1,6 +1,6 @@
 {
   "name": "talyx",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cross-agent security scanner and enforcement for AI coding agent artifacts (MCP servers, skills, plugins, hooks).",
   "license": "SEE LICENSE IN LICENSE",
   "bin": {
