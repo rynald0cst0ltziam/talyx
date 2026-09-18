@@ -45,10 +45,12 @@ import Icon from './Icon.astro';
 
         <p class="mt-8 max-w-xl text-[1.0625rem] leading-relaxed text-fog">
           Cursor, Claude Code, Copilot and 24 more auto-load MCP servers,
-          plugins, skills and hooks — from repos, npm and random gists — and
-          hand them to a model with access to your shell, your credentials and
-          your source. <strong class="text-chalk">Talyx scans every one and
-          blocks what's malicious before the process starts.</strong>
+          plugins and skills — code you never reviewed, running with your
+          shell and your credentials.
+        </p>
+        <p class="mt-4 max-w-xl text-[1.0625rem] leading-relaxed text-chalk">
+          <strong>Talyx scans every one and blocks the malicious ones before
+          they load.</strong>
         </p>
 
         <div class="mt-9 flex flex-wrap items-center gap-3">
@@ -73,6 +75,9 @@ import Icon from './Icon.astro';
           </li>
           <li class="flex items-center gap-1.5">
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Windows · macOS · Linux
+          </li>
+          <li class="flex items-center gap-1.5">
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> One ${site.price.amount} license covers every agent
           </li>
         </ul>
       </div>
