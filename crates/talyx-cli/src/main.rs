@@ -3,6 +3,7 @@
 //! `talyx scan`   — discover, statically scan, and score every artifact
 //!                        visible to a supported agent. Read-only.
 //! `talyx status` — short protection summary. Read-only.
+//! `talyx setup`  — guided first run: scan + recommend a preset + next step.
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
 //!                        configs to route through the enforcement shim
 //!                        (BUILD_PLAN.md §5a). The only command that writes
@@ -22,7 +23,7 @@ mod pipeline;
 mod sarif;
 mod sessions;
 
-use talyx_core::{Decision, ProtectionLevel, RiskBand};
+use talyx_core::{Decision, Preset, ProtectionLevel, RiskBand};
 use talyx_risk::RiskEngine;
 use clap::{Parser, Subcommand, ValueEnum};
 use pipeline::{collect, ScannedArtifact};
@@ -46,9 +47,14 @@ enum Command {
         /// Project root to scan (in addition to user-level/global config).
         #[arg(long, default_value = ".")]
         project: PathBuf,
-        /// Onboarding preset — see BUILD_PLAN.md §6.
-        #[arg(long, value_enum, default_value = "balanced")]
-        level: ProtectionLevelArg,
+        /// Policy strictness. When omitted it follows --preset; set it to
+        /// override just the strictness a preset implies.
+        #[arg(long, value_enum)]
+        level: Option<ProtectionLevelArg>,
+        /// Protection preset: personal | balanced | strict | enterprise.
+        /// Bundles strictness + live proxy + scan depth. Defaults to balanced.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
         /// Fetch and statically scan the actual code behind a
         /// registry-resolved MCP server (`npx <pkg>`, `uvx <pkg>`) instead
         /// of scoring it on declared evidence only. Off by default: this
@@ -78,14 +84,25 @@ enum Command {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+    /// Guided first run: detect agents, scan read-only, recommend a preset,
+    /// and print the exact next command to protect this project. Writes
+    /// nothing and needs no license.
+    Setup {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
     /// Scan, cache decisions, and route MCP servers through the enforcement
     /// shim — the only command that modifies an agent's config file(s)
     /// (with a one-time backup before the first rewrite).
     Init {
         #[arg(long, default_value = ".")]
         project: PathBuf,
-        #[arg(long, value_enum, default_value = "balanced")]
-        level: ProtectionLevelArg,
+        /// Policy strictness. When omitted it follows --preset.
+        #[arg(long, value_enum)]
+        level: Option<ProtectionLevelArg>,
+        /// Protection preset: personal | balanced | strict | enterprise.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
         /// Override the decision store location (defaults to
         /// ~/.talyx/decisions.json, or $TALYX_STORE if set).
         #[arg(long)]
@@ -241,21 +258,48 @@ impl From<ProtectionLevelArg> for ProtectionLevel {
     }
 }
 
+#[derive(ValueEnum, Clone, Copy)]
+enum PresetArg {
+    Personal,
+    Balanced,
+    Strict,
+    Enterprise,
+}
+
+impl From<PresetArg> for Preset {
+    fn from(v: PresetArg) -> Self {
+        match v {
+            PresetArg::Personal => Preset::Personal,
+            PresetArg::Balanced => Preset::Balanced,
+            PresetArg::Strict => Preset::Strict,
+            PresetArg::Enterprise => Preset::Enterprise,
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Scan {
             project,
             level,
+            preset,
             fetch_registry,
             format,
             sarif_file,
             exit_code,
-        } => run_scan(&project, level.into(), fetch_registry, format, sarif_file, exit_code),
+        } => {
+            let preset: Preset = preset.map(Into::into).unwrap_or_default();
+            let level = level.map(Into::into).unwrap_or_else(|| preset.protection_level());
+            let fetch_registry = fetch_registry || preset.deep_registry_scan();
+            run_scan(&project, level, fetch_registry, format, sarif_file, exit_code)
+        }
         Command::Status { project } => run_status(&project),
+        Command::Setup { project } => run_setup(&project),
         Command::Init {
             project,
             level,
+            preset,
             store,
             include_user_config,
             fetch_registry,
@@ -265,9 +309,13 @@ fn main() {
             if code != 0 {
                 std::process::exit(code);
             }
+            let preset: Preset = preset.map(Into::into).unwrap_or_default();
+            let level = level.map(Into::into).unwrap_or_else(|| preset.protection_level());
+            let live = live || preset.live_proxy();
+            let fetch_registry = fetch_registry || preset.deep_registry_scan();
             init::run_init(
                 &project,
-                level.into(),
+                level,
                 store,
                 include_user_config,
                 fetch_registry,
@@ -664,6 +712,106 @@ fn print_recent_proxy_findings() {
             "  {} — {} on {} ({})",
             f.action, f.capability, f.method, f.artifact
         );
+    }
+}
+
+/// `talyx setup` — the guided first run. Detects agents, scans read-only,
+/// recommends a preset from what it finds, and prints the exact next
+/// command. Writes nothing and needs no license, so a brand-new user can
+/// run it immediately after install and know precisely what to do next.
+/// This is the single entry point the installer points a new user at.
+fn run_setup(project: &Path) {
+    let project_root = resolve_root(project);
+    let engine = RiskEngine::new();
+    // Discover at the default policy; `init`/`scan` recompute decisions at
+    // whatever preset the user actually chooses. Setup only needs the
+    // risk bands to recommend one, and never writes a decision.
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+
+    println!("Talyx setup\n");
+
+    let mut agents: Vec<&str> = scanned.iter().map(|s| s.agent_name).collect();
+    agents.sort_unstable();
+    agents.dedup();
+
+    if scanned.is_empty() {
+        println!(
+            "No supported AI coding agent or artifact found under {}.",
+            project_root.display()
+        );
+        println!("\nNext steps:");
+        println!("  - Run setup from a project that uses an agent:  talyx setup --project <path>");
+        println!("  - Or list what's visible machine-wide:          talyx status");
+        println!("\nNothing was changed. Talyx writes nothing until you run `talyx init`.");
+        return;
+    }
+
+    println!(
+        "Detected {} artifact(s) across {} agent(s):",
+        scanned.len(),
+        agents.len()
+    );
+    for a in &agents {
+        println!("  {a} \u{2713}");
+    }
+
+    let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+    let blocked = scanned
+        .iter()
+        .filter(|s| matches!(s.decision, Decision::Block | Decision::Quarantine))
+        .count();
+    let ask = scanned.iter().filter(|s| s.decision == Decision::Ask).count();
+    let rewritable = scanned.iter().filter(|s| s.config_source.is_some()).count();
+
+    println!("\nRisk: {critical} critical, {high} high.");
+    if blocked > 0 || ask > 0 {
+        println!(
+            "At the default preset: {blocked} would be blocked/quarantined, {ask} would need review."
+        );
+    }
+
+    // Recommend the stricter posture only when the scan actually found
+    // something that warrants it — otherwise the everyday default.
+    let recommended = if critical > 0 || high > 0 {
+        Preset::Strict
+    } else {
+        Preset::Balanced
+    };
+    println!(
+        "\nRecommended preset: {recommended}  ({})",
+        recommended.description()
+    );
+
+    // A missing/invalid license returns Err without a network call, so this
+    // stays fast for the brand-new (unlicensed) user setup is aimed at.
+    let licensed = license::require_licensed("init").is_ok();
+
+    println!("\nNext steps:");
+    if rewritable == 0 {
+        println!(
+            "  Nothing here needs enforcement (no rewritable MCP server configs in this project)."
+        );
+        println!(
+            "  Re-run `talyx scan` any time to re-evaluate. Talyx writes nothing until `talyx init`."
+        );
+        return;
+    }
+    if licensed {
+        println!("  License active. Turn on protection for this project:");
+        println!("      talyx init --preset {recommended}");
+        println!(
+            "\n  This rewrites this project's agent configs to route {rewritable} MCP server config(s)"
+        );
+        println!("  through the enforcement shim — reversible any time with `talyx uninstall`.");
+    } else {
+        println!("  1. Evaluate freely (read-only):   talyx scan --preset {recommended}");
+        println!("  2. Activate enforcement:          talyx activate <YOUR-LICENSE-KEY>");
+        println!("  3. Turn on protection:            talyx init --preset {recommended}");
+        println!(
+            "\n  (scan is free; init rewrites this project's agent configs to route {rewritable}"
+        );
+        println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
     }
 }
 

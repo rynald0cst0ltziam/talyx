@@ -1876,6 +1876,9 @@ fn print_risk_summary(scanned: &[ScannedArtifact]) {
     let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
     let blocked = scanned.iter().filter(|s| s.decision == Decision::Block).count();
     println!("\n{critical} critical, {blocked} blocked.");
+    println!(
+        "Next: `talyx why <id>` explains any decision; `talyx status` shows current protection; `talyx uninstall` reverts everything."
+    );
 }
 
 fn level_name(level: ProtectionLevel) -> &'static str {
