@@ -4,6 +4,7 @@
 //!                        visible to a supported agent. Read-only.
 //! `talyx status` — short protection summary. Read-only.
 //! `talyx setup`  — guided first run: scan + recommend a preset + next step.
+//! `talyx verify` — installation health check (binaries, home, license).
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
 //!                        configs to route through the enforcement shim
 //!                        (BUILD_PLAN.md §5a). The only command that writes
@@ -91,6 +92,11 @@ enum Command {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+    /// Check that Talyx is installed correctly: binaries in place, home
+    /// directory writable, license state, and whether enforcement is wired
+    /// up. Read-only, needs no license. Exits non-zero if anything needs
+    /// attention, so an installer or CI step can gate on it.
+    Verify,
     /// Scan, cache decisions, and route MCP servers through the enforcement
     /// shim — the only command that modifies an agent's config file(s)
     /// (with a one-time backup before the first rewrite).
@@ -296,6 +302,7 @@ fn main() {
         }
         Command::Status { project } => run_status(&project),
         Command::Setup { project } => run_setup(&project),
+        Command::Verify => std::process::exit(run_verify()),
         Command::Init {
             project,
             level,
@@ -812,6 +819,104 @@ fn run_setup(project: &Path) {
             "\n  (scan is free; init rewrites this project's agent configs to route {rewritable}"
         );
         println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
+    }
+}
+
+/// `talyx verify` — installation health check (TASKS.md 1.1's "verify
+/// installation" command). Confirms the two binaries are where they need to
+/// be, that ~/.talyx is writable, the license state, and whether enforcement
+/// has been configured yet. One line per check, then a verdict. Returns 0
+/// when everything essential is in place, 1 when something needs attention —
+/// a missing license and an empty decision cache are reported but do NOT
+/// fail the check, because a fresh install legitimately has neither.
+fn run_verify() -> i32 {
+    use std::env::consts::EXE_SUFFIX;
+    println!("Talyx — installation check\n");
+    let mut attention = 0usize;
+
+    // 1. The talyx binary itself — we're running it, so report where from.
+    match std::env::current_exe() {
+        Ok(exe) => println!("  [ok]   talyx binary: {}", exe.display()),
+        Err(e) => {
+            println!("  [!!]   could not locate the running talyx binary: {e}");
+            attention += 1;
+        }
+    }
+
+    // 2. talyx-shim — the enforcement gate. `init` can only route local MCP
+    //    servers/hooks through it if it exists. Checked both next to the
+    //    running binary and at the stable ~/.talyx/bin location the installer
+    //    and `init` copy it to (see init.rs `stable_shim_path`).
+    let shim_name = format!("talyx-shim{EXE_SUFFIX}");
+    let sibling_shim = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(&shim_name)))
+        .filter(|p| p.is_file());
+    let stable_shim = dirs::home_dir()
+        .map(|h| h.join(".talyx").join("bin").join(&shim_name))
+        .filter(|p| p.is_file());
+    match sibling_shim.or(stable_shim) {
+        Some(p) => println!("  [ok]   talyx-shim: {}", p.display()),
+        None => {
+            println!("  [!!]   talyx-shim not found next to talyx or in ~/.talyx/bin — `talyx init` can't wrap local MCP servers until it is.");
+            attention += 1;
+        }
+    }
+
+    // 3. ~/.talyx — home of the decision cache, license, and stable shim.
+    //    Must be writable for anything beyond read-only scanning.
+    match dirs::home_dir() {
+        Some(home) => {
+            let talyx_home = home.join(".talyx");
+            let probe = talyx_home.join(".talyx-write-probe");
+            match std::fs::create_dir_all(&talyx_home)
+                .and_then(|_| std::fs::write(&probe, b"ok"))
+                .and_then(|_| std::fs::remove_file(&probe))
+            {
+                Ok(()) => println!("  [ok]   home directory writable: {}", talyx_home.display()),
+                Err(e) => {
+                    println!("  [!!]   {} is not writable: {e}", talyx_home.display());
+                    attention += 1;
+                }
+            }
+        }
+        None => {
+            println!("  [!!]   could not determine your home directory.");
+            attention += 1;
+        }
+    }
+
+    // 4. License — not needed to scan, needed to init. Report, never fail
+    //    verify on its absence: a brand-new install has no license yet.
+    match license::require_licensed("init") {
+        Ok(()) => println!("  [ok]   license active — `talyx init` (enforcement) is unlocked."),
+        Err(license::LicenseError::NotActivated) => {
+            println!("  [--]   no license yet — `talyx scan`/`setup` are free; run `talyx activate <KEY>` to enable `talyx init`.");
+        }
+        Err(e) => {
+            println!("  [!!]   license problem: {e}");
+            attention += 1;
+        }
+    }
+
+    // 5. Decision cache — present once `init` has run at least once. Absent
+    //    is normal on a fresh install, so it's informational, not a failure.
+    match dirs::home_dir().map(|h| h.join(".talyx").join("decisions.json")) {
+        Some(p) if p.is_file() => println!("  [ok]   decision cache present: {}", p.display()),
+        Some(p) => println!(
+            "  [--]   no decisions cached yet ({}) — run `talyx setup` to get started.",
+            p.display()
+        ),
+        None => {}
+    }
+
+    println!();
+    if attention == 0 {
+        println!("All checks passed. Talyx is installed correctly.");
+        0
+    } else {
+        println!("{attention} item(s) need attention (see [!!] above).");
+        1
     }
 }
 

@@ -196,11 +196,19 @@ main() {
       ;;
   esac
   say ""
+  say "What you have now:"
+  say "  - talyx + talyx-shim installed (binaries only; nothing on your"
+  say "    machine has been scanned, changed, or enforced yet)"
+  say "  - scanning and setup are FREE; turning on enforcement (init) needs a license"
+  say ""
   say "Next steps (PATH changes only take effect in a NEW shell, so this"
   say "session still needs the full path):"
+  say "  $INSTALL_DIR/talyx verify                        # confirm this install is healthy"
+  say "  $INSTALL_DIR/talyx setup --project .             # guided first run — tells you exactly what to do next"
+  say ""
+  say "setup is read-only and needs no license. When you're ready to enforce:"
   say "  $INSTALL_DIR/talyx activate <YOUR-LICENSE-KEY>   # from your purchase email"
-  say "  $INSTALL_DIR/talyx scan --project .              # free, read-only, no license needed"
-  say "  $INSTALL_DIR/talyx init --project .              # after activating, turns on enforcement"
+  say "  $INSTALL_DIR/talyx init --project .              # turns on enforcement (reversible: talyx uninstall)"
 }
 
 detect_profile() {

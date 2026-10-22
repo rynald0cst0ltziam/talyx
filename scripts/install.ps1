@@ -128,11 +128,19 @@ try {
         }
     }
     Write-Info ""
+    Write-Info "What you have now:"
+    Write-Info "  - talyx + talyx-shim installed (binaries only; nothing on your"
+    Write-Info "    machine has been scanned, changed, or enforced yet)"
+    Write-Info "  - scanning and setup are FREE; turning on enforcement (init) needs a license"
+    Write-Info ""
     Write-Info "Next steps (PATH changes only take effect in a NEW terminal, so this"
     Write-Info "session still needs the full path):"
+    Write-Info "  $InstallDir\talyx.exe verify                        # confirm this install is healthy"
+    Write-Info "  $InstallDir\talyx.exe setup --project .             # guided first run -- tells you exactly what to do next"
+    Write-Info ""
+    Write-Info "setup is read-only and needs no license. When you're ready to enforce:"
     Write-Info "  $InstallDir\talyx.exe activate <YOUR-LICENSE-KEY>   # from your purchase email"
-    Write-Info "  $InstallDir\talyx.exe scan --project .              # free, read-only, no license needed"
-    Write-Info "  $InstallDir\talyx.exe init --project .              # after activating, turns on enforcement"
+    Write-Info "  $InstallDir\talyx.exe init --project .              # turns on enforcement (reversible: talyx uninstall)"
 } finally {
     Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 }

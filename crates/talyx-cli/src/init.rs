@@ -1872,13 +1872,71 @@ pub fn run_init(
     print_risk_summary(&scanned);
 }
 
+/// TASKS.md 1.4 — the "what happened" summary printed after every `init`.
+/// A new user has to be able to read this and know, without interpreting
+/// anything: what was allowed, what was stopped, and what (if anything)
+/// they still have to look at by hand. So it reports the full decision
+/// tally (not just critical/blocked), names the artifacts that need a human
+/// decision, and ends with the two commands that act on them plus the one
+/// that undoes everything.
 fn print_risk_summary(scanned: &[ScannedArtifact]) {
+    let mut allowed = 0usize;
+    let mut review = 0usize;
+    let mut blocked = 0usize;
+    let mut quarantined = 0usize;
+    for s in scanned {
+        match s.decision {
+            Decision::Allow | Decision::AllowLog => allowed += 1,
+            Decision::Ask => review += 1,
+            Decision::Block => blocked += 1,
+            Decision::Quarantine => quarantined += 1,
+        }
+    }
     let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
-    let blocked = scanned.iter().filter(|s| s.decision == Decision::Block).count();
-    println!("\n{critical} critical, {blocked} blocked.");
-    println!(
-        "Next: `talyx why <id>` explains any decision; `talyx status` shows current protection; `talyx uninstall` reverts everything."
-    );
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+
+    println!("\nResult:");
+    println!("  {allowed} allowed, {review} need review, {blocked} blocked, {quarantined} quarantined.");
+    println!("  Risk bands: {critical} critical, {high} high.");
+
+    // The artifacts a human still has to decide on — ASK that nobody has
+    // approved, plus anything blocked/quarantined they may want to inspect
+    // or override. Named with the exact id `talyx why`/`allow` take, so the
+    // next step is copy-paste, not guesswork. Capped so a pathological
+    // project can't flood the terminal.
+    let needs_review: Vec<&ScannedArtifact> = scanned
+        .iter()
+        .filter(|s| matches!(s.decision, Decision::Ask | Decision::Block | Decision::Quarantine))
+        .collect();
+    if !needs_review.is_empty() {
+        const MAX_LISTED: usize = 8;
+        println!("\nTo review:");
+        for s in needs_review.iter().take(MAX_LISTED) {
+            println!(
+                "  [{decision}] {name}  ({id})",
+                decision = decision_label(s.decision),
+                name = sanitize_for_display(&s.artifact.name),
+                id = sanitize_for_display(&s.artifact.id),
+            );
+        }
+        if needs_review.len() > MAX_LISTED {
+            println!("  ... and {} more (see `talyx scan`).", needs_review.len() - MAX_LISTED);
+        }
+        println!("\n  `talyx why <id>`   explains the decision.");
+        println!("  `talyx allow <id>` approves and restores one.");
+    }
+
+    println!("\n`talyx status` shows current protection; `talyx uninstall` reverts everything.");
+}
+
+/// Short, stable word for a decision in user-facing summary lines.
+fn decision_label(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Allow | Decision::AllowLog => "allowed",
+        Decision::Ask => "review",
+        Decision::Block => "blocked",
+        Decision::Quarantine => "quarantined",
+    }
 }
 
 fn level_name(level: ProtectionLevel) -> &'static str {
@@ -2510,6 +2568,18 @@ mod tests {
     use talyx_adapters::{ConfigSource, LaunchCommand};
     use talyx_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity, ScoreBreakdown};
     use std::collections::BTreeSet;
+
+    #[test]
+    fn decision_label_covers_every_decision() {
+        // Locks the words the post-init summary ("To review" / "Result")
+        // prints for each decision. Allow and AllowLog both read "allowed";
+        // the three that need a human read as themselves.
+        assert_eq!(decision_label(Decision::Allow), "allowed");
+        assert_eq!(decision_label(Decision::AllowLog), "allowed");
+        assert_eq!(decision_label(Decision::Ask), "review");
+        assert_eq!(decision_label(Decision::Block), "blocked");
+        assert_eq!(decision_label(Decision::Quarantine), "quarantined");
+    }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
