@@ -2617,9 +2617,9 @@ fn restore_remote_entry_toml(
 
 /// Formats a unix timestamp as `YYYY-MM-DD HH:MM:SS UTC` with no external
 /// date dependency (Howard Hinnant's days-from-civil algorithm). Used for
-/// the approval audit trail; a readable UTC instant is far more useful in
-/// an audit line than a raw epoch count.
-fn format_unix(secs: u64) -> String {
+/// the approval audit trail and the sessions report; a readable UTC instant
+/// is far more useful than a raw epoch count.
+pub(crate) fn format_unix(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);

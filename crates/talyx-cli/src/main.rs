@@ -5,6 +5,7 @@
 //! `talyx status` — short protection summary. Read-only.
 //! `talyx setup`  — guided first run: scan + recommend a preset + next step.
 //! `talyx verify` — installation health check (binaries, home, license).
+//! `talyx sessions` — summarize live-proxy findings (TASKS 2.4). Read-only.
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
 //!                        configs to route through the enforcement shim
 //!                        (BUILD_PLAN.md §5a). The only command that writes
@@ -186,6 +187,18 @@ enum Command {
         #[command(subcommand)]
         action: LicenseAction,
     },
+    /// Summarize what the live MCP proxy (`talyx init --live`) has caught
+    /// across recent sessions: totals by action, capability, and artifact,
+    /// plus the most recent findings. `--json` emits the same data as a
+    /// durable machine-readable record.
+    Sessions {
+        /// How many of the most recent session log files to read.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Emit the summary and findings as JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Work with the live-proxy guardrails file (see `talyx init --live`).
     Guardrails {
         #[command(subcommand)]
@@ -360,6 +373,7 @@ fn main() {
             LicenseAction::Status => license::run_status(),
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
+        Command::Sessions { limit, json } => std::process::exit(run_sessions(limit, json)),
         Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
         Command::Advisories { action } => std::process::exit(run_advisories(action)),
     }
@@ -834,6 +848,99 @@ fn run_setup(project: &Path) {
         );
         println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
     }
+}
+
+/// `talyx sessions` — aggregate the live proxy's findings (TASKS.md 2.4).
+/// Human-readable table by default; `--json` prints the same summary plus
+/// the raw findings as a durable machine-readable record. Always exits 0 —
+/// it's a report, not a gate.
+fn run_sessions(limit: usize, json: bool) -> i32 {
+    let findings = sessions::recent(limit);
+    let summary = sessions::summarize(&findings);
+
+    if json {
+        let obj = serde_json::json!({
+            "total": summary.total,
+            "by_action": summary.by_action,
+            "by_capability": summary.by_capability,
+            "by_artifact": summary.by_artifact,
+            "newest_ts_ms": summary.newest_ts_ms,
+            "oldest_ts_ms": summary.oldest_ts_ms,
+            "findings": findings.iter().map(|f| serde_json::json!({
+                "ts_ms": f.ts_ms,
+                "artifact": f.artifact,
+                "method": f.method,
+                "action": f.action,
+                "capability": f.capability,
+                "evidence": f.evidence,
+            })).collect::<Vec<_>>(),
+        });
+        match serde_json::to_string_pretty(&obj) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("talyx: failed to serialize sessions summary: {e}");
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    println!("Talyx — live proxy sessions\n");
+    if summary.total == 0 {
+        println!("No live-proxy findings recorded yet.");
+        println!("(Findings appear here after running an agent with `talyx init --live`.)");
+        return 0;
+    }
+
+    println!(
+        "{} finding(s) from {} through {}.",
+        summary.total,
+        init::format_unix(summary.oldest_ts_ms / 1000),
+        init::format_unix(summary.newest_ts_ms / 1000),
+    );
+
+    println!("\nBy action:");
+    for (action, n) in &summary.by_action {
+        println!("  {n:>4}  {action}");
+    }
+
+    let top_caps = top_n(&summary.by_capability, 8);
+    if !top_caps.is_empty() {
+        println!("\nTop capabilities:");
+        for (cap, n) in top_caps {
+            println!("  {n:>4}  {}", sanitize_for_display(&cap));
+        }
+    }
+
+    let top_artifacts = top_n(&summary.by_artifact, 8);
+    if !top_artifacts.is_empty() {
+        println!("\nMost active artifacts:");
+        for (artifact, n) in top_artifacts {
+            println!("  {n:>4}  {}", sanitize_for_display(&artifact));
+        }
+    }
+
+    println!("\nMost recent:");
+    for f in findings.iter().take(10) {
+        println!(
+            "  {} — {} {} on {} ({})",
+            init::format_unix(f.ts_ms / 1000),
+            f.action,
+            sanitize_for_display(&f.capability),
+            sanitize_for_display(&f.method),
+            sanitize_for_display(&f.artifact),
+        );
+    }
+    0
+}
+
+/// The `n` highest-count entries of a count map, most frequent first (ties
+/// broken by key for a stable, deterministic order).
+fn top_n(counts: &std::collections::BTreeMap<String, usize>, n: usize) -> Vec<(String, usize)> {
+    let mut entries: Vec<(String, usize)> = counts.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    entries.truncate(n);
+    entries
 }
 
 /// `talyx verify` — installation health check (TASKS.md 1.1's "verify
