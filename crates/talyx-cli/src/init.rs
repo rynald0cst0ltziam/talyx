@@ -41,6 +41,10 @@ fn upsert_preserving_approval(store: &DecisionStore, mut record: DecisionRecord)
             && existing.decision == record.decision
         {
             record.manually_approved = true;
+            // Carry the audit trail (who/when/why/scope) forward too — a
+            // re-scan that preserves the approval must preserve the story
+            // behind it, not silently blank it (TASKS.md 2.2).
+            record.approval = existing.approval.clone();
         }
     }
     store.upsert(record)
@@ -329,6 +333,10 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
         approved_launch,
+        // A fresh scan never carries an approval — if this artifact was
+        // manually approved before, `upsert_preserving_approval` restores
+        // both the flag and this metadata from the prior record.
+        approval: None,
     }
 }
 
@@ -2199,11 +2207,67 @@ fn unwrap_config_file(config_path: &Path) -> io::Result<usize> {
     Ok(unwrapped)
 }
 
-pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
+/// Best-effort name for the audit trail — the OS username, or `"unknown"`
+/// when the environment doesn't expose one (e.g. a bare CI container). Not
+/// a security control: it records intent, it doesn't authenticate anyone.
+fn current_user() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// The on-disk location a repo-scoped approval is anchored to — the
+/// directory holding the artifact's config file, or the quarantined
+/// skill/instruction file's original directory. `None` when the record
+/// carries neither (e.g. a registry-resolved server with no local path).
+fn approval_repo_root(record: &DecisionRecord) -> Option<PathBuf> {
+    record
+        .config_path
+        .as_ref()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .or_else(|| {
+            record
+                .quarantine_original_path
+                .as_ref()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
+        })
+}
+
+pub fn run_allow(
+    artifact_id: &str,
+    store_override: Option<PathBuf>,
+    reason: Option<String>,
+    global: bool,
+) {
     let store = resolve_store(store_override);
-    match store.approve(artifact_id) {
+
+    // Scope the approval. `--global` is an explicit statement that this
+    // artifact is trusted everywhere; otherwise it's trusted where it
+    // lives, and we record that location (from the existing record) so a
+    // later audit shows which project granted it (TASKS.md 2.2).
+    let scope = if global {
+        talyx_store::ApprovalScope::Global
+    } else {
+        let root = store.get(artifact_id).as_ref().and_then(approval_repo_root);
+        talyx_store::ApprovalScope::Repo { root }
+    };
+    let approval = talyx_store::Approval {
+        approved_at_unix: talyx_store::DecisionRecord::now_unix(),
+        source: current_user(),
+        reason,
+        scope,
+    };
+    let scope_label = approval.scope.label();
+    let reason_echo = approval.reason.clone();
+
+    match store.approve_with(artifact_id, approval) {
         Ok(true) => {
-            println!("Approved '{artifact_id}'.");
+            println!("Approved '{artifact_id}' ({scope_label}).");
+            if let Some(r) = &reason_echo {
+                println!("  Reason: {}", sanitize_for_display(r));
+            }
             println!("It will be allowed to run until it changes (a different score/decision on the next scan resets this).");
             restore_remote_entry_if_needed(&store, artifact_id);
             restore_quarantined_artifact_if_needed(&store, artifact_id);
@@ -2520,6 +2584,30 @@ fn restore_remote_entry_toml(
     Ok(true)
 }
 
+/// Formats a unix timestamp as `YYYY-MM-DD HH:MM:SS UTC` with no external
+/// date dependency (Howard Hinnant's days-from-civil algorithm). Used for
+/// the approval audit trail; a readable UTC instant is far more useful in
+/// an audit line than a raw epoch count.
+fn format_unix(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+
+    // days since 1970-01-01 -> civil (year, month, day), UTC.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}:{ss:02} UTC")
+}
+
 pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     let store = resolve_store(store_override);
     let Some(record) = store.get(artifact_id) else {
@@ -2541,6 +2629,18 @@ pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     println!();
     for r in &record.reasons {
         println!("  {r}");
+    }
+
+    // The approval audit trail, when this artifact was manually allowed
+    // (TASKS.md 2.2) — who, when, why, and at what scope.
+    if let Some(approval) = &record.approval {
+        println!("\nApproved:");
+        println!("  when:  {}", format_unix(approval.approved_at_unix));
+        println!("  by:    {}", sanitize_for_display(&approval.source));
+        println!("  scope: {}", approval.scope.label());
+        if let Some(reason) = &approval.reason {
+            println!("  reason: {}", sanitize_for_display(reason));
+        }
     }
 
     // Anything the live proxy (`init --live`) has caught for this artifact.
@@ -2579,6 +2679,13 @@ mod tests {
         assert_eq!(decision_label(Decision::Ask), "review");
         assert_eq!(decision_label(Decision::Block), "blocked");
         assert_eq!(decision_label(Decision::Quarantine), "quarantined");
+    }
+
+    #[test]
+    fn format_unix_matches_known_instants() {
+        assert_eq!(format_unix(0), "1970-01-01 00:00:00 UTC");
+        // 1_700_000_000 = 2023-11-14 22:13:20 UTC (independently verifiable).
+        assert_eq!(format_unix(1_700_000_000), "2023-11-14 22:13:20 UTC");
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
@@ -3922,6 +4029,7 @@ mod tests {
                 quarantine_original_path: None,
                 quarantine_current_path: None,
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
 
@@ -4292,6 +4400,7 @@ mod tests {
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
 

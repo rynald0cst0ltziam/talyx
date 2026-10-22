@@ -175,6 +175,16 @@ pub struct DecisionRecord {
     /// command was silently executed — PoC'd live, not hypothetically.
     #[serde(default)]
     pub approved_launch: Option<ApprovedLaunch>,
+    /// Audit metadata for a manual approval — when, by whom, why, and at
+    /// what scope (TASKS.md 2.2). `None` for a record that was never
+    /// manually approved, or one approved by a build of Talyx that predates
+    /// this field (an older store deserializes it to `None`; the fast-path
+    /// `manually_approved` flag the shim reads is unaffected either way).
+    /// `manually_approved` stays the single source of truth for "is this
+    /// allowed"; this only records the story behind that bit for `talyx
+    /// why` and future reporting.
+    #[serde(default)]
+    pub approval: Option<Approval>,
 }
 
 /// See `DecisionRecord::approved_launch`.
@@ -182,6 +192,47 @@ pub struct DecisionRecord {
 pub struct ApprovedLaunch {
     pub command: String,
     pub args: Vec<String>,
+}
+
+/// Who approved a flagged artifact, when, why, and at what scope — the
+/// auditable record behind a `manually_approved` bit (TASKS.md 2.2:
+/// "approval is explicit, auditable, and reversible"). Written by `talyx
+/// allow`; `talyx uninstall`/re-scan clear the approval the same way they
+/// clear `manually_approved`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Approval {
+    pub approved_at_unix: u64,
+    /// Who/what approved it — the OS username when the CLI can determine
+    /// it, else a fallback marker. Recorded so an audit trail has a name
+    /// against each decision, not just a timestamp.
+    pub source: String,
+    /// The human justification passed via `talyx allow --reason`, if any.
+    #[serde(default)]
+    pub reason: Option<String>,
+    pub scope: ApprovalScope,
+}
+
+/// Whether an approval is a statement about this artifact everywhere
+/// (`Global`) or only where it was approved (`Repo`). Local artifact ids
+/// already encode an absolute source path, so they are inherently
+/// repo-specific; this makes that intent explicit and auditable, and gives
+/// a future cross-repo trust-sharing feature something concrete to key on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalScope {
+    Global,
+    Repo { root: Option<PathBuf> },
+}
+
+impl ApprovalScope {
+    /// Short label for `talyx why` / reporting.
+    pub fn label(&self) -> String {
+        match self {
+            ApprovalScope::Global => "global".to_string(),
+            ApprovalScope::Repo { root: Some(p) } => format!("this repo ({})", p.display()),
+            ApprovalScope::Repo { root: None } => "this repo".to_string(),
+        }
+    }
 }
 
 impl DecisionRecord {
@@ -374,6 +425,21 @@ impl DecisionStore {
         })
     }
 
+    /// `talyx allow <id>` with an audit trail (TASKS.md 2.2). Same effect
+    /// on enforcement as `approve` — sets `manually_approved` — but also
+    /// records who/when/why/scope on the record. Returns `false` when the
+    /// artifact has never been scanned.
+    pub fn approve_with(&self, artifact_id: &str, approval: Approval) -> io::Result<bool> {
+        self.with_exclusive_lock(|store| match store.records.get_mut(artifact_id) {
+            Some(record) => {
+                record.manually_approved = true;
+                record.approval = Some(approval);
+                true
+            }
+            None => false,
+        })
+    }
+
     pub fn all(&self) -> Vec<DecisionRecord> {
         self.read_locked().unwrap_or_default().records.into_values().collect()
     }
@@ -429,6 +495,7 @@ mod tests {
             quarantine_original_path: None,
             quarantine_current_path: None,
             approved_launch: None,
+            approval: None,
         };
         store.upsert(record.clone()).unwrap();
 
@@ -463,6 +530,7 @@ mod tests {
                 quarantine_original_path: None,
                 quarantine_current_path: None,
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
 
@@ -502,6 +570,7 @@ mod tests {
             quarantine_original_path: None,
             quarantine_current_path: None,
             approved_launch: None,
+            approval: None,
         }
     }
 

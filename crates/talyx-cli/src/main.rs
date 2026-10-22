@@ -160,6 +160,15 @@ enum Command {
         artifact_id: String,
         #[arg(long)]
         store: Option<PathBuf>,
+        /// Why you're approving it — recorded in the decision cache as an
+        /// audit trail (shown by `talyx why`). Optional but recommended.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Approve this artifact everywhere, not just where it lives now.
+        /// Default is repo-scoped: the approval is recorded against the
+        /// project the artifact was found in.
+        #[arg(long)]
+        global: bool,
     },
     /// Show the full reasoning behind a cached decision.
     Why {
@@ -339,7 +348,12 @@ fn main() {
             include_user_config,
             purge,
         } => init::run_uninstall(&project, store, include_user_config, purge),
-        Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
+        Command::Allow {
+            artifact_id,
+            store,
+            reason,
+            global,
+        } => init::run_allow(&artifact_id, store, reason, global),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
         Command::Activate { key } => std::process::exit(license::run_activate(&key)),
         Command::License { action } => std::process::exit(match action {
