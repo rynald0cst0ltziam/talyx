@@ -848,6 +848,10 @@ fn run_setup(project: &Path) {
         );
         println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
     }
+    println!(
+        "\n  Scope: `init` only modifies this project's configs. Your user-level configs"
+    );
+    println!("  (e.g. ~/.claude.json) stay untouched unless you add --include-user-config.");
 }
 
 /// `talyx sessions` — aggregate the live proxy's findings (TASKS.md 2.4).

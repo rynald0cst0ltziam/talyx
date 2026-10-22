@@ -1754,7 +1754,7 @@ pub fn run_init(
     let store = resolve_store(store_override);
 
     if scanned.is_empty() {
-        println!("No agent artifacts found under {}.", project_root.display());
+        println!("No agent artifacts found under {}.", display_path(&project_root));
         return;
     }
 
@@ -1797,6 +1797,22 @@ pub fn run_init(
     }
 
     println!("Talyx init\n");
+
+    // Scope decision, stated up front (TASKS.md 2.1). The user must know
+    // BEFORE any rewrite exactly what this run will touch and what it will
+    // leave alone — modifying a user-level config affects every project on
+    // the machine, so it never happens as a side effect of pointing init at
+    // one project. The post-run count below quantifies what that meant.
+    if include_user_config {
+        println!("Scope: this project AND user-level configs (--include-user-config).");
+        println!("  User-level configs (e.g. ~/.claude.json) affect every project on this machine.");
+    } else {
+        println!("Scope: this project only — {}", display_path(&project_root));
+        println!("  User-level configs (e.g. ~/.claude.json) are scanned and reported, never modified here.");
+        println!("  Re-run with --include-user-config to also enforce those.");
+    }
+    println!();
+
     println!(
         "{} artifact(s) scanned and cached (protection level: {level_name}).",
         scanned.len(),
@@ -1807,7 +1823,7 @@ pub fn run_init(
     if skipped_outside_project > 0 {
         println!(
             "{skipped_outside_project} rewritable artifact(s) found outside {} (e.g. a user-level config) — NOT rewritten.",
-            project_root.display()
+            display_path(&project_root)
         );
         println!("Re-run with --include-user-config to also protect those.");
     }
@@ -1838,7 +1854,7 @@ pub fn run_init(
         println!(
             "{} flagged skill(s) / instruction file(s) found outside {} (e.g. your own ~/.claude/CLAUDE.md) — NOT quarantined.",
             q.skipped_outside_project,
-            project_root.display()
+            display_path(&project_root)
         );
         println!("Re-run with --include-user-config to also quarantine those.");
     }
@@ -2124,7 +2140,7 @@ pub fn run_uninstall(
 
     println!();
     if total_unwrapped == 0 && restored == 0 {
-        println!("Nothing to undo — no Talyx-modified config found under {}.", project_root.display());
+        println!("Nothing to undo — no Talyx-modified config found under {}.", display_path(&project_root));
         if !include_user_config {
             println!("If you ran `init --include-user-config`, re-run this with the same flag.");
         }
@@ -2615,6 +2631,15 @@ fn restore_remote_entry_toml(
     Ok(true)
 }
 
+/// Path string for display, with Windows' `\\?\` verbatim prefix stripped.
+/// `Path::canonicalize` returns verbatim paths on Windows (e.g.
+/// `\\?\C:\Users\...`), which are correct but confusing in user-facing
+/// output; this only affects what's printed, never a path used on disk.
+pub(crate) fn display_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
+}
+
 /// Formats a unix timestamp as `YYYY-MM-DD HH:MM:SS UTC` with no external
 /// date dependency (Howard Hinnant's days-from-civil algorithm). Used for
 /// the approval audit trail and the sessions report; a readable UTC instant
@@ -2717,6 +2742,12 @@ mod tests {
         assert_eq!(format_unix(0), "1970-01-01 00:00:00 UTC");
         // 1_700_000_000 = 2023-11-14 22:13:20 UTC (independently verifiable).
         assert_eq!(format_unix(1_700_000_000), "2023-11-14 22:13:20 UTC");
+    }
+
+    #[test]
+    fn display_path_strips_windows_verbatim_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\C:\Users\x")), r"C:\Users\x");
+        assert_eq!(display_path(Path::new("/home/x")), "/home/x");
     }
 
     #[test]
