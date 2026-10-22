@@ -28,17 +28,22 @@ pub fn resolve_store(store_override: Option<PathBuf>) -> DecisionStore {
 }
 
 /// Writes a scan result into the store, preserving a prior manual approval
-/// ONLY if this artifact's score and decision are unchanged from what's
-/// cached. This is a safety net independent of `check_drift` below — it
-/// also catches score changes that aren't capability-driven (e.g. a
-/// reputation-discount change from a future trust-graph sync): "the thing
-/// I approved" should mean exactly that thing, not "whatever this
-/// artifact_id points to now."
+/// ONLY if the artifact is unchanged from what was approved — same score,
+/// same decision, same content hash, AND same launch command. This is a
+/// safety net independent of `check_drift` below. It catches score changes
+/// that aren't capability-driven (e.g. a reputation-discount change from a
+/// future trust-graph sync) and, per TASKS.md 2.3's guarantee that an
+/// approved artifact cannot silently change after approval, it drops the
+/// approval the moment the bytes or the launch command move — matching the
+/// promise `talyx allow` prints ("allowed to run until it changes"). A
+/// dropped approval forces the next run back through review.
 fn upsert_preserving_approval(store: &DecisionStore, mut record: DecisionRecord) -> io::Result<()> {
     if let Some(existing) = store.get(&record.artifact_id) {
         if existing.manually_approved
             && existing.total_score == record.total_score
             && existing.decision == record.decision
+            && existing.content_hash == record.content_hash
+            && existing.approved_launch == record.approved_launch
         {
             record.manually_approved = true;
             // Carry the audit trail (who/when/why/scope) forward too — a
@@ -68,6 +73,32 @@ fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<
     let Some(previous) = store.get(&s.artifact.id) else {
         return (baseline_decision, None); // first sighting — nothing to compare
     };
+
+    // Launch-command drift (TASKS.md 2.3), checked independently of the
+    // content hash: a config edit can keep the same artifact id but change
+    // the actual command/args the shim would run (2026-09-15 review,
+    // finding C2 — PoC'd live). The shim already refuses a launch whose
+    // argv doesn't match the approved one verbatim; catching it here too
+    // means a re-scan/init forces a fresh human review rather than leaving
+    // a stored "approved" record the shim will then silently refuse to run.
+    if let (Some(prev_launch), Some(new_launch)) = (&previous.approved_launch, &s.launch) {
+        if prev_launch.command != new_launch.command || prev_launch.args != new_launch.args {
+            let reason = format!(
+                "LAUNCH COMMAND CHANGED since the last scan: approved `{} {}`, config now runs `{} {}` -- re-review required.",
+                prev_launch.command,
+                prev_launch.args.join(" "),
+                new_launch.command,
+                new_launch.args.join(" "),
+            );
+            let decision = if matches!(baseline_decision, Decision::Allow | Decision::AllowLog) {
+                Decision::Ask
+            } else {
+                baseline_decision
+            };
+            return (decision, Some(reason));
+        }
+    }
+
     let (Some(prev_hash), Some(new_hash)) = (&previous.content_hash, &s.artifact.content_hash)
     else {
         return (baseline_decision, None); // one side couldn't be hashed
@@ -2686,6 +2717,75 @@ mod tests {
         assert_eq!(format_unix(0), "1970-01-01 00:00:00 UTC");
         // 1_700_000_000 = 2023-11-14 22:13:20 UTC (independently verifiable).
         assert_eq!(format_unix(1_700_000_000), "2023-11-14 22:13:20 UTC");
+    }
+
+    #[test]
+    fn launch_command_drift_forces_re_review_and_drops_approval() {
+        let dir = unique_temp_dir("launch-drift");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = temp_store(&dir);
+        let cfg = dir.join("config.toml");
+
+        // v1: approved exactly as discovered.
+        let v1 = synthetic_scanned_artifact("srv", cfg.clone(), "node", vec!["server.js".to_string()]);
+        let id = v1.artifact.id.clone();
+        let r1 = record_for(&store, &v1, ProtectionLevel::Balanced);
+        upsert_preserving_approval(&store, r1).unwrap();
+        assert!(store
+            .approve_with(
+                &id,
+                talyx_store::Approval {
+                    approved_at_unix: 0,
+                    source: "test".to_string(),
+                    reason: None,
+                    scope: talyx_store::ApprovalScope::Global,
+                }
+            )
+            .unwrap());
+
+        // v2: same artifact id, different argv — the C2 "swapped command"
+        // case. Drift must escalate to review and name the change.
+        let v2 = synthetic_scanned_artifact("srv", cfg.clone(), "node", vec!["evil.js".to_string()]);
+        let r2 = record_for(&store, &v2, ProtectionLevel::Balanced);
+        assert_eq!(r2.decision, Decision::Ask, "launch drift must escalate to re-review");
+        assert!(
+            r2.reasons.iter().any(|r| r.contains("LAUNCH COMMAND CHANGED")),
+            "drift reason must name the launch-command change"
+        );
+
+        upsert_preserving_approval(&store, r2).unwrap();
+        assert!(
+            !store.get(&id).unwrap().manually_approved,
+            "a launch-command change must drop the prior approval"
+        );
+    }
+
+    #[test]
+    fn content_hash_change_drops_a_prior_approval() {
+        let dir = unique_temp_dir("hash-drift");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = temp_store(&dir);
+        let cfg = dir.join("config.toml");
+
+        // Approve an ASK artifact at one set of bytes.
+        let mut v1 = synthetic_scanned_artifact("srv2", cfg.clone(), "node", vec!["a.js".to_string()]);
+        v1.artifact.content_hash = Some("hash-v1".to_string());
+        v1.decision = Decision::Ask;
+        let id = v1.artifact.id.clone();
+        upsert_preserving_approval(&store, record_for(&store, &v1, ProtectionLevel::Balanced)).unwrap();
+        store.approve(&id).unwrap();
+        assert!(store.get(&id).unwrap().manually_approved);
+
+        // Same id, same decision/score/launch, but the content changed.
+        // The approval was for those bytes, so it must not carry over.
+        let mut v2 = synthetic_scanned_artifact("srv2", cfg.clone(), "node", vec!["a.js".to_string()]);
+        v2.artifact.content_hash = Some("hash-v2".to_string());
+        v2.decision = Decision::Ask;
+        upsert_preserving_approval(&store, record_for(&store, &v2, ProtectionLevel::Balanced)).unwrap();
+        assert!(
+            !store.get(&id).unwrap().manually_approved,
+            "a content-hash change must drop the prior approval"
+        );
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
