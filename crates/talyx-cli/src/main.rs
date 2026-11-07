@@ -6,6 +6,7 @@
 //! `talyx setup`  — guided first run: scan + recommend a preset + next step.
 //! `talyx verify` — installation health check (binaries, home, license).
 //! `talyx sessions` — summarize live-proxy findings (TASKS 2.4). Read-only.
+//! `talyx report` — posture report (text/json/csv/md), TASKS 3.1–3.3. Read-only.
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
 //!                        configs to route through the enforcement shim
 //!                        (BUILD_PLAN.md §5a). The only command that writes
@@ -22,6 +23,7 @@
 mod init;
 mod license;
 mod pipeline;
+mod report;
 mod sarif;
 mod sessions;
 
@@ -187,6 +189,18 @@ enum Command {
         #[command(subcommand)]
         action: LicenseAction,
     },
+    /// Generate a security posture report for this project (or machine):
+    /// posture counts, enforcement, top risk, and live-proxy findings.
+    /// Read-only; exports to text, JSON, CSV, or Markdown.
+    Report {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        /// Output format: text (default), json, csv (full inventory), or md.
+        #[arg(long, value_enum, default_value = "text")]
+        format: ReportFormatArg,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
     /// Summarize what the live MCP proxy (`talyx init --live`) has caught
     /// across recent sessions: totals by action, capability, and artifact,
     /// plus the most recent findings. `--json` emits the same data as a
@@ -274,6 +288,14 @@ enum ProtectionLevelArg {
 enum OutputFormatArg {
     Text,
     Sarif,
+}
+
+#[derive(ValueEnum, Clone, Copy, PartialEq)]
+enum ReportFormatArg {
+    Text,
+    Json,
+    Csv,
+    Md,
 }
 
 impl From<ProtectionLevelArg> for ProtectionLevel {
@@ -373,6 +395,9 @@ fn main() {
             LicenseAction::Status => license::run_status(),
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
+        Command::Report { project, format, store } => {
+            std::process::exit(run_report(&project, format, store))
+        }
         Command::Sessions { limit, json } => std::process::exit(run_sessions(limit, json)),
         Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
         Command::Advisories { action } => std::process::exit(run_advisories(action)),
@@ -852,6 +877,93 @@ fn run_setup(project: &Path) {
         "\n  Scope: `init` only modifies this project's configs. Your user-level configs"
     );
     println!("  (e.g. ~/.claude.json) stay untouched unless you add --include-user-config.");
+}
+
+/// `talyx report` — build the canonical posture report (PRODUCT_MODEL §5,
+/// TASKS 3.1–3.3) from a fresh scan + the decision store + session
+/// findings, and render it to the requested format. Read-only; always
+/// exits 0 (a report, not a gate).
+fn run_report(project: &Path, format: ReportFormatArg, store_override: Option<PathBuf>) -> i32 {
+    let project_root = resolve_root(project);
+    let engine = RiskEngine::new();
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+    let store = init::resolve_store(store_override);
+    let report = report::Report::generate(init::display_path(&project_root), &scanned, &store, 20);
+
+    match format {
+        ReportFormatArg::Json => match serde_json::to_string_pretty(&report.to_json()) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("talyx: failed to serialize report: {e}");
+                return 1;
+            }
+        },
+        ReportFormatArg::Csv => print!("{}", report.to_csv()),
+        ReportFormatArg::Md => print!("{}", report.to_markdown()),
+        ReportFormatArg::Text => print_report_text(&report),
+    }
+    0
+}
+
+fn print_report_text(report: &report::Report) {
+    let p = &report.posture;
+    println!("Talyx report — {}\n", report.scope);
+    println!("Generated: {}", init::format_unix(report.generated_at_unix));
+
+    println!("\nPosture ({} artifact(s)):", p.total);
+    println!("  allowed:     {}", p.allowed);
+    if p.logged > 0 {
+        println!("  logged:      {}", p.logged);
+    }
+    println!("  in review:   {}", p.in_review);
+    println!("  blocked:     {}", p.blocked);
+    println!("  quarantined: {}", p.quarantined);
+    println!("  approved:    {} (manual)", p.approved);
+    if let Some(ratio) = p.allow_block_ratio {
+        println!("  allow/block ratio: {ratio:.2}");
+    }
+
+    if !p.by_band.is_empty() {
+        let bands: Vec<String> = p.by_band.iter().map(|(b, n)| format!("{n} {b}")).collect();
+        println!("  risk bands: {}", bands.join(", "));
+    }
+
+    println!(
+        "\nEnforcement: {} rewritable artifact(s) across {} agent(s).",
+        report.enforcement.rewritable,
+        report.enforcement.by_agent.len()
+    );
+    for (agent, n) in &report.enforcement.by_agent {
+        println!("  {n:>4}  {agent}");
+    }
+
+    let top_caps = top_n(&p.top_capabilities, 8);
+    if !top_caps.is_empty() {
+        println!("\nTop attack classes (capabilities of flagged artifacts):");
+        for (cap, n) in top_caps {
+            println!("  {n:>4}  {}", sanitize_for_display(&cap));
+        }
+    }
+
+    if !report.top_risk.is_empty() {
+        println!("\nTop risk:");
+        for t in &report.top_risk {
+            println!(
+                "  [{}] {} (score {}) — {}",
+                t.band,
+                sanitize_for_display(&t.name),
+                t.score,
+                sanitize_for_display(&t.reason)
+            );
+        }
+    }
+
+    if report.session_findings.total > 0 {
+        println!(
+            "\nLive-proxy findings: {} (run `talyx sessions` for detail).",
+            report.session_findings.total
+        );
+    }
 }
 
 /// `talyx sessions` — aggregate the live proxy's findings (TASKS.md 2.4).
