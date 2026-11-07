@@ -20,6 +20,7 @@
 //! license — see license.rs for the full rationale, including why the
 //! enforcement shim itself is deliberately never gated.
 
+mod history;
 mod init;
 mod license;
 mod pipeline;
@@ -200,6 +201,11 @@ enum Command {
         format: ReportFormatArg,
         #[arg(long)]
         store: Option<PathBuf>,
+        /// Also append this run's posture to the local history, so the next
+        /// report can show "what changed since". `init` records history
+        /// automatically; use this to checkpoint without enforcing.
+        #[arg(long)]
+        record: bool,
     },
     /// Summarize what the live MCP proxy (`talyx init --live`) has caught
     /// across recent sessions: totals by action, capability, and artifact,
@@ -395,9 +401,12 @@ fn main() {
             LicenseAction::Status => license::run_status(),
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
-        Command::Report { project, format, store } => {
-            std::process::exit(run_report(&project, format, store))
-        }
+        Command::Report {
+            project,
+            format,
+            store,
+            record,
+        } => std::process::exit(run_report(&project, format, store, record)),
         Command::Sessions { limit, json } => std::process::exit(run_sessions(limit, json)),
         Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
         Command::Advisories { action } => std::process::exit(run_advisories(action)),
@@ -883,26 +892,98 @@ fn run_setup(project: &Path) {
 /// TASKS 3.1–3.3) from a fresh scan + the decision store + session
 /// findings, and render it to the requested format. Read-only; always
 /// exits 0 (a report, not a gate).
-fn run_report(project: &Path, format: ReportFormatArg, store_override: Option<PathBuf>) -> i32 {
+fn run_report(
+    project: &Path,
+    format: ReportFormatArg,
+    store_override: Option<PathBuf>,
+    record: bool,
+) -> i32 {
     let project_root = resolve_root(project);
+    let scope = init::display_path(&project_root);
     let engine = RiskEngine::new();
     let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
     let store = init::resolve_store(store_override);
-    let report = report::Report::generate(init::display_path(&project_root), &scanned, &store, 20);
+    let report = report::Report::generate(scope.clone(), &scanned, &store, 20);
+
+    // "What changed since last scan" (TASKS 3.4): diff this run against the
+    // latest prior snapshot for the same scope, if any.
+    let current = history::Snapshot::from_rows(scope.clone(), report.generated_at_unix, &report.rows);
+    let activity = history::latest(&scope).map(|prev| history::diff(&prev, &current));
 
     match format {
-        ReportFormatArg::Json => match serde_json::to_string_pretty(&report.to_json()) {
-            Ok(s) => println!("{s}"),
-            Err(e) => {
-                eprintln!("talyx: failed to serialize report: {e}");
-                return 1;
+        ReportFormatArg::Json => {
+            let mut obj = report.to_json();
+            if let (Some(d), Some(map)) = (&activity, obj.as_object_mut()) {
+                map.insert("activity".to_string(), diff_to_json(d));
             }
-        },
+            match serde_json::to_string_pretty(&obj) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("talyx: failed to serialize report: {e}");
+                    return 1;
+                }
+            }
+        }
         ReportFormatArg::Csv => print!("{}", report.to_csv()),
         ReportFormatArg::Md => print!("{}", report.to_markdown()),
-        ReportFormatArg::Text => print_report_text(&report),
+        ReportFormatArg::Text => {
+            print_report_text(&report);
+            if let Some(d) = &activity {
+                print_activity_text(d);
+            }
+        }
+    }
+
+    // Opt-in history capture — keeps a plain `report` side-effect-free for
+    // CI piping while letting a user checkpoint on demand. `init` records
+    // automatically, so change tracking works without this flag too.
+    if record {
+        if let Err(e) = history::record(&current) {
+            eprintln!("talyx: (note) could not record posture history: {e}");
+        }
     }
     0
+}
+
+fn print_activity_text(d: &history::Diff) {
+    if d.is_empty() {
+        println!("\nNo changes since the last recorded scan.");
+        return;
+    }
+    println!("\nActivity since {}:", init::format_unix(d.since_unix));
+    let line = |label: &str, ids: &[String]| {
+        if !ids.is_empty() {
+            println!("  {label}: {}", ids.len());
+            for id in ids.iter().take(8) {
+                println!("      {}", sanitize_for_display(id));
+            }
+        }
+    };
+    line("newly flagged", &d.newly_flagged);
+    line("resolved", &d.resolved);
+    line("newly approved", &d.newly_approved);
+    line("added", &d.added);
+    line("removed", &d.removed);
+    if !d.score_increased.is_empty() {
+        println!("  risk increased: {}", d.score_increased.len());
+        for (id, old, new) in d.score_increased.iter().take(8) {
+            println!("      {} ({old} -> {new})", sanitize_for_display(id));
+        }
+    }
+}
+
+fn diff_to_json(d: &history::Diff) -> serde_json::Value {
+    serde_json::json!({
+        "since_unix": d.since_unix,
+        "newly_flagged": d.newly_flagged,
+        "resolved": d.resolved,
+        "newly_approved": d.newly_approved,
+        "added": d.added,
+        "removed": d.removed,
+        "score_increased": d.score_increased.iter().map(|(id, o, n)| serde_json::json!({
+            "id": id, "old_score": o, "new_score": n,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn print_report_text(report: &report::Report) {

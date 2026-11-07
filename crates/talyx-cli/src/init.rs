@@ -1768,6 +1768,20 @@ pub fn run_init(
         }
     }
 
+    // Record a posture snapshot for change tracking (TASKS.md 3.4). Built
+    // AFTER the upserts so it reflects the decisions (and preserved
+    // approvals) just written. Best-effort: a history-write failure must
+    // never fail an init that otherwise succeeded.
+    {
+        let scope = display_path(&project_root);
+        let rows = crate::report::rows_from_scan(&scanned, &store);
+        let snapshot =
+            crate::history::Snapshot::from_rows(scope, DecisionRecord::now_unix(), &rows);
+        if let Err(e) = crate::history::record(&snapshot) {
+            eprintln!("talyx: (note) could not record posture history: {e}");
+        }
+    }
+
     // SAFETY BOUNDARY: a config file outside `project_root` (the classic
     // case is `~/.claude.json`, Claude Code's user-scope MCP config) is
     // never rewritten unless the caller explicitly opts in. `discover()`
