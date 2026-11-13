@@ -350,6 +350,7 @@ mod tests {
                 quarantine_original_path: None,
                 quarantine_current_path: None,
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
         store

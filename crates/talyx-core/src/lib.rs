@@ -405,6 +405,89 @@ impl ProtectionLevel {
     }
 }
 
+/// A user-facing **preset**: one word a non-expert picks instead of
+/// assembling flags. A preset is a bundle of *safe* defaults — the
+/// `ProtectionLevel` policy table plus the live-proxy and deep-registry
+/// scan toggles. It deliberately does NOT widen enforcement scope:
+/// rewriting configs outside the target project is always governed by an
+/// explicit opt-in, never by a preset name (see `init`'s safety boundary).
+/// Presets add no new enforcement semantics — they only choose among
+/// existing ones. See `docs/PRODUCT_MODEL.md` §4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Preset {
+    /// Signal, not interruption: only the clearest criticals are blocked.
+    Personal,
+    /// The everyday default — log the mediums, block the criticals.
+    #[default]
+    Balanced,
+    /// High-trust repos: strict policy plus the live session firewall.
+    Strict,
+    /// Fleet rollout: strict + live firewall + deepest (registry) scanning.
+    /// Reserved as the anchor for central policy publication (Phase 4);
+    /// today it behaves as `strict` with deep registry scanning on.
+    Enterprise,
+}
+
+impl Preset {
+    /// Every preset, in increasing-protection order — for help text,
+    /// `setup`, and anywhere the full set must be listed.
+    pub const ALL: [Preset; 4] = [
+        Preset::Personal,
+        Preset::Balanced,
+        Preset::Strict,
+        Preset::Enterprise,
+    ];
+
+    /// The stable lowercase token used on the CLI and in config/exports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Preset::Personal => "personal",
+            Preset::Balanced => "balanced",
+            Preset::Strict => "strict",
+            Preset::Enterprise => "enterprise",
+        }
+    }
+
+    /// The policy strictness this preset maps onto.
+    pub fn protection_level(self) -> ProtectionLevel {
+        match self {
+            Preset::Personal => ProtectionLevel::Quiet,
+            Preset::Balanced => ProtectionLevel::Balanced,
+            Preset::Strict | Preset::Enterprise => ProtectionLevel::Strict,
+        }
+    }
+
+    /// Whether this preset turns the live MCP stdio proxy on by default
+    /// (`init --live`). Still overridable per-launch by `TALYX_NO_PROXY=1`.
+    pub fn live_proxy(self) -> bool {
+        matches!(self, Preset::Strict | Preset::Enterprise)
+    }
+
+    /// Whether this preset fetches and statically scans the real code
+    /// behind a registry-resolved (`npx`/`uvx`) server — deeper, but makes
+    /// an outbound registry call per server, so only the top preset opts in.
+    pub fn deep_registry_scan(self) -> bool {
+        matches!(self, Preset::Enterprise)
+    }
+
+    /// One-line human description for `setup` and help output.
+    pub fn description(self) -> &'static str {
+        match self {
+            Preset::Personal => "quiet — block only the clearest criticals, no live proxy",
+            Preset::Balanced => "balanced (default) — log mediums, block criticals",
+            Preset::Strict => "strict — block highs, live session firewall on",
+            Preset::Enterprise => "enterprise — strict + live firewall + deep registry scanning",
+        }
+    }
+}
+
+impl fmt::Display for Preset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// A transparent, inspectable breakdown of how a score was reached — this is
 /// what a "View why" click in the UI renders. Never render a bare number
 /// without this.
@@ -426,5 +509,41 @@ impl ScoreBreakdown {
 
     pub fn band(&self) -> RiskBand {
         RiskBand::from_score(self.total())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_default_is_balanced_and_changes_nothing() {
+        // The default preset must map exactly to today's default behavior,
+        // so adding `--preset` breaks no existing invocation.
+        let p = Preset::default();
+        assert_eq!(p, Preset::Balanced);
+        assert_eq!(p.protection_level(), ProtectionLevel::Balanced);
+        assert!(!p.live_proxy());
+        assert!(!p.deep_registry_scan());
+    }
+
+    #[test]
+    fn preset_level_mapping() {
+        assert_eq!(Preset::Personal.protection_level(), ProtectionLevel::Quiet);
+        assert_eq!(Preset::Strict.protection_level(), ProtectionLevel::Strict);
+        assert_eq!(Preset::Enterprise.protection_level(), ProtectionLevel::Strict);
+        // Live proxy on for strict and above only.
+        assert!(Preset::Strict.live_proxy() && Preset::Enterprise.live_proxy());
+        assert!(!Preset::Personal.live_proxy() && !Preset::Balanced.live_proxy());
+        // Deep registry scan is the enterprise-only differentiator today.
+        assert!(Preset::Enterprise.deep_registry_scan());
+        assert!(!Preset::Strict.deep_registry_scan());
+    }
+
+    #[test]
+    fn preset_str_roundtrips_through_all() {
+        for p in Preset::ALL {
+            assert_eq!(p.to_string(), p.as_str());
+        }
     }
 }

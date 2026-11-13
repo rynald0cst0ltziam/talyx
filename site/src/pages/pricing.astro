@@ -1,7 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
 import Pricing from '../components/Pricing.astro';
-import FAQ from '../components/FAQ.astro';
 import CTA from '../components/CTA.astro';
 ---
 
@@ -21,6 +20,8 @@ import CTA from '../components/CTA.astro';
   </section>
 
   <Pricing standalone />
-  <FAQ />
+  <p class="pb-4 text-center text-sm text-mist">
+    Questions? See the <a href="/faq" class="text-signal underline-offset-4 hover:underline">FAQ</a>.
+  </p>
   <CTA />
 </Base>

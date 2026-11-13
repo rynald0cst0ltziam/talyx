@@ -4,6 +4,26 @@ import Button from './Button.astro';
 import ThreatDemo from './ThreatDemo.astro';
 import FlowField from './FlowField.astro';
 import Icon from './Icon.astro';
+
+// The core, in three moves — surfaced right in the hero so a first-time
+// visitor sees exactly what Talyx does before scrolling.
+const pillars = [
+  {
+    icon: 'radar' as const,
+    title: 'Discover',
+    body: 'Every artifact your 27 agents auto-load — MCP servers, plugins, skills, hooks.',
+  },
+  {
+    icon: 'flow' as const,
+    title: 'Verify',
+    body: 'A real AST + source-to-sink taint engine, content analysis, a known-bad feed.',
+  },
+  {
+    icon: 'shield' as const,
+    title: 'Enforce',
+    body: 'Malicious ones removed or quarantined — the agent physically can’t load them.',
+  },
+];
 ---
 
 <section class="relative isolate overflow-hidden">
@@ -15,18 +35,12 @@ import Icon from './Icon.astro';
     <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-[1fr_1.12fr] lg:gap-12">
       <!-- one reveal block — no internal stagger, so nothing reflows -->
       <div data-reveal>
-        <p
-          class="text-[10px] uppercase tracking-[0.16em] text-signal sm:text-xs sm:tracking-[0.2em]"
-        >
-          Supply-chain security for AI coding agents
-        </p>
-
         <h1
-          class="mt-4 text-[2.75rem] font-bold leading-[1.02] tracking-[-0.025em] text-chalk sm:text-[3.4rem] lg:text-[4rem]"
+          class="text-[2.6rem] font-bold leading-[1.03] tracking-[-0.03em] text-chalk sm:text-[3.3rem] lg:text-[3.85rem]"
         >
-          Your agents run
+          Antivirus for your
           <span class="relative whitespace-nowrap">
-            <span class="text-gradient">untrusted code.</span>
+            <span class="text-gradient">AI coding agents.</span>
             <svg
               class="absolute -bottom-2 left-0 h-2.5 w-full text-signal/50"
               viewBox="0 0 300 12"
@@ -43,24 +57,46 @@ import Icon from './Icon.astro';
           </span>
         </h1>
 
-        <p class="mt-8 max-w-xl text-[1.0625rem] leading-relaxed text-fog">
+        <p class="mt-7 max-w-xl text-[1.0625rem] leading-relaxed text-fog">
           Cursor, Claude Code, Copilot and 24 more auto-load MCP servers,
-          plugins and skills — code you never reviewed, running with your
+          plugins, skills and hooks — unreviewed code that runs with your
           shell and your credentials.
-        </p>
-        <p class="mt-4 max-w-xl text-[1.0625rem] leading-relaxed text-chalk">
-          <strong>Talyx scans every one and blocks the malicious ones before
-          they load.</strong>
+          <strong class="text-chalk">
+            Talyx finds every one across 27 agents, proves what it can really
+            do, and blocks the malicious ones before they load.
+          </strong>
         </p>
 
-        <div class="mt-9 flex flex-wrap items-center gap-3">
+        <div class="mt-8 flex flex-wrap items-center gap-x-4 gap-y-3">
           <Button href="/pricing" variant="primary">
             Lock down your agents — ${site.price.amount} once
             <Icon name="arrow" class="h-4 w-4" />
           </Button>
+          <a
+            href="/#how"
+            class="inline-flex items-center gap-2 rounded-xl px-2 py-3 text-sm font-semibold text-fog transition-colors hover:text-chalk"
+          >
+            See how it works
+            <Icon name="arrow" class="h-4 w-4 text-signal" />
+          </a>
         </div>
 
-        <ul class="mt-8 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-6 text-xs text-mist">
+        <!-- the core, in three moves -->
+        <div class="mt-9 grid grid-cols-3 gap-4 border-t border-line pt-7">
+          {
+            pillars.map((p) => (
+              <div class="flex flex-col gap-2">
+                <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-panel-2 text-signal hairline">
+                  <Icon name={p.icon} class="h-5 w-5" />
+                </div>
+                <p class="text-sm font-semibold text-chalk">{p.title}</p>
+                <p class="text-xs leading-snug text-mist">{p.body}</p>
+              </div>
+            ))
+          }
+        </div>
+
+        <ul class="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-mist">
           <li class="flex items-center gap-1.5">
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.attackClasses} attack classes
           </li>
@@ -68,16 +104,10 @@ import Icon from './Icon.astro';
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> AST + taint, not grep
           </li>
           <li class="flex items-center gap-1.5">
-            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> {site.testsGreen} tests, source-available
-          </li>
-          <li class="flex items-center gap-1.5">
-            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Zero telemetry, zero cloud
+            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Fully local · zero telemetry
           </li>
           <li class="flex items-center gap-1.5">
             <Icon name="check" class="h-3.5 w-3.5 text-safe" /> Windows · macOS · Linux
-          </li>
-          <li class="flex items-center gap-1.5">
-            <Icon name="check" class="h-3.5 w-3.5 text-safe" /> One ${site.price.amount} license covers every agent
           </li>
         </ul>
       </div>

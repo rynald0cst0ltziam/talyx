@@ -3,6 +3,7 @@
 //! overrides). Written by `talyx-mcp-proxy`; surfaced by
 //! `talyx status` and `talyx why`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// One line from a session log.
@@ -13,6 +14,50 @@ pub struct Finding {
     pub action: String,
     pub capability: String,
     pub evidence: String,
+}
+
+/// Aggregated view of a set of findings — the data behind `talyx sessions`
+/// (TASKS.md 2.4: one understandable summary of recent live-proxy activity,
+/// with a durable machine-readable form via `--json`).
+pub struct Summary {
+    pub total: usize,
+    pub by_action: BTreeMap<String, usize>,
+    pub by_capability: BTreeMap<String, usize>,
+    pub by_artifact: BTreeMap<String, usize>,
+    /// Newest / oldest finding timestamps (ms since epoch), 0 when empty.
+    pub newest_ts_ms: u64,
+    pub oldest_ts_ms: u64,
+}
+
+/// Tallies findings by action, capability, and artifact, and records the
+/// time window they span.
+pub fn summarize(findings: &[Finding]) -> Summary {
+    let mut by_action = BTreeMap::new();
+    let mut by_capability = BTreeMap::new();
+    let mut by_artifact = BTreeMap::new();
+    let mut newest = 0u64;
+    let mut oldest = u64::MAX;
+    for f in findings {
+        if !f.action.is_empty() {
+            *by_action.entry(f.action.clone()).or_insert(0) += 1;
+        }
+        if !f.capability.is_empty() {
+            *by_capability.entry(f.capability.clone()).or_insert(0) += 1;
+        }
+        if !f.artifact.is_empty() {
+            *by_artifact.entry(f.artifact.clone()).or_insert(0) += 1;
+        }
+        newest = newest.max(f.ts_ms);
+        oldest = oldest.min(f.ts_ms);
+    }
+    Summary {
+        total: findings.len(),
+        by_action,
+        by_capability,
+        by_artifact,
+        newest_ts_ms: newest,
+        oldest_ts_ms: if findings.is_empty() { 0 } else { oldest },
+    }
 }
 
 fn sessions_dir() -> Option<PathBuf> {
@@ -62,4 +107,46 @@ pub fn recent(max_files: usize) -> Vec<Finding> {
     }
     out.sort_by_key(|f| std::cmp::Reverse(f.ts_ms)); // newest first
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(ts: u64, artifact: &str, action: &str, capability: &str) -> Finding {
+        Finding {
+            ts_ms: ts,
+            artifact: artifact.to_string(),
+            method: "tools/call".to_string(),
+            action: action.to_string(),
+            capability: capability.to_string(),
+            evidence: String::new(),
+        }
+    }
+
+    #[test]
+    fn summarize_tallies_and_bounds_the_window() {
+        let findings = vec![
+            finding(300, "srv-a", "block", "secret_access"),
+            finding(100, "srv-b", "allow", "network_external"),
+            finding(200, "srv-a", "block", "network_external"),
+        ];
+        let s = summarize(&findings);
+        assert_eq!(s.total, 3);
+        assert_eq!(s.by_action.get("block"), Some(&2));
+        assert_eq!(s.by_action.get("allow"), Some(&1));
+        assert_eq!(s.by_capability.get("network_external"), Some(&2));
+        assert_eq!(s.by_artifact.get("srv-a"), Some(&2));
+        assert_eq!(s.newest_ts_ms, 300);
+        assert_eq!(s.oldest_ts_ms, 100);
+    }
+
+    #[test]
+    fn summarize_handles_empty() {
+        let s = summarize(&[]);
+        assert_eq!(s.total, 0);
+        assert_eq!(s.newest_ts_ms, 0);
+        assert_eq!(s.oldest_ts_ms, 0);
+        assert!(s.by_action.is_empty());
+    }
 }

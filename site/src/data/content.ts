@@ -43,7 +43,9 @@ export type IconName =
   | 'drift'
   | 'list'
   | 'terminal'
-  | 'bolt';
+  | 'bolt'
+  | 'chart'
+  | 'history';
 
 export interface Feature {
   title: string;
@@ -118,6 +120,30 @@ export const features: Feature[] = [
     tag: 'CI',
     title: 'SARIF + a GitHub Action',
     body: 'Run the same scan in CI. Results upload as SARIF straight into GitHub code scanning, with a non-zero exit on Block so a poisoned dependency fails the build instead of shipping. Activate with a machine license via an environment variable.',
+  },
+  {
+    icon: 'terminal',
+    tag: 'Out of the box',
+    title: 'One guided command sets you up',
+    body: '`talyx setup` detects your agents, scores them read-only, recommends a protection preset and prints the exact next command — no flags to learn. Presets (`personal` / `balanced` / `strict` / `enterprise`) bundle strictness, live-proxy and scan depth into a single word, and `talyx verify` confirms the install is healthy before you enforce.',
+  },
+  {
+    icon: 'chart',
+    tag: 'Reporting',
+    title: 'A posture report your whole org can read',
+    body: '`talyx report` turns the current state into one summary — allowed / in-review / blocked / quarantined, top attack classes, allow-block ratio and top risk — and exports it as JSON, CSV, Markdown or SARIF. One schema behind every format: feed CI, drop it in a spreadsheet, or hand it to a security review unchanged.',
+  },
+  {
+    icon: 'history',
+    tag: 'Change tracking',
+    title: 'Know what changed since last scan',
+    body: 'Every scan records a durable posture snapshot. The next report shows the diff — newly flagged, resolved, newly approved, risk increased — so you can answer "what changed this week?" without diffing anything by hand. The record is local and keyed per project.',
+  },
+  {
+    icon: 'lock',
+    tag: 'Approvals',
+    title: 'Approvals that leave an audit trail',
+    body: '`talyx allow` records who approved an artifact, when, why, and at what scope — this repo or globally. Approval is bound to the artifact\'s bytes and launch command, so any change forces re-review automatically, and `talyx why` shows the full history. Explicit, auditable, reversible — the audit trail an enterprise rollout needs.',
   },
   {
     icon: 'lock',
@@ -344,26 +370,26 @@ export const steps: Step[] = [
   {
     n: '01',
     title: 'Install',
-    body: 'One binary and its enforcement shim. No runtime, no dependencies, no shell-profile edits.',
+    body: 'One binary and its enforcement shim. No runtime, no dependencies, no shell-profile edits. `talyx verify` confirms the install is healthy.',
     code: 'curl -fsSL https://gettalyx.dev/install.sh | sh',
   },
   {
     n: '02',
-    title: 'Activate your license',
-    body: 'Paste the key from your purchase email. Works offline for 30 days at a time; activate on up to 3 machines.',
-    code: 'talyx activate <YOUR-LICENSE-KEY>',
+    title: 'Set up',
+    body: 'Activate the license from your purchase email, then run one guided command. It detects every agent, scores them read-only, recommends a preset, and prints the exact next step — no flags to learn.',
+    code: 'talyx setup --project .',
   },
   {
     n: '03',
-    title: 'Scan',
-    body: 'Point it at a project or your home directory. It finds every agent, every plugin, every artifact.',
-    code: 'talyx scan --project .',
+    title: 'Enforce',
+    body: 'Pick a preset and go. Approved servers run through the shim; malicious ones are pulled from the config so the agent physically can’t start them; bad skills and injected instruction files are quarantined. Reversible any time.',
+    code: 'talyx init --preset balanced',
   },
   {
     n: '04',
-    title: 'Enforce',
-    body: 'Route every approved MCP server through the shim; blocked ones are pulled from the config; malicious skills are quarantined. Reversible any time.',
-    code: 'talyx init --project ~',
+    title: 'Report & watch',
+    body: 'See the whole posture — allowed, in review, blocked, quarantined, top risk — and what changed since last scan. Export JSON, CSV, Markdown or SARIF for CI and reviews; `talyx sessions` summarises live-proxy findings.',
+    code: 'talyx report --format md',
   },
 ];
 
@@ -376,6 +402,18 @@ export const faqs: Faq[] = [
   {
     q: 'What exactly does Talyx protect against?',
     a: 'The artifact supply chain for AI coding agents: a malicious MCP server launched from a config file, a plugin or extension that ships its own server or hook, a skill or instruction file carrying hidden prompt-injection, an encoded payload in a tool description, a server impersonating a trusted one, a hook that pipes a downloaded script into a shell, a secret read that flows to the network. It inspects what your agent is about to load — across 27 agents — and either verifies it, flags it for review, or blocks it.',
+  },
+  {
+    q: 'How do I get from buying to protected?',
+    a: 'One command. After purchase you paste a single line (the installer with your key): it installs the binary, activates the license, scans your machine, picks a protection preset from what it finds, and turns protection on — reversible any time with `talyx uninstall`. If you would rather go step by step, it is install → `talyx verify` → `talyx activate <key>` → `talyx setup` (guided, read-only, recommends a preset) → `talyx init --preset balanced`. `talyx quickstart <key>` runs the whole thing as one command after install.',
+  },
+  {
+    q: 'What are presets, and which should I pick?',
+    a: 'A preset is the one knob most people need — it bundles decision strictness, whether the live proxy runs, and how deep the scan goes into a single word. `personal` is quietest (a personal machine), `balanced` is the everyday default, `strict` adds live-session inspection for sensitive work, and `enterprise` is the deepest (it also fetches and scans the real code behind `npx`/`uvx` servers). `talyx setup` recommends one for you; `balanced` maps exactly to the historical default, so presets never change behaviour you did not ask for.',
+  },
+  {
+    q: 'What reporting and analytics do I get?',
+    a: '`talyx report` gives one posture summary — allowed / in review / blocked / quarantined, top attack classes, allow-block ratio, top risk, and recent live-proxy findings — and exports it as a human table, JSON, CSV (full inventory) or Markdown, with SARIF from `talyx scan` for CI. One schema sits behind every format, so CI, a spreadsheet and a leadership review all see identical numbers. Every scan also records a durable local snapshot, so the next report shows what changed since last time: newly flagged, resolved, newly approved, risk increased. It is all local — nothing is uploaded.',
   },
   {
     q: 'How is the AST / taint analysis different from a regex scanner?',

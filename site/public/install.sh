@@ -35,15 +35,26 @@ TALYX_REPO="${TALYX_REPO:-rynald0cst0ltziam/talyx}"
 TALYX_VERSION="${TALYX_VERSION:-latest}"
 INSTALL_DIR="${TALYX_INSTALL_DIR:-$HOME/.talyx/bin}"
 MODIFY_PATH=0
+# A license key (via --activate <KEY> or TALYX_LICENSE_KEY) turns this into
+# the one-command flow: install, then run `talyx quickstart`. With
+# --enforce it goes all the way to protected; without it, it activates and
+# prints the one command to enable protection (so piping a script from the
+# internet never rewrites your agent configs unless you explicitly ask).
+LICENSE_KEY="${TALYX_LICENSE_KEY:-}"
+ENFORCE=0
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --modify-path) MODIFY_PATH=1 ;;
+    --enforce) ENFORCE=1 ;;
+    --activate) shift; LICENSE_KEY="${1:-}" ;;
+    --activate=*) LICENSE_KEY="${1#--activate=}" ;;
     *)
-      echo "talyx-install: unknown option '$arg'" >&2
+      echo "talyx-install: unknown option '$1'" >&2
       exit 1
       ;;
   esac
+  shift
 done
 
 say() { printf '%s\n' "$*"; }
@@ -196,11 +207,40 @@ main() {
       ;;
   esac
   say ""
-  say "Next steps (PATH changes only take effect in a NEW shell, so this"
+
+  # One-command flow: a key was supplied, so hand straight off to
+  # `talyx quickstart` (activate + scan + recommend, and enforce too when
+  # --enforce was passed). Run the just-installed binary by full path so it
+  # works in this same shell regardless of PATH.
+  if [ -n "$LICENSE_KEY" ]; then
+    say "What you have now: talyx + talyx-shim installed."
+    say ""
+    if [ "$ENFORCE" = "1" ]; then
+      say "Activating your license and turning on protection…"
+      say ""
+      "$INSTALL_DIR/talyx" quickstart "$LICENSE_KEY"
+    else
+      say "Activating your license…"
+      say ""
+      "$INSTALL_DIR/talyx" quickstart "$LICENSE_KEY" --no-enforce
+    fi
+    return
+  fi
+
+  say "What you have now:"
+  say "  - talyx + talyx-shim installed (binaries only; nothing on your"
+  say "    machine has been scanned, changed, or enforced yet)"
+  say "  - scanning and setup are FREE; turning on enforcement (init) needs a license"
+  say ""
+  say "Fastest path — one command does everything (activate + protect):"
+  say "  $INSTALL_DIR/talyx quickstart <YOUR-LICENSE-KEY>   # from your purchase email"
+  say ""
+  say "Or step by step (PATH changes only take effect in a NEW shell, so this"
   say "session still needs the full path):"
+  say "  $INSTALL_DIR/talyx verify                        # confirm this install is healthy"
+  say "  $INSTALL_DIR/talyx setup --project .             # guided first run — tells you exactly what to do next"
   say "  $INSTALL_DIR/talyx activate <YOUR-LICENSE-KEY>   # from your purchase email"
-  say "  $INSTALL_DIR/talyx scan --project .              # free, read-only, no license needed"
-  say "  $INSTALL_DIR/talyx init --project .              # after activating, turns on enforcement"
+  say "  $INSTALL_DIR/talyx init --project .              # turns on enforcement (reversible: talyx uninstall)"
 }
 
 detect_profile() {

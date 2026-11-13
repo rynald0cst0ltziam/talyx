@@ -28,19 +28,28 @@ pub fn resolve_store(store_override: Option<PathBuf>) -> DecisionStore {
 }
 
 /// Writes a scan result into the store, preserving a prior manual approval
-/// ONLY if this artifact's score and decision are unchanged from what's
-/// cached. This is a safety net independent of `check_drift` below — it
-/// also catches score changes that aren't capability-driven (e.g. a
-/// reputation-discount change from a future trust-graph sync): "the thing
-/// I approved" should mean exactly that thing, not "whatever this
-/// artifact_id points to now."
+/// ONLY if the artifact is unchanged from what was approved — same score,
+/// same decision, same content hash, AND same launch command. This is a
+/// safety net independent of `check_drift` below. It catches score changes
+/// that aren't capability-driven (e.g. a reputation-discount change from a
+/// future trust-graph sync) and, per TASKS.md 2.3's guarantee that an
+/// approved artifact cannot silently change after approval, it drops the
+/// approval the moment the bytes or the launch command move — matching the
+/// promise `talyx allow` prints ("allowed to run until it changes"). A
+/// dropped approval forces the next run back through review.
 fn upsert_preserving_approval(store: &DecisionStore, mut record: DecisionRecord) -> io::Result<()> {
     if let Some(existing) = store.get(&record.artifact_id) {
         if existing.manually_approved
             && existing.total_score == record.total_score
             && existing.decision == record.decision
+            && existing.content_hash == record.content_hash
+            && existing.approved_launch == record.approved_launch
         {
             record.manually_approved = true;
+            // Carry the audit trail (who/when/why/scope) forward too — a
+            // re-scan that preserves the approval must preserve the story
+            // behind it, not silently blank it (TASKS.md 2.2).
+            record.approval = existing.approval.clone();
         }
     }
     store.upsert(record)
@@ -64,6 +73,32 @@ fn check_drift(store: &DecisionStore, s: &ScannedArtifact) -> (Decision, Option<
     let Some(previous) = store.get(&s.artifact.id) else {
         return (baseline_decision, None); // first sighting — nothing to compare
     };
+
+    // Launch-command drift (TASKS.md 2.3), checked independently of the
+    // content hash: a config edit can keep the same artifact id but change
+    // the actual command/args the shim would run (2026-09-15 review,
+    // finding C2 — PoC'd live). The shim already refuses a launch whose
+    // argv doesn't match the approved one verbatim; catching it here too
+    // means a re-scan/init forces a fresh human review rather than leaving
+    // a stored "approved" record the shim will then silently refuse to run.
+    if let (Some(prev_launch), Some(new_launch)) = (&previous.approved_launch, &s.launch) {
+        if prev_launch.command != new_launch.command || prev_launch.args != new_launch.args {
+            let reason = format!(
+                "LAUNCH COMMAND CHANGED since the last scan: approved `{} {}`, config now runs `{} {}` -- re-review required.",
+                prev_launch.command,
+                prev_launch.args.join(" "),
+                new_launch.command,
+                new_launch.args.join(" "),
+            );
+            let decision = if matches!(baseline_decision, Decision::Allow | Decision::AllowLog) {
+                Decision::Ask
+            } else {
+                baseline_decision
+            };
+            return (decision, Some(reason));
+        }
+    }
+
     let (Some(prev_hash), Some(new_hash)) = (&previous.content_hash, &s.artifact.content_hash)
     else {
         return (baseline_decision, None); // one side couldn't be hashed
@@ -329,6 +364,10 @@ fn record_for(store: &DecisionStore, s: &ScannedArtifact, level: ProtectionLevel
         quarantine_original_path,
         quarantine_current_path: None, // a fresh scan means it's at its original location
         approved_launch,
+        // A fresh scan never carries an approval — if this artifact was
+        // manually approved before, `upsert_preserving_approval` restores
+        // both the flag and this metadata from the prior record.
+        approval: None,
     }
 }
 
@@ -1715,7 +1754,7 @@ pub fn run_init(
     let store = resolve_store(store_override);
 
     if scanned.is_empty() {
-        println!("No agent artifacts found under {}.", project_root.display());
+        println!("No agent artifacts found under {}.", display_path(&project_root));
         return;
     }
 
@@ -1726,6 +1765,20 @@ pub fn run_init(
                 "talyx: failed to write decision cache for '{}': {e}",
                 sanitize_for_display(&s.artifact.name)
             );
+        }
+    }
+
+    // Record a posture snapshot for change tracking (TASKS.md 3.4). Built
+    // AFTER the upserts so it reflects the decisions (and preserved
+    // approvals) just written. Best-effort: a history-write failure must
+    // never fail an init that otherwise succeeded.
+    {
+        let scope = display_path(&project_root);
+        let rows = crate::report::rows_from_scan(&scanned, &store);
+        let snapshot =
+            crate::history::Snapshot::from_rows(scope, DecisionRecord::now_unix(), &rows);
+        if let Err(e) = crate::history::record(&snapshot) {
+            eprintln!("talyx: (note) could not record posture history: {e}");
         }
     }
 
@@ -1758,6 +1811,22 @@ pub fn run_init(
     }
 
     println!("Talyx init\n");
+
+    // Scope decision, stated up front (TASKS.md 2.1). The user must know
+    // BEFORE any rewrite exactly what this run will touch and what it will
+    // leave alone — modifying a user-level config affects every project on
+    // the machine, so it never happens as a side effect of pointing init at
+    // one project. The post-run count below quantifies what that meant.
+    if include_user_config {
+        println!("Scope: this project AND user-level configs (--include-user-config).");
+        println!("  User-level configs (e.g. ~/.claude.json) affect every project on this machine.");
+    } else {
+        println!("Scope: this project only — {}", display_path(&project_root));
+        println!("  User-level configs (e.g. ~/.claude.json) are scanned and reported, never modified here.");
+        println!("  Re-run with --include-user-config to also enforce those.");
+    }
+    println!();
+
     println!(
         "{} artifact(s) scanned and cached (protection level: {level_name}).",
         scanned.len(),
@@ -1768,7 +1837,7 @@ pub fn run_init(
     if skipped_outside_project > 0 {
         println!(
             "{skipped_outside_project} rewritable artifact(s) found outside {} (e.g. a user-level config) — NOT rewritten.",
-            project_root.display()
+            display_path(&project_root)
         );
         println!("Re-run with --include-user-config to also protect those.");
     }
@@ -1799,7 +1868,7 @@ pub fn run_init(
         println!(
             "{} flagged skill(s) / instruction file(s) found outside {} (e.g. your own ~/.claude/CLAUDE.md) — NOT quarantined.",
             q.skipped_outside_project,
-            project_root.display()
+            display_path(&project_root)
         );
         println!("Re-run with --include-user-config to also quarantine those.");
     }
@@ -1872,10 +1941,71 @@ pub fn run_init(
     print_risk_summary(&scanned);
 }
 
+/// TASKS.md 1.4 — the "what happened" summary printed after every `init`.
+/// A new user has to be able to read this and know, without interpreting
+/// anything: what was allowed, what was stopped, and what (if anything)
+/// they still have to look at by hand. So it reports the full decision
+/// tally (not just critical/blocked), names the artifacts that need a human
+/// decision, and ends with the two commands that act on them plus the one
+/// that undoes everything.
 fn print_risk_summary(scanned: &[ScannedArtifact]) {
+    let mut allowed = 0usize;
+    let mut review = 0usize;
+    let mut blocked = 0usize;
+    let mut quarantined = 0usize;
+    for s in scanned {
+        match s.decision {
+            Decision::Allow | Decision::AllowLog => allowed += 1,
+            Decision::Ask => review += 1,
+            Decision::Block => blocked += 1,
+            Decision::Quarantine => quarantined += 1,
+        }
+    }
     let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
-    let blocked = scanned.iter().filter(|s| s.decision == Decision::Block).count();
-    println!("\n{critical} critical, {blocked} blocked.");
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+
+    println!("\nResult:");
+    println!("  {allowed} allowed, {review} need review, {blocked} blocked, {quarantined} quarantined.");
+    println!("  Risk bands: {critical} critical, {high} high.");
+
+    // The artifacts a human still has to decide on — ASK that nobody has
+    // approved, plus anything blocked/quarantined they may want to inspect
+    // or override. Named with the exact id `talyx why`/`allow` take, so the
+    // next step is copy-paste, not guesswork. Capped so a pathological
+    // project can't flood the terminal.
+    let needs_review: Vec<&ScannedArtifact> = scanned
+        .iter()
+        .filter(|s| matches!(s.decision, Decision::Ask | Decision::Block | Decision::Quarantine))
+        .collect();
+    if !needs_review.is_empty() {
+        const MAX_LISTED: usize = 8;
+        println!("\nTo review:");
+        for s in needs_review.iter().take(MAX_LISTED) {
+            println!(
+                "  [{decision}] {name}  ({id})",
+                decision = decision_label(s.decision),
+                name = sanitize_for_display(&s.artifact.name),
+                id = sanitize_for_display(&s.artifact.id),
+            );
+        }
+        if needs_review.len() > MAX_LISTED {
+            println!("  ... and {} more (see `talyx scan`).", needs_review.len() - MAX_LISTED);
+        }
+        println!("\n  `talyx why <id>`   explains the decision.");
+        println!("  `talyx allow <id>` approves and restores one.");
+    }
+
+    println!("\n`talyx status` shows current protection; `talyx uninstall` reverts everything.");
+}
+
+/// Short, stable word for a decision in user-facing summary lines.
+fn decision_label(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Allow | Decision::AllowLog => "allowed",
+        Decision::Ask => "review",
+        Decision::Block => "blocked",
+        Decision::Quarantine => "quarantined",
+    }
 }
 
 fn level_name(level: ProtectionLevel) -> &'static str {
@@ -2024,7 +2154,7 @@ pub fn run_uninstall(
 
     println!();
     if total_unwrapped == 0 && restored == 0 {
-        println!("Nothing to undo — no Talyx-modified config found under {}.", project_root.display());
+        println!("Nothing to undo — no Talyx-modified config found under {}.", display_path(&project_root));
         if !include_user_config {
             println!("If you ran `init --include-user-config`, re-run this with the same flag.");
         }
@@ -2138,11 +2268,67 @@ fn unwrap_config_file(config_path: &Path) -> io::Result<usize> {
     Ok(unwrapped)
 }
 
-pub fn run_allow(artifact_id: &str, store_override: Option<PathBuf>) {
+/// Best-effort name for the audit trail — the OS username, or `"unknown"`
+/// when the environment doesn't expose one (e.g. a bare CI container). Not
+/// a security control: it records intent, it doesn't authenticate anyone.
+fn current_user() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// The on-disk location a repo-scoped approval is anchored to — the
+/// directory holding the artifact's config file, or the quarantined
+/// skill/instruction file's original directory. `None` when the record
+/// carries neither (e.g. a registry-resolved server with no local path).
+fn approval_repo_root(record: &DecisionRecord) -> Option<PathBuf> {
+    record
+        .config_path
+        .as_ref()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .or_else(|| {
+            record
+                .quarantine_original_path
+                .as_ref()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
+        })
+}
+
+pub fn run_allow(
+    artifact_id: &str,
+    store_override: Option<PathBuf>,
+    reason: Option<String>,
+    global: bool,
+) {
     let store = resolve_store(store_override);
-    match store.approve(artifact_id) {
+
+    // Scope the approval. `--global` is an explicit statement that this
+    // artifact is trusted everywhere; otherwise it's trusted where it
+    // lives, and we record that location (from the existing record) so a
+    // later audit shows which project granted it (TASKS.md 2.2).
+    let scope = if global {
+        talyx_store::ApprovalScope::Global
+    } else {
+        let root = store.get(artifact_id).as_ref().and_then(approval_repo_root);
+        talyx_store::ApprovalScope::Repo { root }
+    };
+    let approval = talyx_store::Approval {
+        approved_at_unix: talyx_store::DecisionRecord::now_unix(),
+        source: current_user(),
+        reason,
+        scope,
+    };
+    let scope_label = approval.scope.label();
+    let reason_echo = approval.reason.clone();
+
+    match store.approve_with(artifact_id, approval) {
         Ok(true) => {
-            println!("Approved '{artifact_id}'.");
+            println!("Approved '{artifact_id}' ({scope_label}).");
+            if let Some(r) = &reason_echo {
+                println!("  Reason: {}", sanitize_for_display(r));
+            }
             println!("It will be allowed to run until it changes (a different score/decision on the next scan resets this).");
             restore_remote_entry_if_needed(&store, artifact_id);
             restore_quarantined_artifact_if_needed(&store, artifact_id);
@@ -2459,6 +2645,39 @@ fn restore_remote_entry_toml(
     Ok(true)
 }
 
+/// Path string for display, with Windows' `\\?\` verbatim prefix stripped.
+/// `Path::canonicalize` returns verbatim paths on Windows (e.g.
+/// `\\?\C:\Users\...`), which are correct but confusing in user-facing
+/// output; this only affects what's printed, never a path used on disk.
+pub(crate) fn display_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
+}
+
+/// Formats a unix timestamp as `YYYY-MM-DD HH:MM:SS UTC` with no external
+/// date dependency (Howard Hinnant's days-from-civil algorithm). Used for
+/// the approval audit trail and the sessions report; a readable UTC instant
+/// is far more useful than a raw epoch count.
+pub(crate) fn format_unix(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+
+    // days since 1970-01-01 -> civil (year, month, day), UTC.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}:{ss:02} UTC")
+}
+
 pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     let store = resolve_store(store_override);
     let Some(record) = store.get(artifact_id) else {
@@ -2480,6 +2699,18 @@ pub fn run_why(artifact_id: &str, store_override: Option<PathBuf>) {
     println!();
     for r in &record.reasons {
         println!("  {r}");
+    }
+
+    // The approval audit trail, when this artifact was manually allowed
+    // (TASKS.md 2.2) — who, when, why, and at what scope.
+    if let Some(approval) = &record.approval {
+        println!("\nApproved:");
+        println!("  when:  {}", format_unix(approval.approved_at_unix));
+        println!("  by:    {}", sanitize_for_display(&approval.source));
+        println!("  scope: {}", approval.scope.label());
+        if let Some(reason) = &approval.reason {
+            println!("  reason: {}", sanitize_for_display(reason));
+        }
     }
 
     // Anything the live proxy (`init --live`) has caught for this artifact.
@@ -2507,6 +2738,100 @@ mod tests {
     use talyx_adapters::{ConfigSource, LaunchCommand};
     use talyx_core::{Artifact, ArtifactKind, ArtifactSource, PublisherIdentity, ScoreBreakdown};
     use std::collections::BTreeSet;
+
+    #[test]
+    fn decision_label_covers_every_decision() {
+        // Locks the words the post-init summary ("To review" / "Result")
+        // prints for each decision. Allow and AllowLog both read "allowed";
+        // the three that need a human read as themselves.
+        assert_eq!(decision_label(Decision::Allow), "allowed");
+        assert_eq!(decision_label(Decision::AllowLog), "allowed");
+        assert_eq!(decision_label(Decision::Ask), "review");
+        assert_eq!(decision_label(Decision::Block), "blocked");
+        assert_eq!(decision_label(Decision::Quarantine), "quarantined");
+    }
+
+    #[test]
+    fn format_unix_matches_known_instants() {
+        assert_eq!(format_unix(0), "1970-01-01 00:00:00 UTC");
+        // 1_700_000_000 = 2023-11-14 22:13:20 UTC (independently verifiable).
+        assert_eq!(format_unix(1_700_000_000), "2023-11-14 22:13:20 UTC");
+    }
+
+    #[test]
+    fn display_path_strips_windows_verbatim_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\C:\Users\x")), r"C:\Users\x");
+        assert_eq!(display_path(Path::new("/home/x")), "/home/x");
+    }
+
+    #[test]
+    fn launch_command_drift_forces_re_review_and_drops_approval() {
+        let dir = unique_temp_dir("launch-drift");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = temp_store(&dir);
+        let cfg = dir.join("config.toml");
+
+        // v1: approved exactly as discovered.
+        let v1 = synthetic_scanned_artifact("srv", cfg.clone(), "node", vec!["server.js".to_string()]);
+        let id = v1.artifact.id.clone();
+        let r1 = record_for(&store, &v1, ProtectionLevel::Balanced);
+        upsert_preserving_approval(&store, r1).unwrap();
+        assert!(store
+            .approve_with(
+                &id,
+                talyx_store::Approval {
+                    approved_at_unix: 0,
+                    source: "test".to_string(),
+                    reason: None,
+                    scope: talyx_store::ApprovalScope::Global,
+                }
+            )
+            .unwrap());
+
+        // v2: same artifact id, different argv — the C2 "swapped command"
+        // case. Drift must escalate to review and name the change.
+        let v2 = synthetic_scanned_artifact("srv", cfg.clone(), "node", vec!["evil.js".to_string()]);
+        let r2 = record_for(&store, &v2, ProtectionLevel::Balanced);
+        assert_eq!(r2.decision, Decision::Ask, "launch drift must escalate to re-review");
+        assert!(
+            r2.reasons.iter().any(|r| r.contains("LAUNCH COMMAND CHANGED")),
+            "drift reason must name the launch-command change"
+        );
+
+        upsert_preserving_approval(&store, r2).unwrap();
+        assert!(
+            !store.get(&id).unwrap().manually_approved,
+            "a launch-command change must drop the prior approval"
+        );
+    }
+
+    #[test]
+    fn content_hash_change_drops_a_prior_approval() {
+        let dir = unique_temp_dir("hash-drift");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = temp_store(&dir);
+        let cfg = dir.join("config.toml");
+
+        // Approve an ASK artifact at one set of bytes.
+        let mut v1 = synthetic_scanned_artifact("srv2", cfg.clone(), "node", vec!["a.js".to_string()]);
+        v1.artifact.content_hash = Some("hash-v1".to_string());
+        v1.decision = Decision::Ask;
+        let id = v1.artifact.id.clone();
+        upsert_preserving_approval(&store, record_for(&store, &v1, ProtectionLevel::Balanced)).unwrap();
+        store.approve(&id).unwrap();
+        assert!(store.get(&id).unwrap().manually_approved);
+
+        // Same id, same decision/score/launch, but the content changed.
+        // The approval was for those bytes, so it must not carry over.
+        let mut v2 = synthetic_scanned_artifact("srv2", cfg.clone(), "node", vec!["a.js".to_string()]);
+        v2.artifact.content_hash = Some("hash-v2".to_string());
+        v2.decision = Decision::Ask;
+        upsert_preserving_approval(&store, record_for(&store, &v2, ProtectionLevel::Balanced)).unwrap();
+        assert!(
+            !store.get(&id).unwrap().manually_approved,
+            "a content-hash change must drop the prior approval"
+        );
+    }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -3849,6 +4174,7 @@ mod tests {
                 quarantine_original_path: None,
                 quarantine_current_path: None,
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
 
@@ -4219,6 +4545,7 @@ mod tests {
                 quarantine_original_path: Some(skills_dir.join("evil-skill")),
                 quarantine_current_path: Some(quarantine_dir.join("evil-skill")),
                 approved_launch: None,
+                approval: None,
             })
             .unwrap();
 

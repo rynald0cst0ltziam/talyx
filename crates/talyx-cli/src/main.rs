@@ -3,6 +3,11 @@
 //! `talyx scan`   — discover, statically scan, and score every artifact
 //!                        visible to a supported agent. Read-only.
 //! `talyx status` — short protection summary. Read-only.
+//! `talyx quickstart <key>` — one command: activate + scan + enforce.
+//! `talyx setup`  — guided first run: scan + recommend a preset + next step.
+//! `talyx verify` — installation health check (binaries, home, license).
+//! `talyx sessions` — summarize live-proxy findings (TASKS 2.4). Read-only.
+//! `talyx report` — posture report (text/json/csv/md), TASKS 3.1–3.3. Read-only.
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
 //!                        configs to route through the enforcement shim
 //!                        (BUILD_PLAN.md §5a). The only command that writes
@@ -16,13 +21,15 @@
 //! license — see license.rs for the full rationale, including why the
 //! enforcement shim itself is deliberately never gated.
 
+mod history;
 mod init;
 mod license;
 mod pipeline;
+mod report;
 mod sarif;
 mod sessions;
 
-use talyx_core::{Decision, ProtectionLevel, RiskBand};
+use talyx_core::{Decision, Preset, ProtectionLevel, RiskBand};
 use talyx_risk::RiskEngine;
 use clap::{Parser, Subcommand, ValueEnum};
 use pipeline::{collect, ScannedArtifact};
@@ -46,9 +53,14 @@ enum Command {
         /// Project root to scan (in addition to user-level/global config).
         #[arg(long, default_value = ".")]
         project: PathBuf,
-        /// Onboarding preset — see BUILD_PLAN.md §6.
-        #[arg(long, value_enum, default_value = "balanced")]
-        level: ProtectionLevelArg,
+        /// Policy strictness. When omitted it follows --preset; set it to
+        /// override just the strictness a preset implies.
+        #[arg(long, value_enum)]
+        level: Option<ProtectionLevelArg>,
+        /// Protection preset: personal | balanced | strict | enterprise.
+        /// Bundles strictness + live proxy + scan depth. Defaults to balanced.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
         /// Fetch and statically scan the actual code behind a
         /// registry-resolved MCP server (`npx <pkg>`, `uvx <pkg>`) instead
         /// of scoring it on declared evidence only. Off by default: this
@@ -78,14 +90,51 @@ enum Command {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+    /// Guided first run: detect agents, scan read-only, recommend a preset,
+    /// and print the exact next command to protect this project. Writes
+    /// nothing and needs no license.
+    Setup {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+    /// One command from install to protected: activate a license, scan, and
+    /// turn on protection at the recommended preset. The fast path a buyer
+    /// runs after installing (the installer calls this when given a key).
+    /// Enforces by default; pass --no-enforce to stop at the recommendation.
+    Quickstart {
+        /// The license key from your purchase email.
+        key: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        /// Use a specific preset instead of the one recommended from the scan.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
+        /// Activate and recommend, but do not rewrite any config.
+        #[arg(long)]
+        no_enforce: bool,
+        /// With enforcement, also protect user-level configs (see `init`).
+        #[arg(long)]
+        include_user_config: bool,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// Check that Talyx is installed correctly: binaries in place, home
+    /// directory writable, license state, and whether enforcement is wired
+    /// up. Read-only, needs no license. Exits non-zero if anything needs
+    /// attention, so an installer or CI step can gate on it.
+    Verify,
     /// Scan, cache decisions, and route MCP servers through the enforcement
     /// shim — the only command that modifies an agent's config file(s)
     /// (with a one-time backup before the first rewrite).
     Init {
         #[arg(long, default_value = ".")]
         project: PathBuf,
-        #[arg(long, value_enum, default_value = "balanced")]
-        level: ProtectionLevelArg,
+        /// Policy strictness. When omitted it follows --preset.
+        #[arg(long, value_enum)]
+        level: Option<ProtectionLevelArg>,
+        /// Protection preset: personal | balanced | strict | enterprise.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
         /// Override the decision store location (defaults to
         /// ~/.talyx/decisions.json, or $TALYX_STORE if set).
         #[arg(long)]
@@ -137,6 +186,15 @@ enum Command {
         artifact_id: String,
         #[arg(long)]
         store: Option<PathBuf>,
+        /// Why you're approving it — recorded in the decision cache as an
+        /// audit trail (shown by `talyx why`). Optional but recommended.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Approve this artifact everywhere, not just where it lives now.
+        /// Default is repo-scoped: the approval is recorded against the
+        /// project the artifact was found in.
+        #[arg(long)]
+        global: bool,
     },
     /// Show the full reasoning behind a cached decision.
     Why {
@@ -153,6 +211,35 @@ enum Command {
     License {
         #[command(subcommand)]
         action: LicenseAction,
+    },
+    /// Generate a security posture report for this project (or machine):
+    /// posture counts, enforcement, top risk, and live-proxy findings.
+    /// Read-only; exports to text, JSON, CSV, or Markdown.
+    Report {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        /// Output format: text (default), json, csv (full inventory), or md.
+        #[arg(long, value_enum, default_value = "text")]
+        format: ReportFormatArg,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Also append this run's posture to the local history, so the next
+        /// report can show "what changed since". `init` records history
+        /// automatically; use this to checkpoint without enforcing.
+        #[arg(long)]
+        record: bool,
+    },
+    /// Summarize what the live MCP proxy (`talyx init --live`) has caught
+    /// across recent sessions: totals by action, capability, and artifact,
+    /// plus the most recent findings. `--json` emits the same data as a
+    /// durable machine-readable record.
+    Sessions {
+        /// How many of the most recent session log files to read.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Emit the summary and findings as JSON instead of a table.
+        #[arg(long)]
+        json: bool,
     },
     /// Work with the live-proxy guardrails file (see `talyx init --live`).
     Guardrails {
@@ -231,6 +318,14 @@ enum OutputFormatArg {
     Sarif,
 }
 
+#[derive(ValueEnum, Clone, Copy, PartialEq)]
+enum ReportFormatArg {
+    Text,
+    Json,
+    Csv,
+    Md,
+}
+
 impl From<ProtectionLevelArg> for ProtectionLevel {
     fn from(v: ProtectionLevelArg) -> Self {
         match v {
@@ -241,21 +336,64 @@ impl From<ProtectionLevelArg> for ProtectionLevel {
     }
 }
 
+#[derive(ValueEnum, Clone, Copy)]
+enum PresetArg {
+    Personal,
+    Balanced,
+    Strict,
+    Enterprise,
+}
+
+impl From<PresetArg> for Preset {
+    fn from(v: PresetArg) -> Self {
+        match v {
+            PresetArg::Personal => Preset::Personal,
+            PresetArg::Balanced => Preset::Balanced,
+            PresetArg::Strict => Preset::Strict,
+            PresetArg::Enterprise => Preset::Enterprise,
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Scan {
             project,
             level,
+            preset,
             fetch_registry,
             format,
             sarif_file,
             exit_code,
-        } => run_scan(&project, level.into(), fetch_registry, format, sarif_file, exit_code),
+        } => {
+            let preset: Preset = preset.map(Into::into).unwrap_or_default();
+            let level = level.map(Into::into).unwrap_or_else(|| preset.protection_level());
+            let fetch_registry = fetch_registry || preset.deep_registry_scan();
+            run_scan(&project, level, fetch_registry, format, sarif_file, exit_code)
+        }
         Command::Status { project } => run_status(&project),
+        Command::Setup { project } => run_setup(&project),
+        Command::Quickstart {
+            key,
+            project,
+            preset,
+            no_enforce,
+            include_user_config,
+            store,
+        } => std::process::exit(run_quickstart(
+            &key,
+            &project,
+            preset,
+            !no_enforce,
+            include_user_config,
+            store,
+        )),
+        Command::Verify => std::process::exit(run_verify()),
         Command::Init {
             project,
             level,
+            preset,
             store,
             include_user_config,
             fetch_registry,
@@ -265,9 +403,13 @@ fn main() {
             if code != 0 {
                 std::process::exit(code);
             }
+            let preset: Preset = preset.map(Into::into).unwrap_or_default();
+            let level = level.map(Into::into).unwrap_or_else(|| preset.protection_level());
+            let live = live || preset.live_proxy();
+            let fetch_registry = fetch_registry || preset.deep_registry_scan();
             init::run_init(
                 &project,
-                level.into(),
+                level,
                 store,
                 include_user_config,
                 fetch_registry,
@@ -284,13 +426,25 @@ fn main() {
             include_user_config,
             purge,
         } => init::run_uninstall(&project, store, include_user_config, purge),
-        Command::Allow { artifact_id, store } => init::run_allow(&artifact_id, store),
+        Command::Allow {
+            artifact_id,
+            store,
+            reason,
+            global,
+        } => init::run_allow(&artifact_id, store, reason, global),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
         Command::Activate { key } => std::process::exit(license::run_activate(&key)),
         Command::License { action } => std::process::exit(match action {
             LicenseAction::Status => license::run_status(),
             LicenseAction::Deactivate => license::run_deactivate(),
         }),
+        Command::Report {
+            project,
+            format,
+            store,
+            record,
+        } => std::process::exit(run_report(&project, format, store, record)),
+        Command::Sessions { limit, json } => std::process::exit(run_sessions(limit, json)),
         Command::Guardrails { action } => std::process::exit(run_guardrails(action)),
         Command::Advisories { action } => std::process::exit(run_advisories(action)),
     }
@@ -664,6 +818,545 @@ fn print_recent_proxy_findings() {
             "  {} — {} on {} ({})",
             f.action, f.capability, f.method, f.artifact
         );
+    }
+}
+
+/// `talyx quickstart <KEY>` — the one-command path from install to
+/// protected. Activates the license, scans for agents, recommends a preset
+/// from what it finds, and (unless `--no-enforce`) runs `init` at that
+/// preset so the user ends at "protected" in a single command. The
+/// installer calls this when a key is passed to it, so a buyer can go from
+/// purchase to enforced in one paste.
+fn run_quickstart(
+    key: &str,
+    project: &Path,
+    preset_override: Option<PresetArg>,
+    enforce: bool,
+    include_user_config: bool,
+    store: Option<PathBuf>,
+) -> i32 {
+    println!("Talyx quickstart\n");
+
+    // Step 1 — activate. Everything past here needs a valid license, so a
+    // failure stops the whole flow before anything is changed on disk
+    // (run_activate prints the specific reason).
+    println!("[1/3] Activating license...");
+    let code = license::run_activate(key);
+    if code != 0 {
+        eprintln!(
+            "\ntalyx: activation failed — nothing was changed. Fix the key and re-run `talyx quickstart <KEY>`."
+        );
+        return code;
+    }
+
+    // Step 2 — scan read-only and recommend a preset from what's found.
+    println!("\n[2/3] Scanning for agents...");
+    let project_root = resolve_root(project);
+    let engine = RiskEngine::new();
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+
+    let mut agents: Vec<&str> = scanned.iter().map(|s| s.agent_name).collect();
+    agents.sort_unstable();
+    agents.dedup();
+    let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+    let rewritable = scanned.iter().filter(|s| s.config_source.is_some()).count();
+    println!(
+        "      {} artifact(s) across {} agent(s) — {critical} critical, {high} high.",
+        scanned.len(),
+        agents.len()
+    );
+
+    // Recommend the stricter posture only when the scan found something that
+    // warrants it (same rule as `talyx setup`), unless the caller overrode it.
+    let preset: Preset = preset_override.map(Into::into).unwrap_or_else(|| {
+        if critical > 0 || high > 0 {
+            Preset::Strict
+        } else {
+            Preset::Balanced
+        }
+    });
+
+    if scanned.is_empty() || rewritable == 0 {
+        println!(
+            "\nNo rewritable agent configs found under {}. Nothing to enforce here — your license is active.",
+            init::display_path(&project_root)
+        );
+        println!("Re-run from a project that uses an agent, or `talyx scan` to re-check.");
+        return 0;
+    }
+
+    if !enforce {
+        println!(
+            "\nLicense active. Recommended preset: {preset} ({}).",
+            preset.description()
+        );
+        println!("Turn on protection when ready:");
+        println!("    talyx init --preset {preset}");
+        return 0;
+    }
+
+    // Step 3 — enforce at the chosen preset. `init` prints its own full,
+    // reversible summary of exactly what it changed.
+    println!("\n[3/3] Enabling protection ({preset})...\n");
+    let level = preset.protection_level();
+    let live = preset.live_proxy();
+    let fetch_registry = preset.deep_registry_scan();
+    init::run_init(&project_root, level, store, include_user_config, fetch_registry, live);
+    0
+}
+
+/// `talyx setup` — the guided first run. Detects agents, scans read-only,
+/// recommends a preset from what it finds, and prints the exact next
+/// command. Writes nothing and needs no license, so a brand-new user can
+/// run it immediately after install and know precisely what to do next.
+/// This is the single entry point the installer points a new user at.
+fn run_setup(project: &Path) {
+    let project_root = resolve_root(project);
+    let engine = RiskEngine::new();
+    // Discover at the default policy; `init`/`scan` recompute decisions at
+    // whatever preset the user actually chooses. Setup only needs the
+    // risk bands to recommend one, and never writes a decision.
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+
+    println!("Talyx setup\n");
+
+    let mut agents: Vec<&str> = scanned.iter().map(|s| s.agent_name).collect();
+    agents.sort_unstable();
+    agents.dedup();
+
+    if scanned.is_empty() {
+        println!(
+            "No supported AI coding agent or artifact found under {}.",
+            project_root.display()
+        );
+        println!("\nNext steps:");
+        println!("  - Run setup from a project that uses an agent:  talyx setup --project <path>");
+        println!("  - Or list what's visible machine-wide:          talyx status");
+        println!("\nNothing was changed. Talyx writes nothing until you run `talyx init`.");
+        return;
+    }
+
+    println!(
+        "Detected {} artifact(s) across {} agent(s):",
+        scanned.len(),
+        agents.len()
+    );
+    for a in &agents {
+        println!("  {a} \u{2713}");
+    }
+
+    let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+    let blocked = scanned
+        .iter()
+        .filter(|s| matches!(s.decision, Decision::Block | Decision::Quarantine))
+        .count();
+    let ask = scanned.iter().filter(|s| s.decision == Decision::Ask).count();
+    let rewritable = scanned.iter().filter(|s| s.config_source.is_some()).count();
+
+    println!("\nRisk: {critical} critical, {high} high.");
+    if blocked > 0 || ask > 0 {
+        println!(
+            "At the default preset: {blocked} would be blocked/quarantined, {ask} would need review."
+        );
+    }
+
+    // Recommend the stricter posture only when the scan actually found
+    // something that warrants it — otherwise the everyday default.
+    let recommended = if critical > 0 || high > 0 {
+        Preset::Strict
+    } else {
+        Preset::Balanced
+    };
+    println!(
+        "\nRecommended preset: {recommended}  ({})",
+        recommended.description()
+    );
+
+    // A missing/invalid license returns Err without a network call, so this
+    // stays fast for the brand-new (unlicensed) user setup is aimed at.
+    let licensed = license::require_licensed("init").is_ok();
+
+    println!("\nNext steps:");
+    if rewritable == 0 {
+        println!(
+            "  Nothing here needs enforcement (no rewritable MCP server configs in this project)."
+        );
+        println!(
+            "  Re-run `talyx scan` any time to re-evaluate. Talyx writes nothing until `talyx init`."
+        );
+        return;
+    }
+    if licensed {
+        println!("  License active. Turn on protection for this project:");
+        println!("      talyx init --preset {recommended}");
+        println!(
+            "\n  This rewrites this project's agent configs to route {rewritable} MCP server config(s)"
+        );
+        println!("  through the enforcement shim — reversible any time with `talyx uninstall`.");
+    } else {
+        println!("  1. Evaluate freely (read-only):   talyx scan --preset {recommended}");
+        println!("  2. Activate enforcement:          talyx activate <YOUR-LICENSE-KEY>");
+        println!("  3. Turn on protection:            talyx init --preset {recommended}");
+        println!(
+            "\n  (scan is free; init rewrites this project's agent configs to route {rewritable}"
+        );
+        println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
+    }
+    println!(
+        "\n  Scope: `init` only modifies this project's configs. Your user-level configs"
+    );
+    println!("  (e.g. ~/.claude.json) stay untouched unless you add --include-user-config.");
+}
+
+/// `talyx report` — build the canonical posture report (PRODUCT_MODEL §5,
+/// TASKS 3.1–3.3) from a fresh scan + the decision store + session
+/// findings, and render it to the requested format. Read-only; always
+/// exits 0 (a report, not a gate).
+fn run_report(
+    project: &Path,
+    format: ReportFormatArg,
+    store_override: Option<PathBuf>,
+    record: bool,
+) -> i32 {
+    let project_root = resolve_root(project);
+    let scope = init::display_path(&project_root);
+    let engine = RiskEngine::new();
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+    let store = init::resolve_store(store_override);
+    let report = report::Report::generate(scope.clone(), &scanned, &store, 20);
+
+    // "What changed since last scan" (TASKS 3.4): diff this run against the
+    // latest prior snapshot for the same scope, if any.
+    let current = history::Snapshot::from_rows(scope.clone(), report.generated_at_unix, &report.rows);
+    let activity = history::latest(&scope).map(|prev| history::diff(&prev, &current));
+
+    match format {
+        ReportFormatArg::Json => {
+            let mut obj = report.to_json();
+            if let (Some(d), Some(map)) = (&activity, obj.as_object_mut()) {
+                map.insert("activity".to_string(), diff_to_json(d));
+            }
+            match serde_json::to_string_pretty(&obj) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("talyx: failed to serialize report: {e}");
+                    return 1;
+                }
+            }
+        }
+        ReportFormatArg::Csv => print!("{}", report.to_csv()),
+        ReportFormatArg::Md => print!("{}", report.to_markdown()),
+        ReportFormatArg::Text => {
+            print_report_text(&report);
+            if let Some(d) = &activity {
+                print_activity_text(d);
+            }
+        }
+    }
+
+    // Opt-in history capture — keeps a plain `report` side-effect-free for
+    // CI piping while letting a user checkpoint on demand. `init` records
+    // automatically, so change tracking works without this flag too.
+    if record {
+        if let Err(e) = history::record(&current) {
+            eprintln!("talyx: (note) could not record posture history: {e}");
+        }
+    }
+    0
+}
+
+fn print_activity_text(d: &history::Diff) {
+    if d.is_empty() {
+        println!("\nNo changes since the last recorded scan.");
+        return;
+    }
+    println!("\nActivity since {}:", init::format_unix(d.since_unix));
+    let line = |label: &str, ids: &[String]| {
+        if !ids.is_empty() {
+            println!("  {label}: {}", ids.len());
+            for id in ids.iter().take(8) {
+                println!("      {}", sanitize_for_display(id));
+            }
+        }
+    };
+    line("newly flagged", &d.newly_flagged);
+    line("resolved", &d.resolved);
+    line("newly approved", &d.newly_approved);
+    line("added", &d.added);
+    line("removed", &d.removed);
+    if !d.score_increased.is_empty() {
+        println!("  risk increased: {}", d.score_increased.len());
+        for (id, old, new) in d.score_increased.iter().take(8) {
+            println!("      {} ({old} -> {new})", sanitize_for_display(id));
+        }
+    }
+}
+
+fn diff_to_json(d: &history::Diff) -> serde_json::Value {
+    serde_json::json!({
+        "since_unix": d.since_unix,
+        "newly_flagged": d.newly_flagged,
+        "resolved": d.resolved,
+        "newly_approved": d.newly_approved,
+        "added": d.added,
+        "removed": d.removed,
+        "score_increased": d.score_increased.iter().map(|(id, o, n)| serde_json::json!({
+            "id": id, "old_score": o, "new_score": n,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn print_report_text(report: &report::Report) {
+    let p = &report.posture;
+    println!("Talyx report — {}\n", report.scope);
+    println!("Generated: {}", init::format_unix(report.generated_at_unix));
+
+    println!("\nPosture ({} artifact(s)):", p.total);
+    println!("  allowed:     {}", p.allowed);
+    if p.logged > 0 {
+        println!("  logged:      {}", p.logged);
+    }
+    println!("  in review:   {}", p.in_review);
+    println!("  blocked:     {}", p.blocked);
+    println!("  quarantined: {}", p.quarantined);
+    println!("  approved:    {} (manual)", p.approved);
+    if let Some(ratio) = p.allow_block_ratio {
+        println!("  allow/block ratio: {ratio:.2}");
+    }
+
+    if !p.by_band.is_empty() {
+        let bands: Vec<String> = p.by_band.iter().map(|(b, n)| format!("{n} {b}")).collect();
+        println!("  risk bands: {}", bands.join(", "));
+    }
+
+    println!(
+        "\nEnforcement: {} rewritable artifact(s) across {} agent(s).",
+        report.enforcement.rewritable,
+        report.enforcement.by_agent.len()
+    );
+    for (agent, n) in &report.enforcement.by_agent {
+        println!("  {n:>4}  {agent}");
+    }
+
+    let top_caps = top_n(&p.top_capabilities, 8);
+    if !top_caps.is_empty() {
+        println!("\nTop attack classes (capabilities of flagged artifacts):");
+        for (cap, n) in top_caps {
+            println!("  {n:>4}  {}", sanitize_for_display(&cap));
+        }
+    }
+
+    if !report.top_risk.is_empty() {
+        println!("\nTop risk:");
+        for t in &report.top_risk {
+            println!(
+                "  [{}] {} (score {}) — {}",
+                t.band,
+                sanitize_for_display(&t.name),
+                t.score,
+                sanitize_for_display(&t.reason)
+            );
+        }
+    }
+
+    if report.session_findings.total > 0 {
+        println!(
+            "\nLive-proxy findings: {} (run `talyx sessions` for detail).",
+            report.session_findings.total
+        );
+    }
+}
+
+/// `talyx sessions` — aggregate the live proxy's findings (TASKS.md 2.4).
+/// Human-readable table by default; `--json` prints the same summary plus
+/// the raw findings as a durable machine-readable record. Always exits 0 —
+/// it's a report, not a gate.
+fn run_sessions(limit: usize, json: bool) -> i32 {
+    let findings = sessions::recent(limit);
+    let summary = sessions::summarize(&findings);
+
+    if json {
+        let obj = serde_json::json!({
+            "total": summary.total,
+            "by_action": summary.by_action,
+            "by_capability": summary.by_capability,
+            "by_artifact": summary.by_artifact,
+            "newest_ts_ms": summary.newest_ts_ms,
+            "oldest_ts_ms": summary.oldest_ts_ms,
+            "findings": findings.iter().map(|f| serde_json::json!({
+                "ts_ms": f.ts_ms,
+                "artifact": f.artifact,
+                "method": f.method,
+                "action": f.action,
+                "capability": f.capability,
+                "evidence": f.evidence,
+            })).collect::<Vec<_>>(),
+        });
+        match serde_json::to_string_pretty(&obj) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("talyx: failed to serialize sessions summary: {e}");
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    println!("Talyx — live proxy sessions\n");
+    if summary.total == 0 {
+        println!("No live-proxy findings recorded yet.");
+        println!("(Findings appear here after running an agent with `talyx init --live`.)");
+        return 0;
+    }
+
+    println!(
+        "{} finding(s) from {} through {}.",
+        summary.total,
+        init::format_unix(summary.oldest_ts_ms / 1000),
+        init::format_unix(summary.newest_ts_ms / 1000),
+    );
+
+    println!("\nBy action:");
+    for (action, n) in &summary.by_action {
+        println!("  {n:>4}  {action}");
+    }
+
+    let top_caps = top_n(&summary.by_capability, 8);
+    if !top_caps.is_empty() {
+        println!("\nTop capabilities:");
+        for (cap, n) in top_caps {
+            println!("  {n:>4}  {}", sanitize_for_display(&cap));
+        }
+    }
+
+    let top_artifacts = top_n(&summary.by_artifact, 8);
+    if !top_artifacts.is_empty() {
+        println!("\nMost active artifacts:");
+        for (artifact, n) in top_artifacts {
+            println!("  {n:>4}  {}", sanitize_for_display(&artifact));
+        }
+    }
+
+    println!("\nMost recent:");
+    for f in findings.iter().take(10) {
+        println!(
+            "  {} — {} {} on {} ({})",
+            init::format_unix(f.ts_ms / 1000),
+            f.action,
+            sanitize_for_display(&f.capability),
+            sanitize_for_display(&f.method),
+            sanitize_for_display(&f.artifact),
+        );
+    }
+    0
+}
+
+/// The `n` highest-count entries of a count map, most frequent first (ties
+/// broken by key for a stable, deterministic order).
+fn top_n(counts: &std::collections::BTreeMap<String, usize>, n: usize) -> Vec<(String, usize)> {
+    let mut entries: Vec<(String, usize)> = counts.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    entries.truncate(n);
+    entries
+}
+
+/// `talyx verify` — installation health check (TASKS.md 1.1's "verify
+/// installation" command). Confirms the two binaries are where they need to
+/// be, that ~/.talyx is writable, the license state, and whether enforcement
+/// has been configured yet. One line per check, then a verdict. Returns 0
+/// when everything essential is in place, 1 when something needs attention —
+/// a missing license and an empty decision cache are reported but do NOT
+/// fail the check, because a fresh install legitimately has neither.
+fn run_verify() -> i32 {
+    use std::env::consts::EXE_SUFFIX;
+    println!("Talyx — installation check\n");
+    let mut attention = 0usize;
+
+    // 1. The talyx binary itself — we're running it, so report where from.
+    match std::env::current_exe() {
+        Ok(exe) => println!("  [ok]   talyx binary: {}", exe.display()),
+        Err(e) => {
+            println!("  [!!]   could not locate the running talyx binary: {e}");
+            attention += 1;
+        }
+    }
+
+    // 2. talyx-shim — the enforcement gate. `init` can only route local MCP
+    //    servers/hooks through it if it exists. Checked both next to the
+    //    running binary and at the stable ~/.talyx/bin location the installer
+    //    and `init` copy it to (see init.rs `stable_shim_path`).
+    let shim_name = format!("talyx-shim{EXE_SUFFIX}");
+    let sibling_shim = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(&shim_name)))
+        .filter(|p| p.is_file());
+    let stable_shim = dirs::home_dir()
+        .map(|h| h.join(".talyx").join("bin").join(&shim_name))
+        .filter(|p| p.is_file());
+    match sibling_shim.or(stable_shim) {
+        Some(p) => println!("  [ok]   talyx-shim: {}", p.display()),
+        None => {
+            println!("  [!!]   talyx-shim not found next to talyx or in ~/.talyx/bin — `talyx init` can't wrap local MCP servers until it is.");
+            attention += 1;
+        }
+    }
+
+    // 3. ~/.talyx — home of the decision cache, license, and stable shim.
+    //    Must be writable for anything beyond read-only scanning.
+    match dirs::home_dir() {
+        Some(home) => {
+            let talyx_home = home.join(".talyx");
+            let probe = talyx_home.join(".talyx-write-probe");
+            match std::fs::create_dir_all(&talyx_home)
+                .and_then(|_| std::fs::write(&probe, b"ok"))
+                .and_then(|_| std::fs::remove_file(&probe))
+            {
+                Ok(()) => println!("  [ok]   home directory writable: {}", talyx_home.display()),
+                Err(e) => {
+                    println!("  [!!]   {} is not writable: {e}", talyx_home.display());
+                    attention += 1;
+                }
+            }
+        }
+        None => {
+            println!("  [!!]   could not determine your home directory.");
+            attention += 1;
+        }
+    }
+
+    // 4. License — not needed to scan, needed to init. Report, never fail
+    //    verify on its absence: a brand-new install has no license yet.
+    match license::require_licensed("init") {
+        Ok(()) => println!("  [ok]   license active — `talyx init` (enforcement) is unlocked."),
+        Err(license::LicenseError::NotActivated) => {
+            println!("  [--]   no license yet — `talyx scan`/`setup` are free; run `talyx activate <KEY>` to enable `talyx init`.");
+        }
+        Err(e) => {
+            println!("  [!!]   license problem: {e}");
+            attention += 1;
+        }
+    }
+
+    // 5. Decision cache — present once `init` has run at least once. Absent
+    //    is normal on a fresh install, so it's informational, not a failure.
+    match dirs::home_dir().map(|h| h.join(".talyx").join("decisions.json")) {
+        Some(p) if p.is_file() => println!("  [ok]   decision cache present: {}", p.display()),
+        Some(p) => println!(
+            "  [--]   no decisions cached yet ({}) — run `talyx setup` to get started.",
+            p.display()
+        ),
+        None => {}
+    }
+
+    println!();
+    if attention == 0 {
+        println!("All checks passed. Talyx is installed correctly.");
+        0
+    } else {
+        println!("{attention} item(s) need attention (see [!!] above).");
+        1
     }
 }
 

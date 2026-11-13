@@ -8,8 +8,11 @@ const sections = [
   { id: 'quickstart', label: 'Quickstart' },
   { id: 'install', label: 'Install' },
   { id: 'activate', label: 'Activate a license' },
+  { id: 'presets', label: 'Protection presets' },
   { id: 'commands', label: 'Commands' },
+  { id: 'reports', label: 'Reports & history' },
   { id: 'enforcement', label: 'How enforcement works' },
+  { id: 'advisories', label: 'The advisory feed' },
   { id: 'live-proxy', label: 'Live traffic inspection' },
   { id: 'ci', label: 'Use in CI' },
   { id: 'offline', label: 'Offline & air-gapped' },
@@ -22,24 +25,42 @@ const sections = [
 <Base title="Documentation" description="Install, activate and run Talyx — quickstart, command reference, CI usage.">
   <Prose
     title="Documentation"
-    lead="Install the binary, activate your license, scan. Everything runs on your machine."
+    lead="Install, activate and protect in one command — or step through scan, enforce and report. Everything runs on your machine."
     sections={sections}
   >
     <h2 id="quickstart">Quickstart</h2>
-    <p>Three commands from nothing to protected:</p>
+    <p>
+      <strong>One command</strong> — install, activate and turn on protection at
+      the recommended preset, in a single paste (macOS / Linux):
+    </p>
+    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh -s -- --activate &lt;KEY&gt; --enforce</code></pre>
+    <p>
+      Windows (PowerShell) — pass the key through the environment, since
+      <code>irm | iex</code> can't take arguments:
+    </p>
+    <pre><code>$env:TALYX_LICENSE_KEY="&lt;KEY&gt;"; $env:TALYX_ENFORCE="1"; irm https://{site.domain}/install.ps1 | iex</code></pre>
+    <p>
+      Already installed? <code>talyx quickstart &lt;KEY&gt;</code> does the same
+      thing — activate, scan, and enforce at the recommended preset. Drop
+      <code>--enforce</code> (or use <code>quickstart --no-enforce</code>) to stop
+      after activation and just print the one command to turn protection on.
+      Everything is reversible with <code>talyx uninstall</code>.
+    </p>
+    <p>Prefer to go step by step:</p>
     <pre><code># 1 · install (macOS / Linux)
 curl -fsSL https://{site.domain}/install.sh | sh
 
-# 2 · activate the license from your purchase email
+# 2 · check the install is healthy
+talyx verify
+
+# 3 · activate the license from your purchase email
 talyx activate &lt;YOUR-LICENSE-KEY&gt;
 
-# 3 · scan this project + your user-level agent config
-talyx scan --project .</code></pre>
-    <p>
-      When you're ready to enforce, run <code>talyx init --project ~</code>.
-      That's the only command that writes to an agent config, and it backs each
-      one up first.
-    </p>
+# 4 · guided first run — detects agents, recommends a preset, tells you what's next
+talyx setup --project .
+
+# 5 · turn on protection (the only command that writes to a config; backs up first)
+talyx init --preset balanced --project .</code></pre>
 
     <h2 id="install">Install</h2>
     <h3>macOS / Linux</h3>
@@ -88,12 +109,62 @@ talyx license status         # show machines used, key status, offline grace</co
       shim never checks one, so protection you have already set up keeps working.
     </p>
 
+    <h2 id="presets">Protection presets</h2>
+    <p>
+      A preset is the one knob most people need. It bundles the decision
+      strictness, whether the live proxy is on, and how deep the scan goes into
+      a single word, so you don't have to assemble flags. Pass it to
+      <code>scan</code>, <code>init</code> or <code>quickstart</code> with
+      <code>--preset</code>; <code>setup</code> recommends one from what it finds.
+    </p>
+    <table>
+      <thead><tr><th>Preset</th><th>Strictness</th><th>Live proxy</th><th>Registry scan</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td><code>personal</code></td><td>Quiet</td><td>off</td><td>off</td><td>a personal machine — fewer interruptions</td></tr>
+        <tr><td><code>balanced</code></td><td>Balanced</td><td>off</td><td>off</td><td>the everyday default</td></tr>
+        <tr><td><code>strict</code></td><td>Strict</td><td>on</td><td>off</td><td>sensitive work — inspect the session too</td></tr>
+        <tr><td><code>enterprise</code></td><td>Strict</td><td>on</td><td>on</td><td>rollout — deepest scan, fetches registry code</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <code>--preset balanced</code> maps exactly to the old default, so nothing
+      changes if you don't use presets. You can still override just the
+      strictness with <code>--level quiet|balanced|strict</code> on top of a
+      preset.
+    </p>
+
     <h2 id="commands">Commands</h2>
+    <h3><code>talyx quickstart &lt;key&gt;</code></h3>
+    <p>
+      One command from install to protected: activates the license, scans,
+      recommends a preset from what it finds, and turns on protection at that
+      preset. Fails safe — if activation fails, nothing on disk is touched.
+    </p>
+    <ul>
+      <li><code>--preset &lt;preset&gt;</code> — use a specific preset instead of the recommended one.</li>
+      <li><code>--no-enforce</code> — activate and recommend only; don't rewrite any config.</li>
+      <li><code>--project &lt;path&gt;</code>, <code>--include-user-config</code> — as for <code>init</code>.</li>
+    </ul>
+    <h3><code>talyx setup</code></h3>
+    <p>
+      Guided first run. Detects your agents, scans read-only, recommends a
+      preset, and prints the exact next command. Writes nothing and needs no
+      license — run it right after installing to know precisely what to do.
+      <code>--project &lt;path&gt;</code> to point it somewhere else.
+    </p>
+    <h3><code>talyx verify</code></h3>
+    <p>
+      Installation health check: the two binaries are in place, <code>~/.talyx</code>
+      is writable, your license state, and whether enforcement is configured.
+      Read-only, needs no license, and exits non-zero if anything needs attention
+      so an installer or CI step can gate on it.
+    </p>
     <h3><code>talyx scan</code></h3>
     <p>Discover, score and report every artifact. Read-only.</p>
     <ul>
       <li><code>--project &lt;path&gt;</code> — project root to scan (default <code>.</code>). User-level config is always included.</li>
-      <li><code>--level quiet|balanced|strict</code> — how aggressively to flag (default <code>balanced</code>).</li>
+      <li><code>--preset personal|balanced|strict|enterprise</code> — bundle strictness + scan depth (see <a href="#presets">Protection presets</a>).</li>
+      <li><code>--level quiet|balanced|strict</code> — override just the strictness (default follows the preset, else <code>balanced</code>).</li>
       <li><code>--fetch-registry</code> — download &amp; statically scan the real code behind <code>npx</code>/<code>uvx</code> servers. Opt-in; makes outbound registry calls.</li>
       <li><code>--format text|sarif</code>, <code>--sarif-file &lt;path&gt;</code>, <code>--exit-code</code> — CI output.</li>
     </ul>
@@ -107,7 +178,8 @@ talyx license status         # show machines used, key status, offline grace</co
     </p>
     <ul>
       <li><code>--project &lt;path&gt;</code> — project root (default <code>.</code>). Only configs inside it are rewritten unless you add <code>--include-user-config</code>.</li>
-      <li><code>--level quiet|balanced|strict</code> — decision preset (default <code>balanced</code>): which risk bands become Block / Ask / Allow, and the proxy's inspection level when <code>--live</code> is set.</li>
+      <li><code>--preset personal|balanced|strict|enterprise</code> — bundle strictness + live proxy + scan depth in one word (see <a href="#presets">Protection presets</a>). <code>strict</code> and <code>enterprise</code> turn <code>--live</code> on for you.</li>
+      <li><code>--level quiet|balanced|strict</code> — override just the strictness (default follows the preset): which risk bands become Block / Ask / Allow, and the proxy's inspection level when <code>--live</code> is set.</li>
       <li><code>--include-user-config</code> — also rewrite configs outside the project (e.g. <code>~/.claude.json</code>, <code>~/.cursor/mcp.json</code>). A user-level config affects every project, so this is opt-in.</li>
       <li><code>--fetch-registry</code> — download &amp; statically scan the real code behind <code>npx</code>/<code>uvx</code> servers before enforcing (outbound registry calls).</li>
       <li><code>--live</code> — also keep the shim between the agent and each approved MCP server for the session and inspect its JSON-RPC traffic. See <a href="#live-proxy">Live traffic inspection</a>.</li>
@@ -136,11 +208,48 @@ talyx license status         # show machines used, key status, offline grace</co
     <h3><code>talyx allow &lt;id&gt;</code></h3>
     <p>
       Approve an artifact flagged ASK/BLOCK — from now on the shim lets it run and
-      a removed remote entry is restored to the config exactly as it was.
-      <code>--store &lt;path&gt;</code> to point at a non-default store.
+      a removed remote entry (or a quarantined skill) is restored exactly as it
+      was. Approval is <strong>auditable</strong>: it records who approved it,
+      when, why and at what scope.
+    </p>
+    <ul>
+      <li><code>--reason "&lt;text&gt;"</code> — record why, shown by <code>talyx why</code>.</li>
+      <li><code>--global</code> — approve this artifact everywhere, not just where it lives now (the default is repo-scoped).</li>
+      <li><code>--store &lt;path&gt;</code> — point at a non-default store.</li>
+    </ul>
+    <p>
+      Approval is bound to the artifact's content hash <em>and</em> its launch
+      command, so if either changes the approval is dropped and the artifact goes
+      back through review automatically — an approved server can't silently become
+      something else.
     </p>
     <h3><code>talyx why &lt;id&gt;</code></h3>
-    <p>Full reasoning behind a cached decision — every capability, every score contribution, the band and the final decision.</p>
+    <p>
+      Full reasoning behind a cached decision — every capability, every score
+      contribution, the band, the final decision, any live-proxy findings for it,
+      and the approval audit trail (who / when / why / scope) if it was approved.
+    </p>
+    <h3><code>talyx report</code></h3>
+    <p>
+      One security-posture report for a project (or your machine), built from a
+      fresh scan cross-referenced with your decisions: posture counts (allowed /
+      in review / blocked / quarantined), enforcement by agent, top attack
+      classes, allow-block ratio, top risk, and recent live-proxy findings. It
+      also shows <strong>what changed since the last scan</strong> when there's
+      history to compare against.
+    </p>
+    <ul>
+      <li><code>--format text|json|csv|md</code> — human table (default), machine-readable JSON (one shared schema), a full CSV inventory, or a shareable Markdown summary. (SARIF comes from <code>scan --format sarif</code>.)</li>
+      <li><code>--record</code> — also append this run to the local history, so the next report can diff against it. <code>init</code> records history automatically.</li>
+      <li><code>--project &lt;path&gt;</code>, <code>--store &lt;path&gt;</code>.</li>
+    </ul>
+    <h3><code>talyx sessions</code></h3>
+    <p>
+      Summarise what the live proxy (<code>init --live</code>) has caught across
+      recent sessions — totals by action, capability and artifact, plus the most
+      recent findings. <code>--json</code> emits the same data as a durable
+      record; <code>--limit &lt;n&gt;</code> sets how many session logs to read.
+    </p>
     <h3><code>talyx guardrails check|list|example</code></h3>
     <p>
       Validate the live-proxy guardrails file, list the rules it would load, or
@@ -159,6 +268,32 @@ talyx license status         # show machines used, key status, offline grace</co
     </p>
     <h3><code>talyx activate &lt;key&gt;</code> · <code>talyx license status|deactivate</code></h3>
     <p>See <a href="#activate">Activate a license</a>.</p>
+
+    <h2 id="reports">Reports &amp; history</h2>
+    <p>
+      Everything Talyx decides is readable and exportable — for CI, a
+      spreadsheet, or a leadership review — from one structured model, so every
+      format reports identical numbers.
+    </p>
+    <pre><code>talyx report                      # posture table for this project
+talyx report --format md &gt; posture.md   # shareable summary
+talyx report --format csv &gt; inventory.csv   # full artifact inventory
+talyx report --format json        # machine-readable, one schema</code></pre>
+    <p>A report covers:</p>
+    <ul>
+      <li><strong>Posture</strong> — counts across all artifacts: allowed, logged, in review, blocked, quarantined, plus how many are manually approved.</li>
+      <li><strong>Enforcement</strong> — how many artifacts are routed through the shim, by agent.</li>
+      <li><strong>Top risk &amp; attack classes</strong> — the highest-scoring flagged artifacts and the capabilities they cluster around, plus the allow-block ratio.</li>
+      <li><strong>Session findings</strong> — a roll-up of recent live-proxy activity (<code>talyx sessions</code> for the detail).</li>
+    </ul>
+    <p>
+      <strong>What changed since last scan.</strong> Every <code>init</code>
+      records a durable posture snapshot (and <code>report --record</code> lets
+      you checkpoint without enforcing). The next report shows the diff — newly
+      flagged, resolved, newly approved, risk increased — so you can answer
+      "what changed this week?" without comparing anything by hand. The history
+      is local, keyed per project, under <code>~/.talyx/history.jsonl</code>.
+    </p>
 
     <h2 id="enforcement">How enforcement works</h2>
     <ol>
@@ -369,6 +504,7 @@ talyx guardrails list       # show what the proxy would load</code></pre>
       <tbody>
         <tr><td><code>TALYX_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI, and only honoured when a CI environment is detected (<code>CI</code>, <code>GITHUB_ACTIONS</code>, <code>GITLAB_CI</code> and the like). On a workstation, run <code>talyx activate</code> instead.</td></tr>
         <tr><td><code>TALYX_STORE</code></td><td>Path to the decision store (default <code>~/.talyx/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
+        <tr><td><code>TALYX_HISTORY</code></td><td>Path to the posture-history log for "what changed since last scan" (default <code>~/.talyx/history.jsonl</code>).</td></tr>
         <tr><td><code>TALYX_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.talyx/license.json</code>).</td></tr>
         <tr><td><code>TALYX_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.talyx/</code>).</td></tr>
         <tr><td><code>TALYX_NO_PROXY</code></td><td><code>=1</code> forces the shim to <code>exec</code> the real server directly even for a <code>--live</code> entry — a per-launch kill switch for the proxy.</td></tr>
@@ -385,7 +521,8 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     <h2 id="files">Files Talyx writes</h2>
     <p>Everything lives under <code>~/.talyx/</code>. Nothing is sent anywhere.</p>
     <ul>
-      <li><code>decisions.json</code> — the decision cache: every scanned artifact's id, capabilities, score, band and decision. Written by <code>scan</code>/<code>init</code>, read by the shim.</li>
+      <li><code>decisions.json</code> — the decision cache: every scanned artifact's id, capabilities, score, band, decision and (if approved) the audit trail. Written by <code>scan</code>/<code>init</code>, read by the shim.</li>
+      <li><code>history.jsonl</code> — a durable posture snapshot per <code>init</code> (and <code>report --record</code>), for "what changed since last scan". Pruned to the most recent snapshots, keyed per project.</li>
       <li><code>tool_baselines.json</code> — trust-on-first-use snapshot of each server's approved tool list (live proxy).</li>
       <li><code>license.json</code> — cached license status and the 7-day / 30-day trust timers.</li>
       <li><code>sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> — live-proxy findings, one JSON object per line.</li>
@@ -396,6 +533,11 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
+      <li><strong>One-command setup.</strong> <code>talyx quickstart &lt;key&gt;</code> (and the installer's <code>--activate &lt;key&gt; --enforce</code>) takes you from install to protected in a single paste: activate, scan, recommend a preset, enforce.</li>
+      <li><strong>Guided onboarding.</strong> <code>talyx setup</code> detects your agents and recommends a preset read-only; <code>talyx verify</code> is an installation health check.</li>
+      <li><strong>Protection presets.</strong> <code>personal</code> / <code>balanced</code> / <code>strict</code> / <code>enterprise</code> bundle strictness, live proxy and scan depth into one word for <code>scan</code>, <code>init</code> and <code>quickstart</code>.</li>
+      <li><strong>Posture reports &amp; exports.</strong> <code>talyx report</code> gives one posture model exported as text / JSON / CSV / Markdown (SARIF via <code>scan</code>), with a <strong>"what changed since last scan"</strong> diff from durable local history.</li>
+      <li><strong>Auditable approvals.</strong> <code>talyx allow --reason --global</code> records who / when / why / scope; approval is bound to an artifact's bytes and launch command, so any change forces re-review. <code>talyx sessions</code> summarises live-proxy findings.</li>
       <li><strong>Live traffic inspection (opt-in).</strong> <code>talyx init --live</code> keeps the shim between the agent and each approved MCP server for the session — handshake-response scanning, a trust-on-first-use tool baseline that catches a mid-session rug pull, tool-result scanning, and <strong>custom guardrail rules</strong> you write in a local YAML file (block / redact / allow, matched by JSON-path conditions). See <a href="#live-proxy">Live traffic inspection</a>.</li>
       <li><strong>Known-bad advisory feed.</strong> Confirmed-malicious and vulnerable MCP artifacts matched by identity (package + version range, publisher, host, repo owner, typosquat pattern) — bundled, offline, overridable, refreshable over HTTPS. Forces a block or a review regardless of behaviour score. <code>talyx advisories list|check|refresh</code>. See <a href="#advisories">The advisory feed</a>.</li>
       <li><strong>Tree-sitter AST + source-to-sink taint</strong> for JS/TS, Python and Ruby — function-scoped and interprocedural (follows a secret through helper returns and parameters to a network sink). Now the authoritative capability pass for those languages; the regex rules are the parse-failure fallback.</li>

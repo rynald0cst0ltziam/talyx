@@ -20,10 +20,13 @@ export const site = {
   // ── commerce ──────────────────────────────────────────────
   checkoutUrl: 'https://agenify.lemonsqueezy.com/checkout/buy/ea5892a0-d32f-4a75-9398-c177bd28a69d',
   storeSlug: 'agenify',
-  // One-time purchase, lifetime license — must match the Lemon Squeezy
-  // product (single payment, license keys never expire).
+  // One-time purchase, lifetime license — single payment, license keys
+  // never expire. IMPORTANT: this is only the number SHOWN on the site.
+  // The amount actually charged is set on the Lemon Squeezy product/variant
+  // behind `checkoutUrl`; this must be kept in step with that dashboard
+  // price, or the site and the checkout will disagree.
   price: {
-    amount: 99,
+    amount: 49,
     currency: 'USD',
     unit: 'one-time',
   },
