@@ -21,10 +21,17 @@ param(
     [string]$Repo = $(if ($env:TALYX_REPO) { $env:TALYX_REPO } else { "rynald0cst0ltziam/talyx" }),
     [string]$Version = $(if ($env:TALYX_VERSION) { $env:TALYX_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:TALYX_INSTALL_DIR) { $env:TALYX_INSTALL_DIR } else { "$HOME\.talyx\bin" }),
-    [switch]$ModifyPath
+    [switch]$ModifyPath,
+    # A license key turns this into the one-command flow: install, then run
+    # `talyx quickstart`. With -Enforce it goes all the way to protected.
+    # Via `irm | iex`, set it with the environment variable instead:
+    #   $env:TALYX_LICENSE_KEY="<KEY>"; irm <url> | iex
+    [string]$LicenseKey = $(if ($env:TALYX_LICENSE_KEY) { $env:TALYX_LICENSE_KEY } else { "" }),
+    [switch]$Enforce
 )
 
 $ErrorActionPreference = "Stop"
+if ($env:TALYX_ENFORCE -eq "1") { $Enforce = $true }
 
 function Write-Info($msg) { Write-Host $msg }
 # `throw`, not `exit` -- this script is meant to run via `irm ... | iex`,
@@ -128,17 +135,37 @@ try {
         }
     }
     Write-Info ""
+
+    # One-command flow: a key was supplied, so hand straight off to
+    # `talyx quickstart` (activate + scan + recommend, and enforce too when
+    # -Enforce was passed). Full path so it works regardless of PATH.
+    if ($LicenseKey -ne "") {
+        Write-Info "What you have now: talyx + talyx-shim installed."
+        Write-Info ""
+        if ($Enforce) {
+            Write-Info "Activating your license and turning on protection..."
+            Write-Info ""
+            & "$InstallDir\talyx.exe" quickstart $LicenseKey
+        } else {
+            Write-Info "Activating your license..."
+            Write-Info ""
+            & "$InstallDir\talyx.exe" quickstart $LicenseKey --no-enforce
+        }
+        return
+    }
+
     Write-Info "What you have now:"
     Write-Info "  - talyx + talyx-shim installed (binaries only; nothing on your"
     Write-Info "    machine has been scanned, changed, or enforced yet)"
     Write-Info "  - scanning and setup are FREE; turning on enforcement (init) needs a license"
     Write-Info ""
-    Write-Info "Next steps (PATH changes only take effect in a NEW terminal, so this"
+    Write-Info "Fastest path -- one command does everything (activate + protect):"
+    Write-Info "  $InstallDir\talyx.exe quickstart <YOUR-LICENSE-KEY>   # from your purchase email"
+    Write-Info ""
+    Write-Info "Or step by step (PATH changes only take effect in a NEW terminal, so this"
     Write-Info "session still needs the full path):"
     Write-Info "  $InstallDir\talyx.exe verify                        # confirm this install is healthy"
     Write-Info "  $InstallDir\talyx.exe setup --project .             # guided first run -- tells you exactly what to do next"
-    Write-Info ""
-    Write-Info "setup is read-only and needs no license. When you're ready to enforce:"
     Write-Info "  $InstallDir\talyx.exe activate <YOUR-LICENSE-KEY>   # from your purchase email"
     Write-Info "  $InstallDir\talyx.exe init --project .              # turns on enforcement (reversible: talyx uninstall)"
 } finally {

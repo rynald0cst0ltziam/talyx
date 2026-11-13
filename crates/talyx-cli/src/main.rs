@@ -3,6 +3,7 @@
 //! `talyx scan`   — discover, statically scan, and score every artifact
 //!                        visible to a supported agent. Read-only.
 //! `talyx status` — short protection summary. Read-only.
+//! `talyx quickstart <key>` — one command: activate + scan + enforce.
 //! `talyx setup`  — guided first run: scan + recommend a preset + next step.
 //! `talyx verify` — installation health check (binaries, home, license).
 //! `talyx sessions` — summarize live-proxy findings (TASKS 2.4). Read-only.
@@ -95,6 +96,27 @@ enum Command {
     Setup {
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+    /// One command from install to protected: activate a license, scan, and
+    /// turn on protection at the recommended preset. The fast path a buyer
+    /// runs after installing (the installer calls this when given a key).
+    /// Enforces by default; pass --no-enforce to stop at the recommendation.
+    Quickstart {
+        /// The license key from your purchase email.
+        key: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        /// Use a specific preset instead of the one recommended from the scan.
+        #[arg(long, value_enum)]
+        preset: Option<PresetArg>,
+        /// Activate and recommend, but do not rewrite any config.
+        #[arg(long)]
+        no_enforce: bool,
+        /// With enforcement, also protect user-level configs (see `init`).
+        #[arg(long)]
+        include_user_config: bool,
+        #[arg(long)]
+        store: Option<PathBuf>,
     },
     /// Check that Talyx is installed correctly: binaries in place, home
     /// directory writable, license state, and whether enforcement is wired
@@ -352,6 +374,21 @@ fn main() {
         }
         Command::Status { project } => run_status(&project),
         Command::Setup { project } => run_setup(&project),
+        Command::Quickstart {
+            key,
+            project,
+            preset,
+            no_enforce,
+            include_user_config,
+            store,
+        } => std::process::exit(run_quickstart(
+            &key,
+            &project,
+            preset,
+            !no_enforce,
+            include_user_config,
+            store,
+        )),
         Command::Verify => std::process::exit(run_verify()),
         Command::Init {
             project,
@@ -782,6 +819,91 @@ fn print_recent_proxy_findings() {
             f.action, f.capability, f.method, f.artifact
         );
     }
+}
+
+/// `talyx quickstart <KEY>` — the one-command path from install to
+/// protected. Activates the license, scans for agents, recommends a preset
+/// from what it finds, and (unless `--no-enforce`) runs `init` at that
+/// preset so the user ends at "protected" in a single command. The
+/// installer calls this when a key is passed to it, so a buyer can go from
+/// purchase to enforced in one paste.
+fn run_quickstart(
+    key: &str,
+    project: &Path,
+    preset_override: Option<PresetArg>,
+    enforce: bool,
+    include_user_config: bool,
+    store: Option<PathBuf>,
+) -> i32 {
+    println!("Talyx quickstart\n");
+
+    // Step 1 — activate. Everything past here needs a valid license, so a
+    // failure stops the whole flow before anything is changed on disk
+    // (run_activate prints the specific reason).
+    println!("[1/3] Activating license...");
+    let code = license::run_activate(key);
+    if code != 0 {
+        eprintln!(
+            "\ntalyx: activation failed — nothing was changed. Fix the key and re-run `talyx quickstart <KEY>`."
+        );
+        return code;
+    }
+
+    // Step 2 — scan read-only and recommend a preset from what's found.
+    println!("\n[2/3] Scanning for agents...");
+    let project_root = resolve_root(project);
+    let engine = RiskEngine::new();
+    let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
+
+    let mut agents: Vec<&str> = scanned.iter().map(|s| s.agent_name).collect();
+    agents.sort_unstable();
+    agents.dedup();
+    let critical = scanned.iter().filter(|s| s.band == RiskBand::Critical).count();
+    let high = scanned.iter().filter(|s| s.band == RiskBand::High).count();
+    let rewritable = scanned.iter().filter(|s| s.config_source.is_some()).count();
+    println!(
+        "      {} artifact(s) across {} agent(s) — {critical} critical, {high} high.",
+        scanned.len(),
+        agents.len()
+    );
+
+    // Recommend the stricter posture only when the scan found something that
+    // warrants it (same rule as `talyx setup`), unless the caller overrode it.
+    let preset: Preset = preset_override.map(Into::into).unwrap_or_else(|| {
+        if critical > 0 || high > 0 {
+            Preset::Strict
+        } else {
+            Preset::Balanced
+        }
+    });
+
+    if scanned.is_empty() || rewritable == 0 {
+        println!(
+            "\nNo rewritable agent configs found under {}. Nothing to enforce here — your license is active.",
+            init::display_path(&project_root)
+        );
+        println!("Re-run from a project that uses an agent, or `talyx scan` to re-check.");
+        return 0;
+    }
+
+    if !enforce {
+        println!(
+            "\nLicense active. Recommended preset: {preset} ({}).",
+            preset.description()
+        );
+        println!("Turn on protection when ready:");
+        println!("    talyx init --preset {preset}");
+        return 0;
+    }
+
+    // Step 3 — enforce at the chosen preset. `init` prints its own full,
+    // reversible summary of exactly what it changed.
+    println!("\n[3/3] Enabling protection ({preset})...\n");
+    let level = preset.protection_level();
+    let live = preset.live_proxy();
+    let fetch_registry = preset.deep_registry_scan();
+    init::run_init(&project_root, level, store, include_user_config, fetch_registry, live);
+    0
 }
 
 /// `talyx setup` — the guided first run. Detects agents, scans read-only,
