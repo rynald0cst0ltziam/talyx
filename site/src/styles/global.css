@@ -13,26 +13,33 @@
   --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
 
-  --color-ink: #05060a;
-  --color-void: #0a0c12;
-  --color-panel: #10131c;
-  --color-panel-2: #161a26;
-  --color-line: #232838;
-  --color-line-bright: #313a52;
+  /* Base — a lifted obsidian with a faint violet undertone. Kept dark, but
+     a notch lighter and airier than a pure black console. */
+  --color-ink: #0b0b14;
+  --color-void: #0f0f1b;
+  --color-panel: #17182a;
+  --color-panel-2: #212338;
+  --color-line: #2f3350;
+  --color-line-bright: #454c70;
 
-  --color-mist: #8b93a7;
-  --color-fog: #b7bdce;
-  --color-chalk: #edf0f7;
+  --color-mist: #989cb4;
+  --color-fog: #c1c5d7;
+  --color-chalk: #f1f3fa;
 
-  --color-signal: #4de3ff;
-  --color-signal-deep: #1aa8d6;
-  --color-safe: #3ee9a4;
-  --color-threat: #ff5470;
-  --color-warn: #ffb84d;
-  --color-iris: #8b7bff;
+  /* Brand: a luminous violet signal, with cyan and magenta as the plasma
+     accents. Green / red / amber stay reserved for the safe / threat / warn
+     semantics so severity never gets muddied by the brand color. */
+  --color-signal: #8f7bff;
+  --color-signal-deep: #6a53e6;
+  --color-accent: #49e0ff;
+  --color-plasma: #ff6ad5;
+  --color-safe: #34e6a6;
+  --color-threat: #ff4d6b;
+  --color-warn: #ffb020;
+  --color-iris: #8f7bff;
 
-  --shadow-glow: 0 0 40px -8px rgba(77, 227, 255, 0.35);
-  --shadow-panel: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 44px -8px rgba(143, 123, 255, 0.4);
+  --shadow-panel: 0 24px 60px -20px rgba(0, 0, 0, 0.72);
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -85,7 +92,7 @@ body {
 }
 
 ::selection {
-  background: rgba(77, 227, 255, 0.28);
+  background: rgba(143, 123, 255, 0.32);
   color: var(--color-chalk);
 }
 
@@ -107,9 +114,9 @@ body {
 
 .bg-aurora {
   background:
-    radial-gradient(ellipse 50% 40% at 20% 0%, rgba(77, 227, 255, 0.16), transparent 70%),
-    radial-gradient(ellipse 45% 45% at 85% 10%, rgba(139, 123, 255, 0.14), transparent 70%),
-    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(62, 233, 164, 0.08), transparent 70%);
+    radial-gradient(ellipse 50% 40% at 18% 0%, rgba(143, 123, 255, 0.2), transparent 70%),
+    radial-gradient(ellipse 45% 45% at 85% 8%, rgba(73, 224, 255, 0.13), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(255, 106, 213, 0.09), transparent 70%);
 }
 
 /* ── reveal-on-scroll ─────────────────────────────────────── */
@@ -241,7 +248,13 @@ body {
 
 /* ── typographic helpers ──────────────────────────────────── */
 .text-gradient {
-  background: linear-gradient(120deg, var(--color-chalk) 0%, var(--color-signal) 55%, var(--color-iris) 100%);
+  background: linear-gradient(
+    115deg,
+    var(--color-chalk) 0%,
+    var(--color-signal) 40%,
+    var(--color-accent) 72%,
+    var(--color-plasma) 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -267,7 +280,7 @@ body {
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(120deg, var(--color-signal), var(--color-iris), var(--color-safe));
+  background: linear-gradient(120deg, var(--color-signal), var(--color-accent), var(--color-plasma));
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);

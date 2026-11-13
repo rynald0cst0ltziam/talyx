@@ -1,5 +1,4 @@
 ---
-import { site } from '../data/site';
 import Icon from './Icon.astro';
 import Logo from './Logo.astro';
 
@@ -8,6 +7,7 @@ const links = [
   { label: 'Detections', href: '/#detections' },
   { label: 'Capabilities', href: '/#capabilities' },
   { label: 'Docs', href: '/docs' },
+  { label: 'FAQ', href: '/faq' },
   { label: 'Pricing', href: '/pricing' },
 ];
 ---
@@ -33,29 +33,14 @@ const links = [
       }
     </div>
 
-    <div class="flex items-center gap-3">
-      <a
-        href={site.github}
-        class="hidden text-mist transition-colors hover:text-chalk sm:block"
-        aria-label="GitHub"
-      >
-        <Icon name="github" class="h-5 w-5" />
-      </a>
-      <a
-        href="/pricing"
-        class="btn-glow hidden items-center gap-1.5 rounded-xl bg-signal px-4 py-2 text-sm font-semibold text-ink transition-all hover:-translate-y-0.5 hover:brightness-110 sm:inline-flex"
-      >
-        Get Talyx
-      </a>
-      <button
-        id="nav-toggle"
-        class="flex h-9 w-9 items-center justify-center rounded-lg hairline text-chalk md:hidden"
-        aria-label="Menu"
-        aria-expanded="false"
-      >
-        <Icon name="dash" class="h-5 w-5" />
-      </button>
-    </div>
+    <button
+      id="nav-toggle"
+      class="flex h-9 w-9 items-center justify-center rounded-lg hairline text-chalk md:hidden"
+      aria-label="Menu"
+      aria-expanded="false"
+    >
+      <Icon name="dash" class="h-5 w-5" />
+    </button>
   </nav>
 
   <div id="nav-mobile" class="hidden border-t border-line bg-void px-4 py-3 md:hidden">
@@ -66,12 +51,6 @@ const links = [
         </a>
       ))
     }
-    <a
-      href="/pricing"
-      class="mt-2 block rounded-lg bg-signal px-3 py-2.5 text-center text-sm font-semibold text-ink"
-    >
-      Get Talyx — ${site.price.amount}
-    </a>
   </div>
 </header>
 

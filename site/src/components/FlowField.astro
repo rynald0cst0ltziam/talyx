@@ -38,27 +38,27 @@ const packets: [number, number, number, boolean][] = [
     <defs>
       {paths.map((d, i) => <path id={`fp${i}`} d={d} />)}
       <radialGradient id="fp-node" cx="0.5" cy="0.5" r="0.5">
-        <stop offset="0" stop-color="#4de3ff" stop-opacity="0.55"></stop>
-        <stop offset="1" stop-color="#4de3ff" stop-opacity="0"></stop>
+        <stop offset="0" stop-color="#8f7bff" stop-opacity="0.55"></stop>
+        <stop offset="1" stop-color="#8f7bff" stop-opacity="0"></stop>
       </radialGradient>
     </defs>
 
     {
       paths.map((d) => (
-        <path d={d} stroke="#4de3ff" stroke-opacity="0.08" stroke-width="1" />
+        <path d={d} stroke="#8f7bff" stroke-opacity="0.08" stroke-width="1" />
       ))
     }
 
     <!-- the node everything converges on -->
     <circle cx="640" cy="200" r="60" fill="url(#fp-node)" />
-    <circle cx="640" cy="200" r="9" fill="none" stroke="#4de3ff" stroke-opacity="0.35" stroke-width="1.5">
+    <circle cx="640" cy="200" r="9" fill="none" stroke="#8f7bff" stroke-opacity="0.35" stroke-width="1.5">
       <animate attributeName="r" values="6;20;6" dur="4s" repeatCount="indefinite" />
       <animate attributeName="stroke-opacity" values="0.4;0;0.4" dur="4s" repeatCount="indefinite" />
     </circle>
 
     {
       packets.map(([p, dur, begin, threat]) => (
-        <circle r={threat ? 2.6 : 2} fill={threat ? '#ff5470' : '#4de3ff'}>
+        <circle r={threat ? 2.6 : 2} fill={threat ? '#ff4d6b' : '#49e0ff'}>
           <animateMotion
             dur={`${dur}s`}
             begin={`${begin}s`}

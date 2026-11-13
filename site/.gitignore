@@ -7,6 +7,8 @@ dist/
 
 # deps
 node_modules/
+# stray bun lockfile (this project uses npm — package-lock.json is the source of truth)
+bun.lock
 
 # env
 .env
