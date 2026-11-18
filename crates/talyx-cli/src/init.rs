@@ -2169,13 +2169,13 @@ pub fn run_uninstall(
     if purge {
         match talyx_state_dir() {
             Some(dir) if dir.exists() => match std::fs::remove_dir_all(&dir) {
-                Ok(()) => println!("Removed {} (decision cache, license, guardrails).", dir.display()),
+                Ok(()) => println!("Removed {} (decision cache, history, guardrails).", dir.display()),
                 Err(e) => eprintln!("talyx: could not remove {}: {e}", dir.display()),
             },
             _ => println!("No Talyx state directory to remove."),
         }
     } else {
-        println!("\nThe decision cache and license were left in place — re-run with --purge to delete them too.");
+        println!("\nThe decision cache was left in place — re-run with --purge to delete ~/.talyx too.");
     }
 
     println!("\nThe talyx binaries themselves were not deleted; remove ~/.talyx/bin (or wherever you installed them) by hand if you want them gone.");
