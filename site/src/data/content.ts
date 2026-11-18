@@ -119,7 +119,7 @@ export const features: Feature[] = [
     icon: 'ci',
     tag: 'CI',
     title: 'SARIF + a GitHub Action',
-    body: 'Run the same scan in CI. Results upload as SARIF straight into GitHub code scanning, with a non-zero exit on Block so a poisoned dependency fails the build instead of shipping. Activate with a machine license via an environment variable.',
+    body: 'Run the same scan in CI. Results upload as SARIF straight into GitHub code scanning, with a non-zero exit on Block so a poisoned dependency fails the build instead of shipping. No license or key needed — it is free in CI too.',
   },
   {
     icon: 'terminal',
@@ -149,7 +149,7 @@ export const features: Feature[] = [
     icon: 'lock',
     tag: 'Local-first',
     title: 'Nothing leaves your machine',
-    body: 'No account, no daemon, no cloud, no telemetry, no analytics. Optional npm / PyPI registry lookups and a monthly license check are the only outbound calls. Your config, your threat surface, your machine — and the scanner core is source-available so you can read exactly how every detection works.',
+    body: 'No account, no daemon, no cloud, no telemetry, no analytics, no licensing. Optional npm / PyPI registry lookups are the only outbound calls, and only when you ask for them. Your config, your threat surface, your machine — and the scanner core is source-available so you can read exactly how every detection works.',
   },
 ];
 
@@ -303,7 +303,7 @@ export interface Capability {
 export const capabilities: Capability[] = [
   {
     capability: 'Runs fully local',
-    how: 'One binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI lookups and a periodic license check.',
+    how: 'One binary. No account, no daemon, no cloud backend, no telemetry, no licensing. The only outbound calls are optional npm / PyPI lookups when you ask for them.',
   },
   {
     capability: 'Covers 27 coding agents in one scan',
@@ -376,7 +376,7 @@ export const steps: Step[] = [
   {
     n: '02',
     title: 'Set up',
-    body: 'Activate the license from your purchase email, then run one guided command. It detects every agent, scores them read-only, recommends a preset, and prints the exact next step — no flags to learn.',
+    body: 'Run one guided command. It detects every agent, scores them read-only, recommends a preset, and prints the exact next step — no flags to learn, no license.',
     code: 'talyx setup --project .',
   },
   {
@@ -404,8 +404,8 @@ export const faqs: Faq[] = [
     a: 'The artifact supply chain for AI coding agents: a malicious MCP server launched from a config file, a plugin or extension that ships its own server or hook, a skill or instruction file carrying hidden prompt-injection, an encoded payload in a tool description, a server impersonating a trusted one, a hook that pipes a downloaded script into a shell, a secret read that flows to the network. It inspects what your agent is about to load — across 27 agents — and either verifies it, flags it for review, or blocks it.',
   },
   {
-    q: 'How do I get from buying to protected?',
-    a: 'One command. After purchase you paste a single line (the installer with your key): it installs the binary, activates the license, scans your machine, picks a protection preset from what it finds, and turns protection on — reversible any time with `talyx uninstall`. If you would rather go step by step, it is install → `talyx verify` → `talyx activate <key>` → `talyx setup` (guided, read-only, recommends a preset) → `talyx init --preset balanced`. `talyx quickstart <key>` runs the whole thing as one command after install.',
+    q: 'How do I get started?',
+    a: 'One command. Paste the installer with `--enforce` and it installs the binary, scans your machine, picks a protection preset from what it finds, and turns protection on — reversible any time with `talyx uninstall`. Prefer step by step: install → `talyx verify` → `talyx setup` (guided, read-only, recommends a preset) → `talyx init --preset balanced`. `talyx quickstart` runs the whole thing as one command. It is all free — no license, no account, no key.',
   },
   {
     q: 'What are presets, and which should I pick?',
@@ -421,7 +421,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Is it actually local? What leaves my machine?',
-    a: 'It is a single binary. No account, no daemon, no cloud backend, no telemetry. The only outbound calls are optional npm / PyPI registry lookups when you pass --fetch-registry, and a license check against Lemon Squeezy on activation and at most once a week after. Discovery, analysis, scoring and enforcement all happen on your machine.',
+    a: 'It is a single binary. No account, no daemon, no cloud backend, no telemetry, no licensing. The only outbound calls are ones you opt into: npm / PyPI registry lookups when you pass --fetch-registry, and a feed refresh when you run `talyx advisories refresh`. Discovery, analysis, scoring and enforcement all happen on your machine.',
   },
   {
     q: 'Windows, macOS or Linux?',
@@ -468,19 +468,11 @@ export const faqs: Faq[] = [
     a: 'No. Talyx is a launch-time gate plus a per-launch shim, not an always-on proxy. A blocked server is physically removed from the config, so it stays blocked whether or not any Talyx process is running. There is no window where killing a background process drops your protection.',
   },
   {
-    q: 'How does the license work?',
-    a: 'One lifetime key per developer — pay once, no subscription, no renewals. Activate on up to 3 machines. `init` checks the key with Lemon Squeezy on activation and at most once a week after; offline, it keeps working for 30 days before asking you to reconnect. The enforcement shim never checks a license, so protection you have already set up keeps working no matter what. `scan` and `status` run unlicensed so you can evaluate.',
+    q: 'Is it really free? What\'s the catch?',
+    a: 'Yes — fully free, with no catch. Every command, including enforcement, runs with no license, no account, and no activation. There is no paid tier, nothing is gated, and there is no "phone home". There is no payment step anywhere. The source is available so you can verify all of this and build it yourself.',
   },
   {
-    q: 'Do you offer team or volume pricing?',
-    a: 'Yes — volume pricing for 5 or more developers. The product is identical: one lifetime key per developer, each good for 3 machines. Email rynald0cst0ltziam@gmail.com.',
-  },
-  {
-    q: 'Is there a refund policy?',
-    a: '14-day no-questions refund through Lemon Squeezy, our merchant of record. If Talyx does not fit how your team works, you get your money back.',
-  },
-  {
-    q: 'Is it open source? Can I evaluate it first?',
-    a: 'The source is available for review, not open source in the OSI sense — it ships under a proprietary source-available license (LICENSE in the repo) that lets you read, compile, run and security-audit it freely, and run the scanner without a key, while enforcement and redistribution need a license. Every regex, score contribution and threshold is in the repository and covered by tests, many proven against live adversarial fixtures. A time-limited evaluation key is available on request for security teams doing a formal review.',
+    q: 'Is it open source?',
+    a: 'The source is available: a source-available license (LICENSE in the repo) lets you read, compile, run and security-audit every line freely. Every regex, score contribution and threshold is in the repository and covered by tests, many proven against live adversarial fixtures.',
   },
 ];

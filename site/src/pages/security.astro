@@ -56,11 +56,11 @@ const sections = [
 
     <h2 id="privacy">Data &amp; privacy</h2>
     <p>
-      No account, no daemon, no cloud backend, no telemetry, no analytics. The
-      only outbound calls are: optional npm/PyPI registry lookups when you pass
-      <code>--fetch-registry</code>, and a license check against Lemon Squeezy on
-      activation and at most once a week thereafter. Talyx never transmits your
-      config contents, findings, file paths, or code anywhere.
+      No account, no daemon, no cloud backend, no telemetry, no analytics, no
+      licensing. The only outbound calls are ones you opt into: npm/PyPI
+      registry lookups when you pass <code>--fetch-registry</code>, and a feed
+      refresh when you run <code>talyx advisories refresh</code>. Talyx never
+      transmits your config contents, findings, file paths, or code anywhere.
     </p>
 
     <h2 id="audit">Auditability</h2>

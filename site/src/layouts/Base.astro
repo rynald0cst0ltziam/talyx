@@ -72,9 +72,10 @@ const ogImage = new URL('/og.png', site.url).href;
         description: site.description,
         offers: {
           '@type': 'Offer',
-          price: site.price.amount,
-          priceCurrency: site.price.currency,
+          price: '0',
+          priceCurrency: 'USD',
         },
+        isAccessibleForFree: true,
       })}
     />
   </head>
@@ -94,10 +95,9 @@ const ogImage = new URL('/og.png', site.url).href;
           class="relative z-40 border-b border-line bg-panel-2 px-4 py-2 text-center text-[13px] text-fog"
         >
           <span class="text-safe">●</span>{' '}
-          Lifetime license: <strong class="text-chalk">${site.price.amount}</strong>, paid once.{' '}
-          <span class="text-mist">No subscription, no renewals.</span>{' '}
-          <a href="/pricing" class="text-signal underline-offset-4 hover:underline">
-            Get it &rarr;
+          <strong class="text-chalk">Free &amp; fully open</strong> — every feature, no license, no account.{' '}
+          <a href="/docs#quickstart" class="text-signal underline-offset-4 hover:underline">
+            Install &rarr;
           </a>
         </div>
       )
@@ -110,10 +110,6 @@ const ogImage = new URL('/og.png', site.url).href;
     </main>
 
     <Footer />
-
-    <!-- Lemon Squeezy overlay checkout. Any <a class="lemonsqueezy-button">
-         pointing at a *.lemonsqueezy.com URL opens in the overlay. -->
-    <script src="https://assets.lemonsqueezy.com/lemon.js" defer is:inline></script>
 
     <script>
       // Reveal-on-scroll — progressive enhancement. Must degrade to

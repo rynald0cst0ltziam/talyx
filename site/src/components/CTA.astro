@@ -20,18 +20,22 @@ import Icon from './Icon.astro';
       <span class="text-gradient">Your agent doesn't.</span>
     </h2>
     <p class="mx-auto mt-4 max-w-xl text-lg text-fog">
-      Five minutes to install, one command to scan. Then every MCP server,
-      plugin and skill your agents load is checked and gated — for a one-time
-      ${site.price.amount}, with a license that never expires.
+      One command to install, one to scan. Then every MCP server, plugin and
+      skill your agents load is checked and gated. Free — every feature, no
+      license, no account.
     </p>
-    <div class="mt-8 flex flex-wrap justify-center gap-3">
-      <Button href={site.checkoutUrl} variant="buy" overlay>
-        Get Talyx — ${site.price.amount} <Icon name="arrow" class="h-4 w-4" />
+    <div class="mx-auto mt-8 max-w-xl overflow-x-auto rounded-lg border border-line bg-ink px-3.5 py-2.5 text-left">
+      <span class="select-none text-mist">$</span>
+      <code class="font-mono text-[13px] text-fog">curl -fsSL https://{site.domain}/install.sh | sh</code>
+    </div>
+    <div class="mt-6 flex flex-wrap justify-center gap-3">
+      <Button href="/docs#quickstart" variant="primary">
+        Get started <Icon name="arrow" class="h-4 w-4" />
       </Button>
-      <Button href="/docs" variant="ghost">Read the docs</Button>
+      <Button href={site.github} variant="ghost">View the source</Button>
     </div>
     <p class="mt-5 text-xs text-mist">
-      Secure Lemon Squeezy checkout · 14-day refund · activate on 3 machines · scan free, forever
+      Fully local · zero telemetry · source-available · Windows · macOS · Linux
     </p>
   </div>
 </section>
