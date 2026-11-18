@@ -4,11 +4,10 @@
 #   curl -fsSL https://<install-url>/install.sh | sh
 #
 # Downloads the talyx + talyx-shim release binaries for this machine and
-# installs them to ~/.talyx/bin. Does NOT run `talyx init` — that requires
-# a license, which doesn't exist yet at install time (see docs#activate).
-# Running init unlicensed here used to print a scary error as the very
-# last step of a fresh install; now the script just prints the next two
-# commands (activate, then init) and stops.
+# installs them to ~/.talyx/bin. By default it does NOT touch your agent
+# configs — it installs the binaries and prints the one command to turn on
+# protection. Pass --enforce to run `talyx quickstart` straight away.
+# Talyx is fully free: no license, no account, no activation.
 #
 # TALYX_REPO points at the real repo, but no release has been tagged yet
 # (see .github/workflows/release.yml — this script downloads exactly what
@@ -35,20 +34,17 @@ TALYX_REPO="${TALYX_REPO:-rynald0cst0ltziam/talyx}"
 TALYX_VERSION="${TALYX_VERSION:-latest}"
 INSTALL_DIR="${TALYX_INSTALL_DIR:-$HOME/.talyx/bin}"
 MODIFY_PATH=0
-# A license key (via --activate <KEY> or TALYX_LICENSE_KEY) turns this into
-# the one-command flow: install, then run `talyx quickstart`. With
-# --enforce it goes all the way to protected; without it, it activates and
-# prints the one command to enable protection (so piping a script from the
-# internet never rewrites your agent configs unless you explicitly ask).
-LICENSE_KEY="${TALYX_LICENSE_KEY:-}"
+# --enforce turns this into the one-command flow: install, then run
+# `talyx quickstart` (scan + enforce). Without it the installer just drops
+# the binaries and prints the one command — so piping a script from the
+# internet never rewrites your agent configs unless you explicitly ask.
+# Talyx is fully free: no key, no activation.
 ENFORCE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --modify-path) MODIFY_PATH=1 ;;
     --enforce) ENFORCE=1 ;;
-    --activate) shift; LICENSE_KEY="${1:-}" ;;
-    --activate=*) LICENSE_KEY="${1#--activate=}" ;;
     *)
       echo "talyx-install: unknown option '$1'" >&2
       exit 1
@@ -208,38 +204,30 @@ main() {
   esac
   say ""
 
-  # One-command flow: a key was supplied, so hand straight off to
-  # `talyx quickstart` (activate + scan + recommend, and enforce too when
-  # --enforce was passed). Run the just-installed binary by full path so it
-  # works in this same shell regardless of PATH.
-  if [ -n "$LICENSE_KEY" ]; then
+  # One-command flow: --enforce hands straight off to `talyx quickstart`
+  # (scan + enforce). Full path so it works in this same shell regardless of
+  # PATH. Talyx is fully free — no key, no activation.
+  if [ "$ENFORCE" = "1" ]; then
     say "What you have now: talyx + talyx-shim installed."
     say ""
-    if [ "$ENFORCE" = "1" ]; then
-      say "Activating your license and turning on protection…"
-      say ""
-      "$INSTALL_DIR/talyx" quickstart "$LICENSE_KEY"
-    else
-      say "Activating your license…"
-      say ""
-      "$INSTALL_DIR/talyx" quickstart "$LICENSE_KEY" --no-enforce
-    fi
+    say "Turning on protection…"
+    say ""
+    "$INSTALL_DIR/talyx" quickstart
     return
   fi
 
   say "What you have now:"
   say "  - talyx + talyx-shim installed (binaries only; nothing on your"
   say "    machine has been scanned, changed, or enforced yet)"
-  say "  - scanning and setup are FREE; turning on enforcement (init) needs a license"
+  say "  - Talyx is fully free: every command works, no license, no account"
   say ""
-  say "Fastest path — one command does everything (activate + protect):"
-  say "  $INSTALL_DIR/talyx quickstart <YOUR-LICENSE-KEY>   # from your purchase email"
+  say "Fastest path — one command scans and turns on protection:"
+  say "  $INSTALL_DIR/talyx quickstart"
   say ""
   say "Or step by step (PATH changes only take effect in a NEW shell, so this"
   say "session still needs the full path):"
   say "  $INSTALL_DIR/talyx verify                        # confirm this install is healthy"
   say "  $INSTALL_DIR/talyx setup --project .             # guided first run — tells you exactly what to do next"
-  say "  $INSTALL_DIR/talyx activate <YOUR-LICENSE-KEY>   # from your purchase email"
   say "  $INSTALL_DIR/talyx init --project .              # turns on enforcement (reversible: talyx uninstall)"
 }
 
