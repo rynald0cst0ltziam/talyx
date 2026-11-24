@@ -2,9 +2,10 @@ Talyx License
 
 Copyright (c) 2026 rynald0cst0ltziam. All rights reserved.
 
-This is a source-available commercial license. The source is published so
-you can read, build, and security-audit it. It is not open source, and
-using the enforcement features requires a paid license.
+This is a source-available license. The source is published so you can read,
+build, run, and security-audit it. Talyx is free to use — every feature,
+with no license key, no account, and no payment. It is source-available, not
+open source: redistribution and reselling are restricted (Section 3).
 
 --------------------------------------------------------------------------
 
@@ -18,71 +19,48 @@ using the enforcement features requires a paid license.
    "We" / "us" means the copyright holder named above. "You" means the
    person or entity using the Software.
 
-   "License Key" means an activation key we (or an authorized reseller)
-   issue to you, that has not expired or been revoked, and whose seat count
-   you have not exceeded.
-
-   "Enforcement Features" means any function of the Software that modifies
-   another program's configuration or mediates its execution — including
-   `talyx init`, `talyx allow`, and the `talyx-shim` gate.
-   The read-only reporting commands (`talyx scan`, `talyx status`,
-   `talyx why`, `talyx guardrails`, `talyx advisories`) are
-   not Enforcement Features.
-
-2. What you may do without a License Key
+2. What you may do
 
    We grant you a worldwide, royalty-free, non-exclusive, non-transferable
    right to:
 
    (a) download, view, and compile the Software;
 
-   (b) run the Software for security review, evaluation, and testing; and
+   (b) run the Software, including all of its features — scanning,
+       enforcement, the live proxy, and reporting — for any purpose,
+       including commercially, with no license key and no fee; and
 
-   (c) run the read-only reporting commands for any purpose, including
-       commercially.
+   (c) modify the Software for your own internal use.
 
-3. What requires a License Key
+3. What you may not do
 
-   Running the Enforcement Features, other than briefly to evaluate them,
-   requires a valid License Key for each developer who uses them. The
-   commercial terms you accept when you obtain a License Key govern that
-   use alongside this license; if they conflict, those terms control for
-   License Key holders.
-
-4. What you may not do
-
-   Except as Sections 2 and 3 allow, you may not:
+   Except as Section 2 allows, you may not:
 
    (a) distribute, publish, sublicense, sell, rent, lease, or host the
        Software, or provide it to a third party as part of a product or
        service;
 
-   (b) distribute modified copies or works derived from the Software;
+   (b) distribute modified copies or works derived from the Software; or
 
    (c) remove or alter any copyright, license, or attribution notice,
-       including THIRD-PARTY-LICENSES.txt;
-
-   (d) use our names or trademarks except to identify the Software
-       accurately and to state that you use it; or
-
-   (e) work around, disable, or defeat the License Key check.
+       including THIRD-PARTY-LICENSES.txt.
 
    This section does not limit any right you have under applicable law
    that a contract cannot take away, such as rights to observe, study, or
    (where permitted) decompile the Software for interoperability.
 
-5. Third-party components
+4. Third-party components
 
    The Software links the open-source components listed, with their
    license texts, in THIRD-PARTY-LICENSES.txt. Those components stay under
    their own licenses and nothing here limits your rights under them.
 
-6. Ownership
+5. Ownership
 
    We keep all right, title, and interest in the Software. This license
    grants permissions, not ownership.
 
-7. Disclaimer of warranty
+6. Disclaimer of warranty
 
    THE SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTIES OF ANY KIND,
    EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION WARRANTIES OF FITNESS
@@ -90,24 +68,23 @@ using the enforcement features requires a paid license.
    The Software analyzes untrusted input and reports risk; it does not
    guarantee that every malicious artifact is detected or blocked.
 
-8. Limitation of liability
+7. Limitation of liability
 
    IN NO EVENT WILL WE HAVE ANY LIABILITY TO YOU ARISING OUT OF OR RELATED
    TO THE SOFTWARE, INCLUDING INDIRECT, SPECIAL, INCIDENTAL, OR
    CONSEQUENTIAL DAMAGES, EVEN IF WE HAVE BEEN INFORMED OF THEIR
    POSSIBILITY IN ADVANCE. AS FAR AS THE LAW ALLOWS, OUR TOTAL LIABILITY
-   UNDER THIS LICENSE WILL NOT EXCEED THE AMOUNT YOU PAID US FOR THE
-   SOFTWARE IN THE TWELVE MONTHS BEFORE THE CLAIM.
+   UNDER THIS LICENSE WILL NOT EXCEED ONE HUNDRED U.S. DOLLARS.
 
-9. Termination
+8. Termination
 
    This license ends automatically if you breach it and do not fix the
-   breach within 30 days of notice. On termination you must stop using the
-   Software and destroy your copies, except that the Section 2(a)-(b)
-   rights survive for genuine security-review purposes.
+   breach within 30 days of notice. On termination you must stop
+   distributing the Software; your rights to run it for your own use and to
+   study it survive.
 
 --------------------------------------------------------------------------
 
-The warranty disclaimer and liability language in Sections 7-8 is adapted
+The warranty disclaimer and liability language in Sections 6-7 is adapted
 from the Functional Source License 1.1 (https://fsl.software), used here
 under its permissive terms.
