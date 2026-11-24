@@ -26,18 +26,9 @@ and `sitemap-index.xml` resolve.
 
 ## Before launch — required edits
 
-All in **`src/data/site.ts`**:
-
-1. `checkoutUrl` — real Lemon Squeezy checkout URL
-   (Store → Products → your product → Share → copy). Every "Buy" button and
-   the pricing card point at this; `class="lemonsqueezy-button"` + the
-   `lemon.js` script (loaded in `src/layouts/Base.astro`) make it open in an
-   overlay instead of a full-page nav.
-2. `storeSlug` — your `*.lemonsqueezy.com` subdomain.
-3. `price.*` — keep `amount` / `regularAmount` / `launchEndsISO` in sync with
-   the Lemon Squeezy variant and your launch window. `launchEndsISO` drives
-   the countdown on the pricing card and the top banner copy.
-4. `domain` / `url` / `email` / `github` — real values.
+Talyx is fully free: there is no pricing, checkout, or commerce in this
+site. Config lives in **`src/data/site.ts`** — set `domain` / `url` /
+`email` / `github` to real values.
 
 Also:
 

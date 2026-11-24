@@ -14,7 +14,7 @@ it launches. Fully local. No telemetry. No cloud.
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://gettalyx.dev/docs)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](Cargo.toml)
 
-[gettalyx.dev](https://gettalyx.dev) · [Documentation](https://gettalyx.dev/docs) · [Pricing](https://gettalyx.dev/pricing)
+[gettalyx.dev](https://gettalyx.dev) · [Documentation](https://gettalyx.dev/docs) · [FAQ](https://gettalyx.dev/faq)
 
 </div>
 
@@ -77,11 +77,12 @@ from a supply-chain security tool would be indefensible.
 Then:
 
 ```bash
-talyx scan --project .              # free, read-only, evaluate anything
-talyx activate <YOUR-LICENSE-KEY>   # from your purchase email
+talyx scan --project .              # discover + score everything, read-only
 talyx init --project .              # turn on enforcement
 talyx uninstall --project .         # undo it all, whenever you want
 ```
+
+Or go from nothing to protected in one command: `talyx quickstart`.
 
 Both installers verify the download against the `SHA256SUMS` published
 with the release and refuse to install on a mismatch. Every release
@@ -94,13 +95,11 @@ not substituted afterwards:
 gh attestation verify talyx-x86_64-unknown-linux-musl.tar.gz --repo rynald0cst0ltziam/talyx
 ```
 
-`scan` and `status` run without a license so you can evaluate freely;
-`init` (the part that rewrites configs and enforces) needs a license —
-`talyx-shim` itself is never gated, so a lapsed license can't break a
-server that's already running. See
-[`crates/talyx-cli/src/license.rs`](crates/talyx-cli/src/license.rs) for
-exactly how activation works, and [gettalyx.dev/pricing](https://gettalyx.dev/pricing)
-for the license.
+Talyx is **fully free** — every command, including `init` enforcement and
+the live proxy, runs with no license, no account, and no activation. There
+is no paid tier and nothing is gated. It makes no mandatory outbound call:
+the only network requests are the opt-in `--fetch-registry` (fetch an
+npm/PyPI package to scan its code) and `talyx advisories refresh`.
 
 None of the installers touch your shell profile or `PATH` automatically —
 pass `--modify-path` (shell) / `-ModifyPath` (PowerShell) to opt in;
@@ -122,8 +121,8 @@ A ready-to-use workflow is at
 [`.github/workflows/talyx-scan.yml`](.github/workflows/talyx-scan.yml).
 Each finding carries a repo-relative file location — the exact
 `SKILL.md` line for a poisoned skill, the config entry for a risky MCP
-server — and a stable fingerprint so results dedupe across runs. Activate
-in CI with `TALYX_LICENSE_KEY` in the job environment.
+server — and a stable fingerprint so results dedupe across runs. No license
+or key is needed in CI — it's free there too.
 
 ## Architecture
 
@@ -144,8 +143,8 @@ crates/
   talyx-content      prompt-injection / hidden-Unicode / encoded-payload / exfil-directive
                       detectors, shared by the scanner and the live proxy
   talyx-advisories   known-bad feed — identity-matched, offline, refreshable over HTTPS
-  talyx-cli          the `talyx` binary: scan, status, init, allow, why, guardrails, advisories,
-                      activate, license
+  talyx-cli          the `talyx` binary: scan, status, setup, quickstart, verify, init, allow,
+                      why, report, sessions, guardrails, advisories, uninstall
 data/
   trust_seed.json         hand-verified publisher trust graph
   advisories.json         hand-curated, fully-sourced disclosures of malicious/vulnerable artifacts
@@ -186,12 +185,12 @@ the full command reference, including `--fetch-registry`, `init --live`
 
 ## License
 
-Talyx is **source-available under a commercial license** — see
-[`LICENSE`](LICENSE). You may read, compile, run, and security-audit the
-source, and run the read-only commands (`scan`, `status`, `why`,
-`guardrails`, `advisories`) for any purpose including commercially;
-enforcement (`init` / the shim) needs a paid per-developer license, and
-redistribution, resale, or hosting is not granted.
+Talyx is **free to use and source-available** — see [`LICENSE`](LICENSE).
+Every feature, including `init` enforcement and the live proxy, is free for
+any purpose including commercially, with no license key and no fee. You may
+read, compile, run, modify for your own use, and security-audit the source.
+It is source-available, not open source: redistribution, resale, and hosting
+the Software as a product or service are not granted.
 
 Third-party open-source components are listed with their full license
 texts in [`THIRD-PARTY-LICENSES.txt`](THIRD-PARTY-LICENSES.txt). None are
