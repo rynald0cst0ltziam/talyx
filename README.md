@@ -53,18 +53,27 @@ isn't (v1) — in [`THREAT_MODEL.md`](THREAT_MODEL.md).
 
 ```bash
 # macOS / Linux
-curl -fsSL https://gettalyx.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rynald0cst0ltziam/talyx/main/scripts/install.sh | sh
 ```
 
 ```powershell
 # Windows
-irm https://gettalyx.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/rynald0cst0ltziam/talyx/main/scripts/install.ps1 | iex
 ```
 
 ```bash
 # npm (any platform)
 npm install -g talyx
 ```
+
+```bash
+# from source (works without a tagged release)
+git clone https://github.com/rynald0cst0ltziam/talyx && cd talyx && cargo build --release
+```
+
+The `curl`/`irm` and `npm` paths download pre-built binaries from GitHub
+Releases, so they need a tagged release (`v*`) to exist. Building from
+source works any time.
 
 The npm package has **no install scripts**. The native binaries ship in
 per-platform packages (`@talyx/linux-x64` and friends) declared as
