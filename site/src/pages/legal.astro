@@ -5,14 +5,13 @@ import { site } from '../data/site';
 
 const sections = [
   { id: 'terms', label: 'Terms of use' },
-  { id: 'license', label: 'License grant' },
-  { id: 'refunds', label: 'Refunds' },
+  { id: 'license', label: 'License' },
   { id: 'privacy', label: 'Privacy' },
 ];
 ---
 
 <Base title="Terms & privacy" hideBanner>
-  <Prose title="Terms & privacy" lead="Plain-language summary. A formal agreement is provided at checkout." sections={sections}>
+  <Prose title="Terms & privacy" lead="Plain-language summary." sections={sections}>
     <h2 id="terms">Terms of use</h2>
     <p>
       Talyx is provided as-is. It is a security aid, not a guarantee — you
@@ -21,30 +20,22 @@ const sections = [
       openly on the <a href="/security">threat model</a> page.
     </p>
 
-    <h2 id="license">License grant</h2>
+    <h2 id="license">License</h2>
     <p>
-      A purchase grants one named developer a non-exclusive, non-transferable
-      license to install and use Talyx on up to 3 machines they control. The
-      license is a one-time purchase and does not expire. Team purchases cover
-      one license per developer. You may
-      read the source for audit; you may not redistribute the binaries or resell
-      access.
-    </p>
-
-    <h2 id="refunds">Refunds</h2>
-    <p>
-      14 days, no questions asked, processed through Lemon Squeezy — our
-      merchant of record, who also handles any applicable sales tax / VAT.
-      Email <a href={`mailto:${site.email}`}>{site.email}</a>.
+      Talyx is free to use — no license key, no account, no payment. It ships
+      under a source-available license (see <code>LICENSE</code> in the
+      repository): you may read, compile, run and security-audit every line at
+      no cost. Redistribution and reselling are governed by that license — read
+      it for the details.
     </p>
 
     <h2 id="privacy">Privacy</h2>
     <p>
-      The software collects nothing. This website uses no third-party analytics
-      or advertising trackers. Checkout is handled by Lemon Squeezy under
-      <a href="https://www.lemonsqueezy.com/privacy">their privacy policy</a>;
-      we receive your name, email and license status to provide support and
-      license activation, nothing more.
+      The software collects nothing — no telemetry, no account, no licensing
+      call, no "phone home". This website uses no third-party analytics or
+      advertising trackers. There is no checkout and no payment, so we never
+      receive any billing information. Questions? Email
+      <a href={`mailto:${site.email}`}>{site.email}</a>.
     </p>
   </Prose>
 </Base>

@@ -3,9 +3,9 @@
 //! `talyx scan`   — discover, statically scan, and score every artifact
 //!                        visible to a supported agent. Read-only.
 //! `talyx status` — short protection summary. Read-only.
-//! `talyx quickstart <key>` — one command: activate + scan + enforce.
+//! `talyx quickstart` — one command: scan + enforce at the recommended preset.
 //! `talyx setup`  — guided first run: scan + recommend a preset + next step.
-//! `talyx verify` — installation health check (binaries, home, license).
+//! `talyx verify` — installation health check (binaries, home).
 //! `talyx sessions` — summarize live-proxy findings (TASKS 2.4). Read-only.
 //! `talyx report` — posture report (text/json/csv/md), TASKS 3.1–3.3. Read-only.
 //! `talyx init`   — scan, cache decisions, AND rewrite MCP server
@@ -14,16 +14,14 @@
 //!                        anything — see init.rs.
 //! `talyx allow <id>` — manually approve a flagged artifact.
 //! `talyx why <id>`   — show the full reasoning behind a cached decision.
-//! `talyx activate <key>` — bind a paid license to this machine.
-//! `talyx license status|deactivate` — inspect / release the license.
 //!
-//! `scan` and `status` are free (evaluation). `init` requires a valid
-//! license — see license.rs for the full rationale, including why the
-//! enforcement shim itself is deliberately never gated.
+//! Talyx is fully free. Every command — including `init` enforcement — runs
+//! with no license, no account, and no mandatory outbound "phone home". The
+//! only network calls are opt-in: `--fetch-registry` (npm/PyPI package
+//! fetch) and `advisories refresh`.
 
 mod history;
 mod init;
-mod license;
 mod pipeline;
 mod report;
 mod sarif;
@@ -97,19 +95,17 @@ enum Command {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
-    /// One command from install to protected: activate a license, scan, and
-    /// turn on protection at the recommended preset. The fast path a buyer
-    /// runs after installing (the installer calls this when given a key).
-    /// Enforces by default; pass --no-enforce to stop at the recommendation.
+    /// One command from install to protected: scan, recommend a preset, and
+    /// turn on protection at it. The fast path a new user runs after
+    /// installing. Enforces by default; pass --no-enforce to stop at the
+    /// recommendation.
     Quickstart {
-        /// The license key from your purchase email.
-        key: String,
         #[arg(long, default_value = ".")]
         project: PathBuf,
         /// Use a specific preset instead of the one recommended from the scan.
         #[arg(long, value_enum)]
         preset: Option<PresetArg>,
-        /// Activate and recommend, but do not rewrite any config.
+        /// Scan and recommend, but do not rewrite any config.
         #[arg(long)]
         no_enforce: bool,
         /// With enforcement, also protect user-level configs (see `init`).
@@ -118,9 +114,8 @@ enum Command {
         #[arg(long)]
         store: Option<PathBuf>,
     },
-    /// Check that Talyx is installed correctly: binaries in place, home
-    /// directory writable, license state, and whether enforcement is wired
-    /// up. Read-only, needs no license. Exits non-zero if anything needs
+    /// Check that Talyx is installed correctly: binaries in place and the
+    /// home directory writable. Read-only. Exits non-zero if anything needs
     /// attention, so an installer or CI step can gate on it.
     Verify,
     /// Scan, cache decisions, and route MCP servers through the enforcement
@@ -175,9 +170,9 @@ enum Command {
         /// ~/.claude.json). Pass this if you ran `init --include-user-config`.
         #[arg(long)]
         include_user_config: bool,
-        /// Also delete ~/.talyx — the decision cache, license and
-        /// guardrails. Off by default: undoing enforcement and throwing
-        /// away your license are different decisions.
+        /// Also delete ~/.talyx — the decision cache, history and
+        /// guardrails. Off by default: undoing enforcement and clearing your
+        /// local Talyx state are different decisions.
         #[arg(long)]
         purge: bool,
     },
@@ -201,16 +196,6 @@ enum Command {
         artifact_id: String,
         #[arg(long)]
         store: Option<PathBuf>,
-    },
-    /// Activate a paid license on this machine (required for `init`).
-    Activate {
-        /// The license key from your purchase email (a UUID, e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
-        key: String,
-    },
-    /// Inspect or release this machine's license.
-    License {
-        #[command(subcommand)]
-        action: LicenseAction,
     },
     /// Generate a security posture report for this project (or machine):
     /// posture counts, enforcement, top risk, and live-proxy findings.
@@ -252,14 +237,6 @@ enum Command {
         #[command(subcommand)]
         action: AdvisoriesAction,
     },
-}
-
-#[derive(Subcommand)]
-enum LicenseAction {
-    /// Show license status, machines used, and expiry (lifetime keys never expire).
-    Status,
-    /// Release this machine's activation slot so it can be used elsewhere.
-    Deactivate,
 }
 
 #[derive(Subcommand)]
@@ -375,14 +352,12 @@ fn main() {
         Command::Status { project } => run_status(&project),
         Command::Setup { project } => run_setup(&project),
         Command::Quickstart {
-            key,
             project,
             preset,
             no_enforce,
             include_user_config,
             store,
         } => std::process::exit(run_quickstart(
-            &key,
             &project,
             preset,
             !no_enforce,
@@ -399,10 +374,6 @@ fn main() {
             fetch_registry,
             live,
         } => {
-            let code = license::gate("init");
-            if code != 0 {
-                std::process::exit(code);
-            }
             let preset: Preset = preset.map(Into::into).unwrap_or_default();
             let level = level.map(Into::into).unwrap_or_else(|| preset.protection_level());
             let live = live || preset.live_proxy();
@@ -416,10 +387,6 @@ fn main() {
                 live,
             )
         }
-        // Deliberately NOT licence-gated, unlike `init`. Taking your
-        // configs back is not a paid feature, and a lapsed licence must
-        // never be the reason someone is stuck with Talyx wired into
-        // every agent on their machine.
         Command::Uninstall {
             project,
             store,
@@ -433,11 +400,6 @@ fn main() {
             global,
         } => init::run_allow(&artifact_id, store, reason, global),
         Command::Why { artifact_id, store } => init::run_why(&artifact_id, store),
-        Command::Activate { key } => std::process::exit(license::run_activate(&key)),
-        Command::License { action } => std::process::exit(match action {
-            LicenseAction::Status => license::run_status(),
-            LicenseAction::Deactivate => license::run_deactivate(),
-        }),
         Command::Report {
             project,
             format,
@@ -821,14 +783,11 @@ fn print_recent_proxy_findings() {
     }
 }
 
-/// `talyx quickstart <KEY>` — the one-command path from install to
-/// protected. Activates the license, scans for agents, recommends a preset
-/// from what it finds, and (unless `--no-enforce`) runs `init` at that
-/// preset so the user ends at "protected" in a single command. The
-/// installer calls this when a key is passed to it, so a buyer can go from
-/// purchase to enforced in one paste.
+/// `talyx quickstart` — the one-command path from install to protected.
+/// Scans for agents, recommends a preset from what it finds, and (unless
+/// `--no-enforce`) runs `init` at that preset so the user ends at
+/// "protected" in a single command. Fully free — no license, no key.
 fn run_quickstart(
-    key: &str,
     project: &Path,
     preset_override: Option<PresetArg>,
     enforce: bool,
@@ -837,20 +796,8 @@ fn run_quickstart(
 ) -> i32 {
     println!("Talyx quickstart\n");
 
-    // Step 1 — activate. Everything past here needs a valid license, so a
-    // failure stops the whole flow before anything is changed on disk
-    // (run_activate prints the specific reason).
-    println!("[1/3] Activating license...");
-    let code = license::run_activate(key);
-    if code != 0 {
-        eprintln!(
-            "\ntalyx: activation failed — nothing was changed. Fix the key and re-run `talyx quickstart <KEY>`."
-        );
-        return code;
-    }
-
-    // Step 2 — scan read-only and recommend a preset from what's found.
-    println!("\n[2/3] Scanning for agents...");
+    // Step 1 — scan read-only and recommend a preset from what's found.
+    println!("[1/2] Scanning for agents...");
     let project_root = resolve_root(project);
     let engine = RiskEngine::new();
     let scanned = collect(&project_root, &engine, ProtectionLevel::Balanced, false);
@@ -879,7 +826,7 @@ fn run_quickstart(
 
     if scanned.is_empty() || rewritable == 0 {
         println!(
-            "\nNo rewritable agent configs found under {}. Nothing to enforce here — your license is active.",
+            "\nNo rewritable agent configs found under {}. Nothing to enforce here.",
             init::display_path(&project_root)
         );
         println!("Re-run from a project that uses an agent, or `talyx scan` to re-check.");
@@ -888,7 +835,7 @@ fn run_quickstart(
 
     if !enforce {
         println!(
-            "\nLicense active. Recommended preset: {preset} ({}).",
+            "\nRecommended preset: {preset} ({}).",
             preset.description()
         );
         println!("Turn on protection when ready:");
@@ -896,9 +843,9 @@ fn run_quickstart(
         return 0;
     }
 
-    // Step 3 — enforce at the chosen preset. `init` prints its own full,
+    // Step 2 — enforce at the chosen preset. `init` prints its own full,
     // reversible summary of exactly what it changed.
-    println!("\n[3/3] Enabling protection ({preset})...\n");
+    println!("\n[2/2] Enabling protection ({preset})...\n");
     let level = preset.protection_level();
     let live = preset.live_proxy();
     let fetch_registry = preset.deep_registry_scan();
@@ -974,10 +921,6 @@ fn run_setup(project: &Path) {
         recommended.description()
     );
 
-    // A missing/invalid license returns Err without a network call, so this
-    // stays fast for the brand-new (unlicensed) user setup is aimed at.
-    let licensed = license::require_licensed("init").is_ok();
-
     println!("\nNext steps:");
     if rewritable == 0 {
         println!(
@@ -988,22 +931,13 @@ fn run_setup(project: &Path) {
         );
         return;
     }
-    if licensed {
-        println!("  License active. Turn on protection for this project:");
-        println!("      talyx init --preset {recommended}");
-        println!(
-            "\n  This rewrites this project's agent configs to route {rewritable} MCP server config(s)"
-        );
-        println!("  through the enforcement shim — reversible any time with `talyx uninstall`.");
-    } else {
-        println!("  1. Evaluate freely (read-only):   talyx scan --preset {recommended}");
-        println!("  2. Activate enforcement:          talyx activate <YOUR-LICENSE-KEY>");
-        println!("  3. Turn on protection:            talyx init --preset {recommended}");
-        println!(
-            "\n  (scan is free; init rewrites this project's agent configs to route {rewritable}"
-        );
-        println!("   MCP server config(s) through the enforcement shim — reversible with `talyx uninstall`.)");
-    }
+    println!("  Turn on protection for this project (free, no license):");
+    println!("      talyx init --preset {recommended}");
+    println!("  Or in one command:  talyx quickstart");
+    println!(
+        "\n  This rewrites this project's agent configs to route {rewritable} MCP server config(s)"
+    );
+    println!("  through the enforcement shim — reversible any time with `talyx uninstall`.");
     println!(
         "\n  Scope: `init` only modifies this project's configs. Your user-level configs"
     );
@@ -1303,8 +1237,8 @@ fn run_verify() -> i32 {
         }
     }
 
-    // 3. ~/.talyx — home of the decision cache, license, and stable shim.
-    //    Must be writable for anything beyond read-only scanning.
+    // 3. ~/.talyx — home of the decision cache and stable shim. Must be
+    //    writable for anything beyond read-only scanning.
     match dirs::home_dir() {
         Some(home) => {
             let talyx_home = home.join(".talyx");
@@ -1326,20 +1260,7 @@ fn run_verify() -> i32 {
         }
     }
 
-    // 4. License — not needed to scan, needed to init. Report, never fail
-    //    verify on its absence: a brand-new install has no license yet.
-    match license::require_licensed("init") {
-        Ok(()) => println!("  [ok]   license active — `talyx init` (enforcement) is unlocked."),
-        Err(license::LicenseError::NotActivated) => {
-            println!("  [--]   no license yet — `talyx scan`/`setup` are free; run `talyx activate <KEY>` to enable `talyx init`.");
-        }
-        Err(e) => {
-            println!("  [!!]   license problem: {e}");
-            attention += 1;
-        }
-    }
-
-    // 5. Decision cache — present once `init` has run at least once. Absent
+    // 4. Decision cache — present once `init` has run at least once. Absent
     //    is normal on a fresh install, so it's informational, not a failure.
     match dirs::home_dir().map(|h| h.join(".talyx").join("decisions.json")) {
         Some(p) if p.is_file() => println!("  [ok]   decision cache present: {}", p.display()),

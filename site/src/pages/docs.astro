@@ -7,7 +7,7 @@ import { site } from '../data/site';
 const sections = [
   { id: 'quickstart', label: 'Quickstart' },
   { id: 'install', label: 'Install' },
-  { id: 'activate', label: 'Activate a license' },
+  { id: 'free', label: 'Free & source-available' },
   { id: 'presets', label: 'Protection presets' },
   { id: 'commands', label: 'Commands' },
   { id: 'reports', label: 'Reports & history' },
@@ -22,29 +22,26 @@ const sections = [
 ];
 ---
 
-<Base title="Documentation" description="Install, activate and run Talyx — quickstart, command reference, CI usage.">
+<Base title="Documentation" description="Install and run Talyx — quickstart, command reference, CI usage. Fully free, no license.">
   <Prose
     title="Documentation"
-    lead="Install, activate and protect in one command — or step through scan, enforce and report. Everything runs on your machine."
+    lead="Install and protect in one command — or step through scan, enforce and report. Everything runs on your machine, and it's free."
     sections={sections}
   >
     <h2 id="quickstart">Quickstart</h2>
     <p>
-      <strong>One command</strong> — install, activate and turn on protection at
-      the recommended preset, in a single paste (macOS / Linux):
+      <strong>One command</strong> — install and turn on protection at the
+      recommended preset, in a single paste (macOS / Linux):
     </p>
-    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh -s -- --activate &lt;KEY&gt; --enforce</code></pre>
+    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh -s -- --enforce</code></pre>
+    <p>Windows (PowerShell):</p>
+    <pre><code>$env:TALYX_ENFORCE="1"; irm https://{site.domain}/install.ps1 | iex</code></pre>
     <p>
-      Windows (PowerShell) — pass the key through the environment, since
-      <code>irm | iex</code> can't take arguments:
-    </p>
-    <pre><code>$env:TALYX_LICENSE_KEY="&lt;KEY&gt;"; $env:TALYX_ENFORCE="1"; irm https://{site.domain}/install.ps1 | iex</code></pre>
-    <p>
-      Already installed? <code>talyx quickstart &lt;KEY&gt;</code> does the same
-      thing — activate, scan, and enforce at the recommended preset. Drop
-      <code>--enforce</code> (or use <code>quickstart --no-enforce</code>) to stop
-      after activation and just print the one command to turn protection on.
-      Everything is reversible with <code>talyx uninstall</code>.
+      Already installed? <code>talyx quickstart</code> does the same — scan and
+      enforce at the recommended preset. Add <code>--no-enforce</code> to stop
+      after the scan and just print the one command to turn protection on.
+      Everything is reversible with <code>talyx uninstall</code>. No license, no
+      account, no key.
     </p>
     <p>Prefer to go step by step:</p>
     <pre><code># 1 · install (macOS / Linux)
@@ -53,13 +50,10 @@ curl -fsSL https://{site.domain}/install.sh | sh
 # 2 · check the install is healthy
 talyx verify
 
-# 3 · activate the license from your purchase email
-talyx activate &lt;YOUR-LICENSE-KEY&gt;
-
-# 4 · guided first run — detects agents, recommends a preset, tells you what's next
+# 3 · guided first run — detects agents, recommends a preset, tells you what's next
 talyx setup --project .
 
-# 5 · turn on protection (the only command that writes to a config; backs up first)
+# 4 · turn on protection (the only command that writes to a config; backs up first)
 talyx init --preset balanced --project .</code></pre>
 
     <h2 id="install">Install</h2>
@@ -89,24 +83,20 @@ cd talyx
 cargo build --release
 ./target/release/talyx --help</code></pre>
 
-    <h2 id="activate">Activate a license</h2>
+    <h2 id="free">Free &amp; source-available</h2>
     <p>
-      Talyx is a paid tool with a lifetime license. After purchase you receive a
-      key by email (it is also on your Lemon Squeezy order page) in the form
-      <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>. Activate it once per machine:
+      Talyx is <strong>fully free</strong>. Every command — scanning,
+      enforcement, the live proxy, reports — runs with no license, no account,
+      and no activation. There is no paid tier and nothing is gated.
     </p>
-    <pre><code>talyx activate &lt;YOUR-LICENSE-KEY&gt;</code></pre>
     <p>
-      This makes one HTTPS call to Lemon Squeezy to bind the key to this machine,
-      then writes <code>~/.talyx/license.json</code>. You can activate on up
-      to <strong>3 machines</strong>. To free a slot:
-    </p>
-    <pre><code>talyx license deactivate     # release this machine's slot
-talyx license status         # show machines used, key status, offline grace</code></pre>
-    <p>
-      <code>scan</code> and <code>status</code> run without a license so you can
-      evaluate. <code>init</code> requires an active license. The enforcement
-      shim never checks one, so protection you have already set up keeps working.
+      It makes <strong>no mandatory outbound calls</strong>: no telemetry, no
+      licensing "phone home". The only network calls are ones you opt into —
+      <code>--fetch-registry</code> (fetch an npm / PyPI package to scan its real
+      code) and <code>talyx advisories refresh</code> (pull a newer advisory
+      feed). The source is available so you can read exactly how every detection
+      works, and build it yourself from the
+      <a href={site.github}>repository</a> if you prefer.
     </p>
 
     <h2 id="presets">Protection presets</h2>
@@ -134,30 +124,29 @@ talyx license status         # show machines used, key status, offline grace</co
     </p>
 
     <h2 id="commands">Commands</h2>
-    <h3><code>talyx quickstart &lt;key&gt;</code></h3>
+    <h3><code>talyx quickstart</code></h3>
     <p>
-      One command from install to protected: activates the license, scans,
-      recommends a preset from what it finds, and turns on protection at that
-      preset. Fails safe — if activation fails, nothing on disk is touched.
+      One command from install to protected: scans, recommends a preset from
+      what it finds, and turns on protection at that preset. Free — no license,
+      no key.
     </p>
     <ul>
       <li><code>--preset &lt;preset&gt;</code> — use a specific preset instead of the recommended one.</li>
-      <li><code>--no-enforce</code> — activate and recommend only; don't rewrite any config.</li>
+      <li><code>--no-enforce</code> — scan and recommend only; don't rewrite any config.</li>
       <li><code>--project &lt;path&gt;</code>, <code>--include-user-config</code> — as for <code>init</code>.</li>
     </ul>
     <h3><code>talyx setup</code></h3>
     <p>
       Guided first run. Detects your agents, scans read-only, recommends a
-      preset, and prints the exact next command. Writes nothing and needs no
-      license — run it right after installing to know precisely what to do.
+      preset, and prints the exact next command. Writes nothing — run it right
+      after installing to know precisely what to do.
       <code>--project &lt;path&gt;</code> to point it somewhere else.
     </p>
     <h3><code>talyx verify</code></h3>
     <p>
-      Installation health check: the two binaries are in place, <code>~/.talyx</code>
-      is writable, your license state, and whether enforcement is configured.
-      Read-only, needs no license, and exits non-zero if anything needs attention
-      so an installer or CI step can gate on it.
+      Installation health check: the two binaries are in place and
+      <code>~/.talyx</code> is writable. Read-only, and exits non-zero if
+      anything needs attention so an installer or CI step can gate on it.
     </p>
     <h3><code>talyx scan</code></h3>
     <p>Discover, score and report every artifact. Read-only.</p>
@@ -174,7 +163,7 @@ talyx license status         # show machines used, key status, offline grace</co
     <p>
       Scans, caches your decisions, and rewrites configs so approved MCP servers
       launch through the shim and blocked ones are removed. The only mutating
-      command. Requires a license.
+      command. Free, like everything else.
     </p>
     <ul>
       <li><code>--project &lt;path&gt;</code> — project root (default <code>.</code>). Only configs inside it are rewritten unless you add <code>--include-user-config</code>.</li>
@@ -191,13 +180,12 @@ talyx license status         # show machines used, key status, offline grace</co
       back to its original launch command, and anything quarantined or removed is
       put back. Entries are unwrapped <em>in place</em> rather than by restoring
       the pre-Talyx backup, so any change you made to those configs in the
-      meantime survives. Does not require a license — taking your configs back is
-      never a paid feature.
+      meantime survives.
     </p>
     <ul>
       <li><code>--project &lt;path&gt;</code> — project root (default <code>.</code>).</li>
       <li><code>--include-user-config</code> — also undo configs outside the project. Pass this if you ran <code>init --include-user-config</code>.</li>
-      <li><code>--purge</code> — also delete <code>~/.talyx</code> (decision cache, license, guardrails). Off by default: undoing enforcement and discarding your license are separate decisions.</li>
+      <li><code>--purge</code> — also delete <code>~/.talyx</code> (decision cache, history, guardrails). Off by default: undoing enforcement and clearing your local Talyx state are separate decisions.</li>
       <li><code>--store &lt;path&gt;</code> — override the decision store location.</li>
     </ul>
     <p>
@@ -266,9 +254,6 @@ talyx license status         # show machines used, key status, offline grace</co
       download never overwrites the local file); the copy bundled in the
       binary is never touched. See <a href="#advisories">The advisory feed</a>.
     </p>
-    <h3><code>talyx activate &lt;key&gt;</code> · <code>talyx license status|deactivate</code></h3>
-    <p>See <a href="#activate">Activate a license</a>.</p>
-
     <h2 id="reports">Reports &amp; history</h2>
     <p>
       Everything Talyx decides is readable and exportable — for CI, a
@@ -487,25 +472,25 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     category: talyx</code></pre>
     <p>
       <code>--exit-code</code> returns 2 on any Block/Quarantine, 1 on any Ask, 0
-      otherwise. In CI, activate with a machine license via
-      <code>TALYX_LICENSE_KEY</code> in the job environment.
+      otherwise. No license or key needed — it's free in CI too.
     </p>
 
     <h2 id="offline">Offline &amp; air-gapped</h2>
     <p>
-      After activation, Talyx works offline for 30 days before it asks to
-      re-verify. For fully air-gapped machines, enterprise licenses ship an
-      offline activation file — email <a href={`mailto:${site.email}`}>{site.email}</a>.
+      Talyx needs no network for its core work — discovery, analysis, scoring
+      and enforcement all run locally, with no license check and no activation.
+      It works fully offline and on air-gapped machines out of the box. The only
+      outbound calls are the opt-in <code>--fetch-registry</code> and
+      <code>talyx advisories refresh</code>; skip those and nothing leaves the
+      machine.
     </p>
 
     <h2 id="env">Environment variables</h2>
     <table>
       <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
       <tbody>
-        <tr><td><code>TALYX_LICENSE_KEY</code></td><td>Validate against this key without consuming an activation slot — for CI, and only honoured when a CI environment is detected (<code>CI</code>, <code>GITHUB_ACTIONS</code>, <code>GITLAB_CI</code> and the like). On a workstation, run <code>talyx activate</code> instead.</td></tr>
         <tr><td><code>TALYX_STORE</code></td><td>Path to the decision store (default <code>~/.talyx/decisions.json</code>). The tool baseline is written as a sibling <code>tool_baselines.json</code>.</td></tr>
         <tr><td><code>TALYX_HISTORY</code></td><td>Path to the posture-history log for "what changed since last scan" (default <code>~/.talyx/history.jsonl</code>).</td></tr>
-        <tr><td><code>TALYX_LICENSE_FILE</code></td><td>Path to the cached license (default <code>~/.talyx/license.json</code>).</td></tr>
         <tr><td><code>TALYX_REGISTRY_CACHE</code></td><td>Directory for <code>--fetch-registry</code> package downloads (default under <code>~/.talyx/</code>).</td></tr>
         <tr><td><code>TALYX_NO_PROXY</code></td><td><code>=1</code> forces the shim to <code>exec</code> the real server directly even for a <code>--live</code> entry — a per-launch kill switch for the proxy.</td></tr>
         <tr><td><code>TALYX_PROXY_LEVEL</code></td><td><code>quiet</code> | <code>balanced</code> | <code>strict</code> — the live proxy's inspection level (default <code>balanced</code>).</td></tr>
@@ -514,7 +499,6 @@ talyx guardrails list       # show what the proxy would load</code></pre>
         <tr><td><code>TALYX_GUARDRAILS</code></td><td>Path to the guardrails file, overriding the <code>~/.talyx/</code> and <code>&lt;project&gt;/.talyx/</code> defaults.</td></tr>
         <tr><td><code>TALYX_ADVISORIES</code></td><td>Path to an advisory feed file, overriding the bundled one and <code>~/.talyx/advisories.json</code>. See <a href="#advisories">The advisory feed</a>.</td></tr>
         <tr><td><code>TALYX_ADVISORIES_URL</code></td><td>Feed URL for <code>talyx advisories refresh</code> (default: the <code>advisories.json</code> asset of the latest <code>$TALYX_REPO</code> release).</td></tr>
-        <tr><td><code>TALYX_DEV</code></td><td><code>=1</code> skips the license gate — <strong>debug builds only</strong>, compiled out of release binaries. For working on Talyx itself.</td></tr>
       </tbody>
     </table>
 
@@ -524,7 +508,6 @@ talyx guardrails list       # show what the proxy would load</code></pre>
       <li><code>decisions.json</code> — the decision cache: every scanned artifact's id, capabilities, score, band, decision and (if approved) the audit trail. Written by <code>scan</code>/<code>init</code>, read by the shim.</li>
       <li><code>history.jsonl</code> — a durable posture snapshot per <code>init</code> (and <code>report --record</code>), for "what changed since last scan". Pruned to the most recent snapshots, keyed per project.</li>
       <li><code>tool_baselines.json</code> — trust-on-first-use snapshot of each server's approved tool list (live proxy).</li>
-      <li><code>license.json</code> — cached license status and the 7-day / 30-day trust timers.</li>
       <li><code>sessions/&lt;date&gt;-&lt;pid&gt;.jsonl</code> — live-proxy findings, one JSON object per line.</li>
       <li>A <code>.talyx-quarantine/</code> directory next to an agent's skills folder or a flagged instruction file — blocked skills and project-scoped instruction files are moved here (not under <code>~/.talyx/</code>, so the move stays within the same repo and is easy to inspect / undo).</li>
       <li>A <code>&lt;file&gt;.talyx-backup</code> next to each agent config the first time <code>init</code> rewrites it.</li>
@@ -533,7 +516,8 @@ talyx guardrails list       # show what the proxy would load</code></pre>
     <h2 id="changelog">Changelog</h2>
     <h3>Unreleased</h3>
     <ul>
-      <li><strong>One-command setup.</strong> <code>talyx quickstart &lt;key&gt;</code> (and the installer's <code>--activate &lt;key&gt; --enforce</code>) takes you from install to protected in a single paste: activate, scan, recommend a preset, enforce.</li>
+      <li><strong>Fully free.</strong> No license, no account, no activation, no "phone home" — every command, including <code>init</code> enforcement, runs free.</li>
+      <li><strong>One-command setup.</strong> <code>talyx quickstart</code> (and the installer's <code>--enforce</code>) takes you from install to protected in a single paste: scan, recommend a preset, enforce.</li>
       <li><strong>Guided onboarding.</strong> <code>talyx setup</code> detects your agents and recommends a preset read-only; <code>talyx verify</code> is an installation health check.</li>
       <li><strong>Protection presets.</strong> <code>personal</code> / <code>balanced</code> / <code>strict</code> / <code>enterprise</code> bundle strictness, live proxy and scan depth into one word for <code>scan</code>, <code>init</code> and <code>quickstart</code>.</li>
       <li><strong>Posture reports &amp; exports.</strong> <code>talyx report</code> gives one posture model exported as text / JSON / CSV / Markdown (SARIF via <code>scan</code>), with a <strong>"what changed since last scan"</strong> diff from durable local history.</li>
@@ -548,7 +532,6 @@ talyx guardrails list       # show what the proxy would load</code></pre>
       <li>SARIF 2.1.0 output + GitHub Action; capability-drift re-review.</li>
       <li>Skill &amp; instruction-file content analysis: prompt injection, invisible Unicode, encoded payloads, exfiltration directives — and a flagged, project-scoped instruction file (<code>.cursorrules</code>, <code>GEMINI.md</code>) is quarantined, not just reported.</li>
       <li>Config-rewrite enforcement for every discovered agent, local and remote MCP servers; skills and repo-delivered instruction files quarantined; <code>talyx allow</code> reverses any of it.</li>
-      <li><code>talyx activate</code> / <code>license</code> commands.</li>
     </ul>
   </Prose>
 
