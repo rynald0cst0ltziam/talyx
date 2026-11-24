@@ -71,9 +71,9 @@ npm install -g talyx
 git clone https://github.com/rynald0cst0ltziam/talyx && cd talyx && cargo build --release
 ```
 
-The `curl`/`irm` and `npm` paths download pre-built binaries from GitHub
-Releases, so they need a tagged release (`v*`) to exist. Building from
-source works any time.
+The `curl`/`irm` and `npm` paths install pre-built, checksum-verified
+binaries from the latest GitHub Release; building from source works any
+time. All of it is free — no license, no account.
 
 The npm package has **no install scripts**. The native binaries ship in
 per-platform packages (`@talyx/linux-x64` and friends) declared as
