@@ -1198,11 +1198,11 @@ fn top_n(counts: &std::collections::BTreeMap<String, usize>, n: usize) -> Vec<(S
 
 /// `talyx verify` — installation health check (TASKS.md 1.1's "verify
 /// installation" command). Confirms the two binaries are where they need to
-/// be, that ~/.talyx is writable, the license state, and whether enforcement
-/// has been configured yet. One line per check, then a verdict. Returns 0
-/// when everything essential is in place, 1 when something needs attention —
-/// a missing license and an empty decision cache are reported but do NOT
-/// fail the check, because a fresh install legitimately has neither.
+/// be, that ~/.talyx is writable, and whether enforcement has been configured
+/// yet. One line per check, then a verdict. Returns 0 when everything
+/// essential is in place, 1 when something needs attention — an empty decision
+/// cache is reported but does NOT fail the check, because a fresh install
+/// legitimately has none.
 fn run_verify() -> i32 {
     use std::env::consts::EXE_SUFFIX;
     println!("Talyx — installation check\n");
