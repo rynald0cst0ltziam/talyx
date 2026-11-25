@@ -192,6 +192,12 @@ the full command reference, including `--fetch-registry`, `init --live`
 - `verified` on a publisher is only ever set by an explicit verification
   step, never inferred from a name or package scope.
 
+## Support
+
+Talyx is free, always will be, and is built solo. If it helps you, you can
+support the work — entirely optional — at
+[buymeacoffee.com/rynald0s](https://buymeacoffee.com/rynald0s). ☕
+
 ## License
 
 Talyx is **free to use and source-available** — see [`LICENSE`](LICENSE).
