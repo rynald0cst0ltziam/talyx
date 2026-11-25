@@ -26,7 +26,7 @@ import Icon from './Icon.astro';
     </p>
     <div class="mx-auto mt-8 max-w-xl overflow-x-auto rounded-lg border border-line bg-ink px-3.5 py-2.5 text-left">
       <span class="select-none text-mist">$</span>
-      <code class="font-mono text-[13px] text-fog">curl -fsSL https://{site.domain}/install.sh | sh</code>
+      <code class="font-mono text-[13px] text-fog">curl -fsSL {site.installSh} | sh</code>
     </div>
     <div class="mt-6 flex flex-wrap justify-center gap-3">
       <Button href="/docs#quickstart" variant="primary">

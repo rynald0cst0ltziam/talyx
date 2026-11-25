@@ -9,6 +9,12 @@ export const site = {
   email: 'rynald0cst0ltziam@gmail.com',
   github: 'https://github.com/rynald0cst0ltziam/talyx',
 
+  // Install scripts are served GitHub-natively so a `curl … | sh` works
+  // without this marketing site being deployed. The scripts themselves
+  // download the release binaries from GitHub Releases.
+  installSh: 'https://raw.githubusercontent.com/rynald0cst0ltziam/talyx/main/scripts/install.sh',
+  installPs1: 'https://raw.githubusercontent.com/rynald0cst0ltziam/talyx/main/scripts/install.ps1',
+
   // ── product facts ─────────────────────────────────────────
   agentsCovered: 27,
   attackClasses: 15,
