@@ -39,3 +39,9 @@ npm/.bin-native/
 /launch/
 generated-notices.txt
 notices.diff
+
+# Vercel
+.vercel
+
+.vercel
+.env*
