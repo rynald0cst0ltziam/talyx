@@ -1,5 +1,6 @@
 ---
 import { steps } from '../data/content';
+import { site } from '../data/site';
 import Icon from './Icon.astro';
 ---
 
@@ -27,7 +28,7 @@ import Icon from './Icon.astro';
       >
         <span class="select-none text-mist">$</span>
         <code class="whitespace-nowrap font-mono text-[13px] text-fog"
-          >curl -fsSL https://gettalyx.dev/install.sh | sh -s -- --enforce</code
+          >curl -fsSL {site.installSh} | sh -s -- --enforce</code
         >
       </div>
       <p class="mt-3 text-sm text-mist">

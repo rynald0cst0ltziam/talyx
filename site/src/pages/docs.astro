@@ -33,9 +33,9 @@ const sections = [
       <strong>One command</strong> — install and turn on protection at the
       recommended preset, in a single paste (macOS / Linux):
     </p>
-    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh -s -- --enforce</code></pre>
+    <pre><code>curl -fsSL {site.installSh} | sh -s -- --enforce</code></pre>
     <p>Windows (PowerShell):</p>
-    <pre><code>$env:TALYX_ENFORCE="1"; irm https://{site.domain}/install.ps1 | iex</code></pre>
+    <pre><code>$env:TALYX_ENFORCE="1"; irm {site.installPs1} | iex</code></pre>
     <p>
       Already installed? <code>talyx quickstart</code> does the same — scan and
       enforce at the recommended preset. Add <code>--no-enforce</code> to stop
@@ -45,7 +45,7 @@ const sections = [
     </p>
     <p>Prefer to go step by step:</p>
     <pre><code># 1 · install (macOS / Linux)
-curl -fsSL https://{site.domain}/install.sh | sh
+curl -fsSL {site.installSh} | sh
 
 # 2 · check the install is healthy
 talyx verify
@@ -58,14 +58,14 @@ talyx init --preset balanced --project .</code></pre>
 
     <h2 id="install">Install</h2>
     <h3>macOS / Linux</h3>
-    <pre><code>curl -fsSL https://{site.domain}/install.sh | sh</code></pre>
+    <pre><code>curl -fsSL {site.installSh} | sh</code></pre>
     <p>
       Installs <code>talyx</code> and <code>talyx-shim</code> to
       <code>~/.talyx/bin</code>. It does not touch your shell profile unless
       you pass <code>--modify-path</code>.
     </p>
     <h3>Windows (PowerShell)</h3>
-    <pre><code>irm https://{site.domain}/install.ps1 | iex</code></pre>
+    <pre><code>irm {site.installPs1} | iex</code></pre>
     <h3>npm</h3>
     <pre><code>npm install -g talyx</code></pre>
     <p>
