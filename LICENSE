@@ -3,9 +3,10 @@ Talyx License
 Copyright (c) 2026 rynald0cst0ltziam. All rights reserved.
 
 This is a source-available license. The source is published so you can read,
-build, run, and security-audit it. Talyx is free to use — every feature,
-with no license key, no account, and no payment. It is source-available, not
-open source: redistribution and reselling are restricted (Section 3).
+build, run, modify, and security-audit it. Talyx is free to use — every
+feature, with no license key, no account, and no payment. It is
+source-available, not open source: redistribution and reselling are
+restricted (Section 3), but you are free to change it for your own use.
 
 --------------------------------------------------------------------------
 
@@ -30,7 +31,9 @@ open source: redistribution and reselling are restricted (Section 3).
        enforcement, the live proxy, and reporting — for any purpose,
        including commercially, with no license key and no fee; and
 
-   (c) modify the Software for your own internal use.
+   (c) modify the Software, and build and run your modified version, for
+       your own use. (You may not distribute that modified version — see
+       Section 3.)
 
 3. What you may not do
 
