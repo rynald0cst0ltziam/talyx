@@ -2,8 +2,8 @@
 export const site = {
   name: 'Talyx',
   tagline: 'Supply-chain security for AI coding agents.',
-  domain: 'gettalyx.dev',
-  url: 'https://gettalyx.dev',
+  domain: 'talyx-kohl.vercel.app',
+  url: 'https://talyx-kohl.vercel.app',
   description:
     'Your AI coding agents auto-load MCP servers, plugins, skills and hooks — untrusted code with access to your shell, your credentials and your source. Talyx scans every one across 27 agents with a real tree-sitter AST and source-to-sink taint, and physically blocks what is malicious before it launches. Fully free, fully local, no telemetry, source-available.',
   email: 'rynald0cst0ltziam@gmail.com',
